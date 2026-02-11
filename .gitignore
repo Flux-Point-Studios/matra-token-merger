@@ -26,6 +26,10 @@ env.local
 # Audit artifacts (keep structure, ignore generated data)
 audit_pack/**/claim_tx_out/*.cbor
 
+# Preprod keys (NEVER commit signing keys)
+audit_pack/preprod/keys/*.skey
+scripts/keys/
+
 # Aiken build
 onchain/claim_validator/build/
 onchain/claim_validator/artifacts/

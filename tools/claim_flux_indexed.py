@@ -33,7 +33,7 @@ from pycardano import (
     UTxO,
     Value,
     RawPlutusData,
-    PlutusV2Script,
+    PlutusV3Script,
     ExecutionUnits,
 )
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
@@ -200,7 +200,7 @@ def build_claim_tx(
     claimant_addr = Address(payment_part=pkh, network=Address.from_primitive(script_address).network)
 
     # Load script
-    script = PlutusV2Script(bytes.fromhex(script_cbor_hex))
+    script = PlutusV3Script(bytes.fromhex(script_cbor_hex))
     script_hash = PycScriptHash(bytes.fromhex(script_address_to_hash(script_address)))
 
     builder = TransactionBuilder(context)

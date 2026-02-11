@@ -2,6 +2,7 @@
 Shared configuration for the FLUX merger pipeline.
 
 Loads environment variables and provides typed constants used across all tools.
+Supports network switching via NETWORK env var (mainnet / preprod).
 """
 
 from __future__ import annotations
@@ -26,14 +27,26 @@ for _env_file in ("env.local", ".env"):
         break
 
 # ---------------------------------------------------------------------------
-# API keys
+# Network selection
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_PROJECT_ID: str = os.environ.get("BLOCKFROST_PROJECT_ID", "")
+NETWORK: str = os.environ.get("NETWORK", "mainnet").lower()
+assert NETWORK in ("mainnet", "preprod", "preview"), (
+    f"NETWORK must be mainnet, preprod, or preview — got {NETWORK!r}"
+)
+
+# ---------------------------------------------------------------------------
+# API keys (network-aware)
+# ---------------------------------------------------------------------------
+
+BLOCKFROST_PROJECT_ID: str = os.environ.get(
+    f"BLOCKFROST_PROJECT_ID_{NETWORK.upper()}",
+    os.environ.get("BLOCKFROST_PROJECT_ID", ""),
+)
 TAP_TOOLS_API_KEY: str = os.environ.get("TAP_TOOLS_API_KEY", "")
 
 # ---------------------------------------------------------------------------
-# Token identifiers
+# Token identifiers (mainnet defaults — overridden for testnet runs)
 # ---------------------------------------------------------------------------
 
 AGENT_POLICY: str = os.environ.get(
@@ -62,10 +75,15 @@ FLUX_MAX_SUPPLY_DISPLAY: int = 1_000_000_000  # 1 billion
 FLUX_MAX_SUPPLY_BASE: int = FLUX_MAX_SUPPLY_DISPLAY * (10 ** FLUX_DECIMALS)  # 1e15
 
 # ---------------------------------------------------------------------------
-# API base URLs
+# API base URLs (network-aware)
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_BASE_URL: str = "https://cardano-mainnet.blockfrost.io/api/v0"
+_BLOCKFROST_BASE_URLS = {
+    "mainnet": "https://cardano-mainnet.blockfrost.io/api/v0",
+    "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
+    "preview": "https://cardano-preview.blockfrost.io/api/v0",
+}
+BLOCKFROST_BASE_URL: str = _BLOCKFROST_BASE_URLS[NETWORK]
 TAPTOOLS_BASE_URL: str = "https://openapi.taptools.io/api/v1"
 
 # ---------------------------------------------------------------------------
