@@ -121,10 +121,11 @@ Script hash: `7ee33b926834bd7d983ca9d433cee0cc1918ed5bcb5f78ab795d7057`
 | Wrong redeemer | Garbage CBOR redeemer data | PASS (rejected) |
 | Datum swap | Attacker substitutes own pkh in datum | PASS (rejected) |
 | Index poisoning | Fabricated UTxO reference | PASS (rejected) |
+| Franken address | Claim via addr(victim_pkh, attacker_stk) | PASS (rejected) |
 
 ### Test suite
 
-125 unit/integration tests covering all tools, utilities, and E2E pipeline flow.
+129 unit/integration tests covering all tools, utilities, and E2E pipeline flow.
 
 ```
 tests/test_api_clients.py        13 tests
@@ -135,7 +136,7 @@ tests/test_claim_flux_indexed.py 13 tests
 tests/test_config.py             10 tests
 tests/test_e2e_pipeline.py       15 tests
 tests/test_flux_merge_valuation.py 11 tests
-tests/test_snapshot_allocate.py  14 tests
+tests/test_snapshot_allocate.py  18 tests  (incl. 4 franken address tests)
 tests/test_twap_snapshot_pools.py 19 tests
 ```
 
@@ -286,7 +287,7 @@ flux-merger/
   scripts/
     preprod_harness.py                 # 9-stage preprod rehearsal
     red_team.py                        # adversarial test suite
-  tests/                               # 125 tests
+  tests/                               # 129 tests
   audit_pack/
     2026-02-11/                        # mainnet artifacts (Phases 1-3)
     preprod/                           # preprod rehearsal state + data
@@ -395,6 +396,7 @@ flux-merger/
 | [`scripts/red_team.py`](scripts/red_team.py) | 137-171 | `test_wrong_redeemer` -- garbage redeemer data |
 | [`scripts/red_team.py`](scripts/red_team.py) | 174-204 | `test_datum_swap` -- attacker substitutes own pkh in datum |
 | [`scripts/red_team.py`](scripts/red_team.py) | 207-236 | `test_index_poisoning` -- fabricated UTxO reference |
+| [`scripts/red_team.py`](scripts/red_team.py) | 244-285 | `test_franken_address_claim` -- franken address (shared pkh, different staking key) |
 
 ---
 
@@ -419,6 +421,10 @@ list.has(tx.extra_signatories, datum.claimant_pkh)
 - Double claim (rejected -- UTxO already consumed)
 - Index poisoning (rejected -- UTxO doesn't exist on chain)
 - Garbage redeemer (rejected at CBOR deserialization)
+- Franken address (rejected -- attacker constructs `addr(victim_pkh, attacker_stk)` but lacks the payment signing key; validator requires `extra_signatories` match)
+
+**Franken address defense:**
+The allocation pipeline groups holders by payment key hash, not by full address. Two addresses sharing the same payment credential (e.g., a base address and a franken address with a different staking part) merge into a single claim UTxO keyed to that payment key hash. Only the holder of the corresponding payment signing key can claim.
 
 ---
 

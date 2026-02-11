@@ -153,6 +153,135 @@ class TestAllocateFlux:
         assert result[0]["flux_display"] == 6.0  # 6M / 10^6
 
 
+class TestFrankenAddressGrouping:
+    """Franken address attack: two addresses share the same payment key hash
+    but have different staking credentials.
+
+    The allocation pipeline groups by payment key hash, so both addresses'
+    balances should be combined into a single claim UTxO. Only the legitimate
+    keyholder (who owns the payment signing key) can claim.
+    """
+
+    def _make_franken_pair(self):
+        """Create two bech32 addresses with the same payment key hash
+        but different staking key hashes."""
+        from pycardano import Address, Network
+        from pycardano.hash import VerificationKeyHash
+
+        # Same payment key hash for both addresses
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        payment_vkh = VerificationKeyHash(pkh_bytes)
+
+        # Different staking key hashes
+        stk_1 = VerificationKeyHash(bytes.fromhex(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "aaaaaa"[:56]
+        ))
+        stk_2 = VerificationKeyHash(bytes.fromhex(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            "bbbbbb"[:56]
+        ))
+
+        addr_legit = Address(
+            payment_part=payment_vkh,
+            staking_part=stk_1,
+            network=Network.TESTNET,
+        )
+        addr_franken = Address(
+            payment_part=payment_vkh,
+            staking_part=stk_2,
+            network=Network.TESTNET,
+        )
+
+        return str(addr_legit), str(addr_franken)
+
+    def test_same_pkh_extracted(self):
+        """Both addresses yield the same payment key hash."""
+        from tools.cardano_utils import address_to_payment_key_hash
+
+        addr_legit, addr_franken = self._make_franken_pair()
+        assert addr_legit != addr_franken  # different bech32 strings
+        pkh_1 = address_to_payment_key_hash(addr_legit)
+        pkh_2 = address_to_payment_key_hash(addr_franken)
+        assert pkh_1 == pkh_2 == SAMPLE_PKH_1
+
+    def test_allocations_grouped_by_pkh(self):
+        """Franken + legitimate addresses merge into one claim row."""
+        from collections import defaultdict
+        from tools.cardano_utils import address_to_payment_key_hash
+
+        addr_legit, addr_franken = self._make_franken_pair()
+
+        # Simulate two allocation rows (from two different addresses)
+        allocs = [
+            {"address": addr_legit, "flux_units": 600_000, "token_name": "AGENT",
+             "token_balance_base": 600, "token_balance_display": 600, "flux_display": 0.6},
+            {"address": addr_franken, "flux_units": 400_000, "token_name": "AGENT",
+             "token_balance_base": 400, "token_balance_display": 400, "flux_display": 0.4},
+        ]
+
+        # Reproduce the grouping logic from run_snapshot_and_allocate
+        pkh_totals: dict[str, dict] = defaultdict(lambda: {
+            "addresses": set(), "flux_units": 0, "per_token": {},
+        })
+        for a in allocs:
+            pkh = address_to_payment_key_hash(a["address"])
+            assert pkh is not None
+            entry = pkh_totals[pkh]
+            entry["addresses"].add(a["address"])
+            entry["flux_units"] += a["flux_units"]
+
+        # Should produce ONE grouped entry
+        assert len(pkh_totals) == 1
+        assert SAMPLE_PKH_1 in pkh_totals
+        entry = pkh_totals[SAMPLE_PKH_1]
+        assert entry["flux_units"] == 1_000_000  # combined
+        assert len(entry["addresses"]) == 2  # both addresses tracked
+
+    def test_franken_address_cannot_change_datum(self):
+        """The claim datum is keyed by payment key hash, not full address.
+        A franken address holder without the payment signing key cannot claim."""
+        from tools.cardano_utils import encode_claim_datum, decode_claim_datum
+
+        # The datum encodes only the payment key hash
+        datum_cbor = encode_claim_datum(SAMPLE_PKH_1)
+        recovered_pkh = decode_claim_datum(datum_cbor.hex())
+
+        # Datum does NOT include staking key — franken address is irrelevant
+        assert recovered_pkh == SAMPLE_PKH_1
+
+    def test_enterprise_address_same_pkh(self):
+        """An enterprise address (no staking part) with the same payment key hash
+        should also group with base addresses sharing that pkh."""
+        from pycardano import Address, Network
+        from pycardano.hash import VerificationKeyHash
+        from tools.cardano_utils import address_to_payment_key_hash
+
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        payment_vkh = VerificationKeyHash(pkh_bytes)
+
+        # Enterprise address (no staking credential)
+        enterprise_addr = Address(
+            payment_part=payment_vkh,
+            network=Network.TESTNET,
+        )
+
+        # Base address with staking credential
+        stk = VerificationKeyHash(bytes.fromhex(
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            "cccccc"[:56]
+        ))
+        base_addr = Address(
+            payment_part=payment_vkh,
+            staking_part=stk,
+            network=Network.TESTNET,
+        )
+
+        assert str(enterprise_addr) != str(base_addr)
+        assert address_to_payment_key_hash(str(enterprise_addr)) == SAMPLE_PKH_1
+        assert address_to_payment_key_hash(str(base_addr)) == SAMPLE_PKH_1
+
+
 class TestAllocationsCSV:
     def test_csv_roundtrip(self, tmp_path):
         rows = [

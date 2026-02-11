@@ -241,6 +241,57 @@ def test_index_poisoning(
         return {"test": "index_poisoning", "passed": True, "rejection": str(e)[:300]}
 
 
+def test_franken_address_claim(
+    context: BlockFrostChainContext,
+    attacker,
+    victim,
+    victim_refs: list,
+    script_address: str,
+    script: PlutusV3Script,
+    flux_policy_id: ScriptHash,
+) -> dict[str, Any]:
+    """Attack: attacker creates a franken address (victim's payment key hash +
+    attacker's staking key) and tries to claim victim's UTxO.
+
+    The claim validator checks that the payment key hash from the inline datum
+    is present in tx.extra_signatories. The attacker does NOT have the victim's
+    payment signing key, so this must fail.
+    """
+    try:
+        from pycardano.hash import VerificationKeyHash
+
+        builder = TransactionBuilder(context)
+        for ref in victim_refs:
+            utxo = make_script_utxo(
+                ref[0], ref[1], ref[2], victim.pkh_hex,  # victim's real pkh
+                script_address, flux_policy_id,
+            )
+            builder.add_script_input(utxo, script=script, redeemer=unit_redeemer())
+
+        # Attacker signs — does NOT have victim's payment key
+        builder.required_signers = [attacker.vkey.hash()]
+        builder.add_input_address(attacker.address)
+
+        # Build a franken address: victim's payment pkh + attacker's staking key
+        victim_pkh = VerificationKeyHash(bytes.fromhex(victim.pkh_hex))
+        attacker_stk = attacker.vkey.hash()
+        franken_addr = Address(
+            payment_part=victim_pkh,
+            staking_part=attacker_stk,
+            network=Network.TESTNET,
+        )
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[attacker.skey],
+            change_address=franken_addr,  # send to franken address
+        )
+        context.submit_tx(signed_tx)
+        return {"test": "franken_address", "passed": False,
+                "error": "Franken address claim accepted!"}
+    except Exception as e:
+        return {"test": "franken_address", "passed": True, "rejection": str(e)[:300]}
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -331,6 +382,13 @@ def run_red_team(
     logger.info("-" * 40)
     logger.info("TEST 4: Index poisoning")
     r = test_index_poisoning(context, attacker, script_address, script, flux_policy_id)
+    results.append(r)
+    logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+
+    # Test 5: Franken address claim
+    logger.info("-" * 40)
+    logger.info("TEST 5: Franken address claim")
+    r = test_franken_address_claim(context, attacker, victim, victim_refs, script_address, script, flux_policy_id)
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
