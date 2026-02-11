@@ -1,0 +1,33 @@
+{
+  "subject": "POLICY_ID_HERE464c5558",
+  "name": {
+    "value": "FLUX",
+    "sequenceNumber": 0,
+    "signatures": []
+  },
+  "description": {
+    "value": "FLUX — unified token from the AGENT + SHARDS merger",
+    "sequenceNumber": 0,
+    "signatures": []
+  },
+  "ticker": {
+    "value": "FLUX",
+    "sequenceNumber": 0,
+    "signatures": []
+  },
+  "decimals": {
+    "value": 6,
+    "sequenceNumber": 0,
+    "signatures": []
+  },
+  "url": {
+    "value": "https://fluxpoint.io",
+    "sequenceNumber": 0,
+    "signatures": []
+  },
+  "logo": {
+    "value": "",
+    "sequenceNumber": 0,
+    "signatures": []
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "type": "all",
+  "scripts": [
+    {
+      "type": "sig",
+      "keyHash": "REPLACE_WITH_MINTING_KEY_HASH"
+    },
+    {
+      "type": "before",
+      "slot": 999999999
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+name = "fluxpoint/claim-validator"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "FLUX claim validator — signature-gated spend by payment key hash"
+
+[repository]
+user = "fluxpoint"
+project = "claim-validator"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "2.2.0"
+source = "github"

@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files
+.env
+env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Audit artifacts (keep structure, ignore generated data)
+audit_pack/**/claim_tx_out/*.cbor
+
+# Aiken build
+onchain/claim_validator/build/
+onchain/claim_validator/artifacts/
+onchain/flux_mint_policy/build/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
