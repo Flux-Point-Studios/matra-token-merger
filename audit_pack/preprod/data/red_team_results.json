@@ -1,0 +1,22 @@
+[
+  {
+    "test": "wrong_signer",
+    "passed": true,
+    "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace(spend:0=Namespace(extraRedeemers=['spend:0']))))"
+  },
+  {
+    "test": "wrong_redeemer",
+    "passed": true,
+    "rejection": "Namespace(type='jsonwsp/fault', version='1.0', servicename='ogmios', fault=Namespace(code='client', string='Invalid request: Deserialisation failure while decoding serialised transaction. CBOR failed with error: DeserialiseFailure 0 \"expected tag\".'), reflection=Namespace(id='91ae591f-c7f2-4092-834a"
+  },
+  {
+    "test": "datum_swap",
+    "passed": true,
+    "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace(spend:0=Namespace(extraRedeemers=['spend:0']))))"
+  },
+  {
+    "test": "index_poisoning",
+    "passed": true,
+    "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace(spend:0=Namespace(extraRedeemers=['spend:0']))))"
+  }
+]

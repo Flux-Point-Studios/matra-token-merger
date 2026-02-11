@@ -41,6 +41,7 @@ import cbor2
 from cbor2 import CBORTag
 from pycardano import (
     Address,
+    Asset,
     AssetName,
     BlockFrostChainContext,
     MultiAsset,
@@ -189,12 +190,12 @@ def mint_test_token(
 
     # Mint
     builder.mint = MultiAsset()
-    builder.mint[policy_id] = {asset_name: total_supply}
+    builder.mint[policy_id] = Asset({asset_name: total_supply})
     builder.native_scripts = [native_script]
 
     # Send minted tokens to admin
     multi = MultiAsset()
-    multi[policy_id] = {asset_name: total_supply}
+    multi[policy_id] = Asset({asset_name: total_supply})
     min_ada = 2_000_000
     tx_out = TransactionOutput(admin.address, Value(min_ada, multi))
     builder.add_output(tx_out)
@@ -281,7 +282,7 @@ def build_adversarial_distributions(num_wallets: int) -> list[Distribution]:
 
 
 def distribute_test_tokens(
-    context: BlockFrostChainContext,
+    blockfrost_project_id: str,
     admin: Wallet,
     test_wallets: list[Wallet],
     agent_policy_id: ScriptHash,
@@ -294,9 +295,6 @@ def distribute_test_tokens(
 
     Returns list of submitted tx hashes.
     """
-    # Build native scripts for spending
-    native_script = ScriptPubkey(admin.vkey.hash())
-
     agent_name = AssetName(bytes.fromhex(agent_name_hex))
     shards_name = AssetName(bytes.fromhex(shards_name_hex))
 
@@ -307,7 +305,10 @@ def distribute_test_tokens(
     for batch_start in range(0, len(distributions), batch_size):
         batch = distributions[batch_start : batch_start + batch_size]
 
-        builder = TransactionBuilder(context)
+        # Fresh context each batch to avoid stale UTxO cache
+        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+
+        builder = TransactionBuilder(ctx)
         builder.add_input_address(admin.address)
 
         for dist in batch:
@@ -316,13 +317,13 @@ def distribute_test_tokens(
             has_asset = False
 
             if dist.agent_amount > 0:
-                multi[agent_policy_id] = {agent_name: dist.agent_amount}
+                multi[agent_policy_id] = Asset({agent_name: dist.agent_amount})
                 has_asset = True
             if dist.shards_amount > 0:
                 if shards_policy_id in multi:
                     multi[shards_policy_id][shards_name] = dist.shards_amount
                 else:
-                    multi[shards_policy_id] = {shards_name: dist.shards_amount}
+                    multi[shards_policy_id] = Asset({shards_name: dist.shards_amount})
                 has_asset = True
 
             if not has_asset:
@@ -338,15 +339,16 @@ def distribute_test_tokens(
         )
 
         tx_hash = signed_tx.id.payload.hex()
-        context.submit_tx(signed_tx)
+        ctx.submit_tx(signed_tx)
         tx_hashes.append(tx_hash)
         logger.info(
             "Distribution batch tx: %s (%d outputs)",
             tx_hash, len(batch),
         )
 
-        # Wait for confirmation
-        time.sleep(3)
+        # Wait for on-chain confirmation before next batch
+        logger.info("Waiting 30s for chain confirmation...")
+        time.sleep(30)
 
     return tx_hashes
 
@@ -488,12 +490,12 @@ def mint_flux_test(
 
     # Mint
     builder.mint = MultiAsset()
-    builder.mint[policy_id] = {asset_name: FLUX_TEST_SUPPLY_BASE}
+    builder.mint[policy_id] = Asset({asset_name: FLUX_TEST_SUPPLY_BASE})
     builder.native_scripts = [policy_script]
 
     # Send to admin
     multi = MultiAsset()
-    multi[policy_id] = {asset_name: FLUX_TEST_SUPPLY_BASE}
+    multi[policy_id] = Asset({asset_name: FLUX_TEST_SUPPLY_BASE})
     tx_out = TransactionOutput(admin.address, Value(5_000_000, multi))
     builder.add_output(tx_out)
 
@@ -557,7 +559,7 @@ def encode_claim_datum(pkh_hex: str) -> bytes:
 
 
 def build_claim_utxos(
-    context: BlockFrostChainContext,
+    blockfrost_project_id: str,
     admin: Wallet,
     allocations_csv: Path,
     script_address: str,
@@ -588,7 +590,10 @@ def build_claim_utxos(
         batch = rows[batch_start : batch_start + batch_size]
         batch_num = batch_start // batch_size
 
-        builder = TransactionBuilder(context)
+        # Fresh context each batch to avoid stale UTxO cache
+        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+
+        builder = TransactionBuilder(ctx)
         builder.add_input_address(admin.address)
 
         output_details = []
@@ -597,7 +602,7 @@ def build_claim_utxos(
             datum = RawPlutusData(cbor2.loads(datum_cbor))
 
             multi = MultiAsset()
-            multi[flux_policy_id] = {asset_name: alloc["flux"]}
+            multi[flux_policy_id] = Asset({asset_name: alloc["flux"]})
             min_ada = 2_000_000
             value = Value(min_ada, multi)
 
@@ -615,7 +620,7 @@ def build_claim_utxos(
         )
 
         tx_hash = signed_tx.id.payload.hex()
-        context.submit_tx(signed_tx)
+        ctx.submit_tx(signed_tx)
 
         batch_result = {
             "batch_index": batch_num,
@@ -626,7 +631,9 @@ def build_claim_utxos(
         batches_result.append(batch_result)
         logger.info("Claim UTxO batch %d submitted: %s (%d outputs)", batch_num, tx_hash, len(output_details))
 
-        time.sleep(3)  # Wait for chain
+        # Wait for on-chain confirmation before next batch
+        logger.info("Waiting 30s for chain confirmation...")
+        time.sleep(30)
 
     return batches_result
 
@@ -690,7 +697,7 @@ def claim_flux(
 
         # Reconstruct UTxO
         multi = MultiAsset()
-        multi[flux_policy_id] = {asset_name: flux_qty}
+        multi[flux_policy_id] = Asset({asset_name: flux_qty})
         value = Value(2_000_000, multi)
 
         datum_cbor = encode_claim_datum(wallet.pkh_hex)
@@ -753,7 +760,7 @@ def red_team_wrong_signer(
                 output_index,
             )
             multi = MultiAsset()
-            multi[flux_policy_id] = {asset_name: flux_qty}
+            multi[flux_policy_id] = Asset({asset_name: flux_qty})
             value = Value(2_000_000, multi)
 
             # Datum has the VICTIM's pkh
@@ -838,10 +845,9 @@ def run_preprod_rehearsal(
     data_dir = work_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    base_url = "https://cardano-preprod.blockfrost.io/api/v0"
+    # Let blockfrost-python auto-detect network from project_id prefix
     context = BlockFrostChainContext(
         project_id=blockfrost_project_id,
-        base_url=base_url,
     )
 
     state_file = work_dir / "rehearsal_state.json"
@@ -919,31 +925,67 @@ def run_preprod_rehearsal(
         agent_supply = 1_000_000_000  # 1B, 0 decimals
         shards_supply = 3_000_000_000_000  # 3M display × 10^6, 6 decimals
 
-        agent_policy_id, agent_tx = mint_test_token(
-            context, admin, agent_name_hex, agent_supply,
+        # Both tokens use the same native script (admin signature)
+        pub_key_hash = admin.vkey.hash()
+        native_script = ScriptPubkey(pub_key_hash)
+        policy_id = native_script.hash()
+
+        agent_name = AssetName(bytes.fromhex(agent_name_hex))
+        shards_name = AssetName(bytes.fromhex(shards_name_hex))
+
+        logger.info(
+            "Minting both tokens under policy %s in a single tx",
+            policy_id.payload.hex(),
         )
-        logger.info("Waiting for AGENT_TEST mint confirmation...")
+
+        builder = TransactionBuilder(context)
+        builder.add_input_address(admin.address)
+
+        # Mint both in one tx
+        builder.mint = MultiAsset({
+            policy_id: Asset({
+                agent_name: agent_supply,
+                shards_name: shards_supply,
+            })
+        })
+        builder.native_scripts = [native_script]
+
+        # Output: send both tokens to admin
+        multi = MultiAsset({
+            policy_id: Asset({
+                agent_name: agent_supply,
+                shards_name: shards_supply,
+            })
+        })
+        tx_out = TransactionOutput(admin.address, Value(3_000_000, multi))
+        builder.add_output(tx_out)
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        mint_tx_hash = signed_tx.id.payload.hex()
+        context.submit_tx(signed_tx)
+        logger.info("Mint TX submitted: %s", mint_tx_hash)
+        logger.info("Waiting for confirmation...")
         time.sleep(30)
 
-        shards_policy_id, shards_tx = mint_test_token(
-            context, admin, shards_name_hex, shards_supply,
-        )
-        logger.info("Waiting for SHARDS_TEST mint confirmation...")
-        time.sleep(30)
+        agent_policy_id = policy_id
+        shards_policy_id = policy_id
 
         state["agent_test"] = {
-            "policy_id": agent_policy_id.payload.hex(),
+            "policy_id": policy_id.payload.hex(),
             "asset_name_hex": agent_name_hex,
             "supply": agent_supply,
             "decimals": 0,
-            "mint_tx": agent_tx,
+            "mint_tx": mint_tx_hash,
         }
         state["shards_test"] = {
-            "policy_id": shards_policy_id.payload.hex(),
+            "policy_id": policy_id.payload.hex(),
             "asset_name_hex": shards_name_hex,
             "supply": shards_supply,
             "decimals": 6,
-            "mint_tx": shards_tx,
+            "mint_tx": mint_tx_hash,
         }
         state["stage_2_complete"] = True
         save_state()
@@ -967,13 +1009,11 @@ def run_preprod_rehearsal(
         distributions = build_adversarial_distributions(num_test_wallets)
 
         dist_txs = distribute_test_tokens(
-            context, admin, test_wallets,
+            blockfrost_project_id, admin, test_wallets,
             agent_policy_id, agent_name_hex,
             shards_policy_id, shards_name_hex,
             distributions,
         )
-        logger.info("Waiting for distribution confirmations...")
-        time.sleep(30)
 
         state["distributions"] = [
             {"wallet": d.wallet_index, "agent": d.agent_amount,
@@ -1027,6 +1067,8 @@ def run_preprod_rehearsal(
         logger.info("STAGE 5: Mint FLUX_TEST with timelock")
         logger.info("=" * 60)
 
+        # Fresh context after previous stages
+        context = BlockFrostChainContext(project_id=blockfrost_project_id)
         current_slot = context.last_block_slot
         timelock_slot = current_slot + timelock_offset_slots
         logger.info("Current slot: %d, timelock: %d (offset +%d)", current_slot, timelock_slot, timelock_offset_slots)
@@ -1060,7 +1102,7 @@ def run_preprod_rehearsal(
 
         alloc_csv = Path(state["allocation"]["csv_path"])
         batches = build_claim_utxos(
-            context, admin, alloc_csv,
+            blockfrost_project_id, admin, alloc_csv,
             script_address, flux_policy_id,
             batch_size=20,
         )
@@ -1120,8 +1162,10 @@ def run_preprod_rehearsal(
             if w.pkh_hex in index and claimed_count < 5:
                 refs = index[w.pkh_hex]
                 try:
+                    # Fresh context per claim to avoid stale UTxOs
+                    claim_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
                     tx_hash = claim_flux(
-                        context, w, refs,
+                        claim_ctx, w, refs,
                         script_address, script, flux_policy_id,
                     )
                     claim_results.append({
@@ -1169,12 +1213,15 @@ def run_preprod_rehearsal(
             victim = unclaimed_wallets[0]
             attacker = unclaimed_wallets[1]
 
+            # Fresh context for red-team tests
+            rt_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+
             # Test 1: Wrong signer
             logger.info("RED TEAM TEST 1: Wrong signer claim")
             victim_refs = index.get(victim.pkh_hex, [])
             if victim_refs:
                 passed = red_team_wrong_signer(
-                    context, attacker, victim,
+                    rt_ctx, attacker, victim,
                     victim_refs, script_address, script, flux_policy_id,
                 )
                 red_team_results.append({
@@ -1186,8 +1233,10 @@ def run_preprod_rehearsal(
             logger.info("RED TEAM TEST 2: Double claim")
             attacker_refs = index.get(attacker.pkh_hex, [])
             if attacker_refs:
+                # Fresh context after test 1 may have changed state
+                rt_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
                 passed = red_team_double_claim(
-                    context, attacker, attacker_refs,
+                    rt_ctx, attacker, attacker_refs,
                     script_address, script, flux_policy_id,
                 )
                 red_team_results.append({

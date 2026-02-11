@@ -33,6 +33,7 @@ from typing import Any
 import cbor2
 from pycardano import (
     Address,
+    Asset,
     AssetName,
     BlockFrostChainContext,
     MultiAsset,
@@ -79,7 +80,7 @@ def make_script_utxo(
     asset_name = AssetName(bytes.fromhex(FLUX_ASSET_NAME_HEX))
     script_addr = Address.from_primitive(script_address)
     multi = MultiAsset()
-    multi[flux_policy_id] = {asset_name: flux_qty}
+    multi[flux_policy_id] = Asset({asset_name: flux_qty})
     value = Value(2_000_000, multi)
 
     datum_cbor = encode_claim_datum(pkh_hex)
@@ -172,30 +173,35 @@ def test_wrong_redeemer(
 
 def test_datum_swap(
     context: BlockFrostChainContext,
-    wallet,
-    refs: list,
+    attacker,
+    victim,
+    victim_refs: list,
     script_address: str,
     script: PlutusV3Script,
     flux_policy_id: ScriptHash,
 ) -> dict[str, Any]:
-    """Attack: reconstruct UTxO with a DIFFERENT datum (fake pkh) than what's on chain."""
+    """Attack: attacker reconstructs victim's UTxO with attacker's pkh in datum, signs with attacker key.
+
+    With inline datums, the node uses the on-chain datum (victim's pkh),
+    so the validator should reject because the attacker isn't the authorized signer.
+    """
     try:
         builder = TransactionBuilder(context)
-        # Use a totally fake pkh in the datum
-        fake_pkh = "00" * 28
-        for ref in refs:
+        # Reconstruct victim's UTxO but with ATTACKER's pkh in datum
+        for ref in victim_refs:
             utxo = make_script_utxo(
-                ref[0], ref[1], ref[2], fake_pkh,  # WRONG datum
+                ref[0], ref[1], ref[2], attacker.pkh_hex,  # ATTACKER's pkh
                 script_address, flux_policy_id,
             )
             builder.add_script_input(utxo, script=script, redeemer=unit_redeemer())
 
-        builder.required_signers = [wallet.vkey.hash()]
-        builder.add_input_address(wallet.address)
+        # Attacker signs (not the victim)
+        builder.required_signers = [attacker.vkey.hash()]
+        builder.add_input_address(attacker.address)
 
         signed_tx = builder.build_and_sign(
-            signing_keys=[wallet.skey],
-            change_address=wallet.address,
+            signing_keys=[attacker.skey],
+            change_address=attacker.address,
         )
         context.submit_tx(signed_tx)
         return {"test": "datum_swap", "passed": False, "error": "TX with wrong datum accepted!"}
@@ -259,10 +265,8 @@ def run_red_team(
         logger.error("Rehearsal must complete through stage 7. Current state is incomplete.")
         sys.exit(1)
 
-    base_url = "https://cardano-preprod.blockfrost.io/api/v0"
     context = BlockFrostChainContext(
         project_id=blockfrost_project_id,
-        base_url=base_url,
     )
 
     # Load validator
@@ -316,10 +320,10 @@ def run_red_team(
     results.append(r)
     logger.info("Result: %s (%s)", "PASS" if r["passed"] else "FAIL", r.get("note", ""))
 
-    # Test 3: Datum swap
+    # Test 3: Datum swap (attacker tries to replace victim's datum with their own pkh)
     logger.info("-" * 40)
     logger.info("TEST 3: Datum swap")
-    r = test_datum_swap(context, victim, victim_refs, script_address, script, flux_policy_id)
+    r = test_datum_swap(context, attacker, victim, victim_refs, script_address, script, flux_policy_id)
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
