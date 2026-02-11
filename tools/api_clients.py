@@ -215,9 +215,9 @@ class TapToolsClient:
 
         *interval*: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w
         """
-        return self._post(
+        return self._get(
             "/token/ohlcv",
-            {
+            params={
                 "unit": unit,
                 "interval": interval,
                 "numIntervals": num_intervals,
@@ -234,11 +234,11 @@ class TapToolsClient:
         interval: str = "1h",
         num_intervals: int = 168,
     ) -> list[dict[str, Any]]:
-        """Get OHLCV candles for a specific pool."""
-        return self._post(
+        """Get OHLCV candles for a specific pool via onchainID."""
+        return self._get(
             "/token/ohlcv",
-            {
-                "pairID": pool_id,
+            params={
+                "onchainID": pool_id,
                 "interval": interval,
                 "numIntervals": num_intervals,
             },
@@ -246,9 +246,9 @@ class TapToolsClient:
 
     def get_token_price(self, unit: str) -> dict[str, Any]:
         """Get current token price."""
-        return self._post("/token/price", {"unit": unit})
+        return self._get("/token/prices", params={"unit": unit})
 
     def get_ada_price(self) -> float:
-        """Get current ADA/USD price."""
-        data = self._get("/token/price/ada")
+        """Get current ADA/USD price via /token/quote."""
+        data = self._get("/token/quote", params={"quote": "USD"})
         return float(data.get("price", 0))

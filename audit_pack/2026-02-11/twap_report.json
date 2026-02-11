@@ -1,0 +1,237 @@
+{
+  "report_type": "twap_snapshot_pools",
+  "generated_at": "2026-02-11T17:46:33.806686+00:00",
+  "parameters": {
+    "primary_window": "7d",
+    "extra_windows": [
+      "24h",
+      "30d"
+    ],
+    "min_tvl_ada": 10000,
+    "top_pools": 3,
+    "combine_mode": "median"
+  },
+  "ada_usd_price": 0.2550894679,
+  "tokens": {
+    "AGENT": {
+      "unit": "97bbb7db0baef89caefce61b8107ac74c7a7340166b39d906f174bec54616c6f73",
+      "decimals": 0,
+      "eligible_pools": 3,
+      "pools": [
+        {
+          "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+          "dex": "Splash",
+          "tvl_ada": 128926.833839,
+          "windows": {
+            "7d": {
+              "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.00183312214106286,
+              "latest_close": 0.0018126432198209987,
+              "min_close": 0.001652576899555518,
+              "max_close": 0.002037410332044868
+            },
+            "24h": {
+              "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.0018232515781577256,
+              "latest_close": 0.0018126432198209987,
+              "min_close": 0.0018090655511056428,
+              "max_close": 0.001886251594141267
+            },
+            "30d": {
+              "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.001984457291751833,
+              "latest_close": 0.0018126432198209987,
+              "min_close": 0.001652576899555518,
+              "max_close": 0.0023403799375299916
+            }
+          }
+        },
+        {
+          "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+          "dex": "Minswap (V2)",
+          "tvl_ada": 44864.477854,
+          "windows": {
+            "7d": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.0018497519020120184,
+              "latest_close": 0.0018446481024614136,
+              "min_close": 0.0016855041096795625,
+              "max_close": 0.0020179878439205326
+            },
+            "24h": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.0018541547937352115,
+              "latest_close": 0.0018446481024614136,
+              "min_close": 0.0018446481024614136,
+              "max_close": 0.0018881072625702043
+            },
+            "30d": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.001993118061530035,
+              "latest_close": 0.0018446481024614136,
+              "min_close": 0.00168624807317318,
+              "max_close": 0.0023003879368860666
+            }
+          }
+        },
+        {
+          "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+          "dex": "WingRiders (V2)",
+          "tvl_ada": 16147.296593,
+          "windows": {
+            "7d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.0018981859057841661,
+              "latest_close": 0.0018944963811994135,
+              "min_close": 0.0017200124749724424,
+              "max_close": 0.00203944325240993
+            },
+            "24h": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.0019021981985289846,
+              "latest_close": 0.0018944963811994135,
+              "min_close": 0.0018944963811994135,
+              "max_close": 0.001943788012108669
+            },
+            "30d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.002045409024842778,
+              "latest_close": 0.0018944963811994135,
+              "min_close": 0.0017200124749724424,
+              "max_close": 0.002390608310437328
+            }
+          }
+        }
+      ],
+      "combined_twap": {
+        "window": "7d",
+        "mode": "median",
+        "ada": 0.0018497519020120184,
+        "usd": 0.0004718522284312587,
+        "per_pool_twaps_ada": [
+          0.00183312214106286,
+          0.0018497519020120184,
+          0.0018981859057841661
+        ]
+      }
+    },
+    "SHARDS": {
+      "unit": "ea153b5d4864af15a1079a94a0e2486d6376fa28aafad272d15b243a0014df10536861726473",
+      "decimals": 6,
+      "eligible_pools": 2,
+      "pools": [
+        {
+          "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+          "dex": "WingRiders (V2)",
+          "tvl_ada": 12395.188346,
+          "windows": {
+            "7d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.10524232640499817,
+              "latest_close": 0.1115438581526645,
+              "min_close": 0.08409222224239542,
+              "max_close": 0.11262949603885934
+            },
+            "24h": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.1115438581526645,
+              "latest_close": 0.1115438581526645,
+              "min_close": 0.1115438581526645,
+              "max_close": 0.1115438581526645
+            },
+            "30d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.10656157692792788,
+              "latest_close": 0.1115438581526645,
+              "min_close": 0.08409222224239542,
+              "max_close": 0.11884239038580542
+            }
+          }
+        },
+        {
+          "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.8a137d6b7d532082cd31eff774edb6726a8d16a762bb1063f1875419c639a5eb",
+          "dex": "Minswap (V2)",
+          "tvl_ada": 11748.697911,
+          "windows": {
+            "7d": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.8a137d6b7d532082cd31eff774edb6726a8d16a762bb1063f1875419c639a5eb",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.10343348896745046,
+              "latest_close": 0.10942296497813661,
+              "min_close": 0.0834798411346098,
+              "max_close": 0.1126346840128329
+            },
+            "24h": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.8a137d6b7d532082cd31eff774edb6726a8d16a762bb1063f1875419c639a5eb",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.10962369741780513,
+              "latest_close": 0.10942296497813661,
+              "min_close": 0.10942296497813661,
+              "max_close": 0.1126346840128329
+            },
+            "30d": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.8a137d6b7d532082cd31eff774edb6726a8d16a762bb1063f1875419c639a5eb",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.10512421037206333,
+              "latest_close": 0.10942296497813661,
+              "min_close": 0.0834798411346098,
+              "max_close": 0.11810211292085554
+            }
+          }
+        }
+      ],
+      "combined_twap": {
+        "window": "7d",
+        "mode": "median",
+        "ada": 0.10433790768622431,
+        "usd": 0.026615501353478278,
+        "per_pool_twaps_ada": [
+          0.10524232640499817,
+          0.10343348896745046
+        ]
+      }
+    }
+  }
+}

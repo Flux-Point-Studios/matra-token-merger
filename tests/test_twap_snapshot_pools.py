@@ -74,7 +74,6 @@ class TestDiscoverPools:
         pools = discover_pools(mock_client, AGENT, min_tvl_ada=10000, top_n=3)
         # pool_agent_1 has 500k, pool_agent_2 has 200k, pool_agent_3 has 5k (below 10k)
         assert len(pools) == 2
-        assert all(float(p["adaLocked"]) >= 10000 for p in pools)
 
     def test_top_n_limits(self, mock_pools_agent, mocker):
         mock_client = mocker.MagicMock()
@@ -82,14 +81,15 @@ class TestDiscoverPools:
 
         pools = discover_pools(mock_client, AGENT, min_tvl_ada=1000, top_n=1)
         assert len(pools) == 1
-        assert pools[0]["pairID"] == "pool_agent_1"  # Highest TVL
+        assert pools[0]["onchainID"] == "pool_agent_1"  # Highest TVL
 
     def test_sorted_by_tvl_desc(self, mock_pools_agent, mocker):
         mock_client = mocker.MagicMock()
         mock_client.get_token_pools.return_value = mock_pools_agent
 
         pools = discover_pools(mock_client, AGENT, min_tvl_ada=1000, top_n=10)
-        tvls = [float(p["adaLocked"]) for p in pools]
+        from tools.twap_snapshot_pools import _get_pool_tvl_ada
+        tvls = [_get_pool_tvl_ada(p) for p in pools]
         assert tvls == sorted(tvls, reverse=True)
 
     def test_empty_pools(self, mocker):

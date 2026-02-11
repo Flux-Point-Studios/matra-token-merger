@@ -122,7 +122,7 @@ class TestTapToolsClient:
     def test_get_ada_price(self):
         responses.add(
             responses.GET,
-            "https://openapi.taptools.io/api/v1/token/price/ada",
+            "https://openapi.taptools.io/api/v1/token/quote",
             json={"price": "0.55"},
         )
         client = TapToolsClient(api_key="test")

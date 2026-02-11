@@ -118,9 +118,15 @@ def build_merge_report(
     twap_report: dict[str, Any] | None = None,
     twap_report_path: Path | None = None,
     tokens: list[TokenInfo] | None = None,
+    burn_adjustments: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """Build the merge report containing weights and integer buckets."""
+    """Build the merge report containing weights and integer buckets.
+
+    *burn_adjustments*: token-name → base units to subtract from on-chain
+    supply (permanently locked / burned tokens).
+    """
     tokens = tokens or LEGACY_TOKENS
+    burn_adjustments = burn_adjustments or {}
 
     # Load TWAP data
     if twap_report is None and twap_report_path is not None:
@@ -140,15 +146,25 @@ def build_merge_report(
             logger.warning("TWAP price for %s is zero or missing!", t.name)
 
     # Fetch supplies
+    raw_supplies: dict[str, int] = {}
     supplies: dict[str, int] = {}
     for t in tokens:
-        supplies[t.name] = fetch_supply(bf, t)
-        logger.info(
-            "%s supply: %d base units (%.2f display)",
-            t.name,
-            supplies[t.name],
-            supplies[t.name] / (10 ** t.decimals),
-        )
+        raw = fetch_supply(bf, t)
+        raw_supplies[t.name] = raw
+        burned = burn_adjustments.get(t.name, 0)
+        supplies[t.name] = raw - burned
+        if burned > 0:
+            logger.info(
+                "%s supply: %d on-chain − %d burned = %d circulating (%.2f display)",
+                t.name, raw, burned, supplies[t.name],
+                supplies[t.name] / (10 ** t.decimals),
+            )
+        else:
+            logger.info(
+                "%s supply: %d base units (%.2f display)",
+                t.name, supplies[t.name],
+                supplies[t.name] / (10 ** t.decimals),
+            )
 
     # Valuations + weights
     val_data = compute_valuations(tokens, supplies, twap_prices_usd)
@@ -171,6 +187,8 @@ def build_merge_report(
             t.name: {
                 "unit": t.unit,
                 "decimals": t.decimals,
+                "supply_onchain_base_units": raw_supplies[t.name],
+                "burn_adjustment_base_units": burn_adjustments.get(t.name, 0),
                 "supply_base_units": supplies[t.name],
                 "supply_display": supplies[t.name] / (10 ** t.decimals),
                 "twap_usd": twap_prices_usd[t.name],
@@ -181,6 +199,7 @@ def build_merge_report(
             }
             for t in tokens
         },
+        "burn_address": burn_adjustments.get("_address"),
         "totals": {
             "total_valuation_usd": val_data["total_valuation_usd"],
             "sum_weights": sum(val_data["weights"].values()),
@@ -208,12 +227,31 @@ def main(argv: list[str] | None = None) -> None:
         "--out-json", type=str, required=True,
         help="Output path for merge report JSON",
     )
+    parser.add_argument(
+        "--burn", type=str, nargs="*", default=[],
+        help="Burn adjustments as TOKEN:BASE_UNITS (e.g. AGENT:4002 SHARDS:88551450001)",
+    )
+    parser.add_argument(
+        "--burn-address", type=str, default=None,
+        help="Address of the burn contract (for audit trail)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
+    # Parse burn adjustments
+    burn_adj: dict[str, Any] = {}
+    for b in args.burn:
+        token_name, amount_str = b.split(":")
+        burn_adj[token_name] = int(amount_str)
+    if args.burn_address:
+        burn_adj["_address"] = args.burn_address
+
     bf = BlockfrostClient()
-    report = build_merge_report(bf, twap_report_path=Path(args.twap_report))
+    report = build_merge_report(
+        bf, twap_report_path=Path(args.twap_report),
+        burn_adjustments=burn_adj if burn_adj else None,
+    )
 
     out_path = Path(args.out_json)
     out_path.parent.mkdir(parents=True, exist_ok=True)

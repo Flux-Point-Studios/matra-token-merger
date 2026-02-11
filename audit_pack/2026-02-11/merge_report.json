@@ -1,0 +1,41 @@
+{
+  "report_type": "flux_merge_valuation",
+  "generated_at": "2026-02-11T17:54:03.109816+00:00",
+  "flux_total_base_units": 1000000000000000,
+  "tokens": {
+    "AGENT": {
+      "unit": "97bbb7db0baef89caefce61b8107ac74c7a7340166b39d906f174bec54616c6f73",
+      "decimals": 0,
+      "supply_onchain_base_units": 1000000000,
+      "burn_adjustment_base_units": 4002,
+      "supply_base_units": 999995998,
+      "supply_display": 999995998.0,
+      "twap_usd": 0.0004718522284312587,
+      "valuation_usd": 471850.3400786405,
+      "weight": 0.8552717530843149,
+      "flux_bucket_base_units": 855271753084314,
+      "flux_bucket_display": 855271753.084314
+    },
+    "SHARDS": {
+      "unit": "ea153b5d4864af15a1079a94a0e2486d6376fa28aafad272d15b243a0014df10536861726473",
+      "decimals": 6,
+      "supply_onchain_base_units": 3088534450001,
+      "burn_adjustment_base_units": 88551450001,
+      "supply_base_units": 2999983000000,
+      "supply_display": 2999983.0,
+      "twap_usd": 0.026615501353478278,
+      "valuation_usd": 79846.05159691183,
+      "weight": 0.14472824691568503,
+      "flux_bucket_base_units": 144728246915686,
+      "flux_bucket_display": 144728246.915686
+    }
+  },
+  "burn_address": "addr1w8qmxkacjdffxah0l3qg8hq2pmvs58q8lcy42zy9kda2ylc6dy5r4",
+  "totals": {
+    "total_valuation_usd": 551696.3916755524,
+    "sum_weights": 1.0,
+    "sum_buckets_base_units": 1000000000000000,
+    "buckets_sum_equals_max": true
+  },
+  "warnings": []
+}

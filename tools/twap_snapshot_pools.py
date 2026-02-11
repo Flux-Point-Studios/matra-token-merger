@@ -78,6 +78,20 @@ def combine_twaps(
 # ---------------------------------------------------------------------------
 
 
+def _get_pool_tvl_ada(pool: dict[str, Any]) -> float:
+    """Extract ADA-side TVL from a TapTools pool response.
+
+    TapTools returns tokenALocked/tokenBLocked.  The ADA side is whichever
+    token has ticker "ADA" or an empty unit string.
+    """
+    if pool.get("tokenBTicker") == "ADA" or pool.get("tokenB") == "":
+        return float(pool.get("tokenBLocked", 0))
+    if pool.get("tokenATicker") == "ADA" or pool.get("tokenA") == "":
+        return float(pool.get("tokenALocked", 0))
+    # Fallback: try legacy field
+    return float(pool.get("adaLocked", 0))
+
+
 def discover_pools(
     client: TapToolsClient,
     token: TokenInfo,
@@ -89,10 +103,10 @@ def discover_pools(
     # Filter by minimum TVL
     filtered = [
         p for p in raw_pools
-        if float(p.get("adaLocked", 0)) >= min_tvl_ada
+        if _get_pool_tvl_ada(p) >= min_tvl_ada
     ]
     # Sort by TVL descending
-    filtered.sort(key=lambda p: float(p.get("adaLocked", 0)), reverse=True)
+    filtered.sort(key=lambda p: _get_pool_tvl_ada(p), reverse=True)
     return filtered[:top_n]
 
 
@@ -164,11 +178,11 @@ def build_twap_report(
 
         pool_entries = []
         for pool in pools:
-            pool_id = pool.get("pairID") or pool.get("pair") or pool.get("id", "")
+            pool_id = pool.get("onchainID") or pool.get("pairID", "")
             entry: dict[str, Any] = {
                 "pool_id": pool_id,
                 "dex": pool.get("exchange", "unknown"),
-                "tvl_ada": float(pool.get("adaLocked", 0)),
+                "tvl_ada": _get_pool_tvl_ada(pool),
                 "windows": {},
             }
 

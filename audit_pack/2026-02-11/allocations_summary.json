@@ -1,0 +1,41 @@
+{
+  "snapshot_anchor": {
+    "block_hash": "39a866b50965cf504fe38f3aa40c6d12df246ee50f74b02bfbc2c3c249dec74b",
+    "block_height": 13027155,
+    "block_time": 1770832583,
+    "block_slot": 179266292
+  },
+  "generated_at": "2026-02-11T17:56:47.946289+00:00",
+  "parameters": {
+    "exclude_script_addresses": true,
+    "denominator_mode": "eligible",
+    "dust_to": null,
+    "min_flux_threshold": 1
+  },
+  "per_token": {
+    "AGENT": {
+      "raw_holders": 2402,
+      "eligible_holders": 2112,
+      "raw_supply_base": 1000000000,
+      "eligible_supply_base": 387071787,
+      "bucket_base_units": 855271753084314,
+      "distributed_base_units": 855271753083232,
+      "dust_base_units": 1082
+    },
+    "SHARDS": {
+      "raw_holders": 4841,
+      "eligible_holders": 4696,
+      "raw_supply_base": 3088534450001,
+      "eligible_supply_base": 937295313154,
+      "bucket_base_units": 144728246915686,
+      "distributed_base_units": 144728246913373,
+      "dust_base_units": 2313
+    }
+  },
+  "totals": {
+    "unique_claimants": 6491,
+    "total_flux_distributed": 998095065835579,
+    "total_dust_remaining": 1904934164421,
+    "sum_equals_max_supply": true
+  }
+}

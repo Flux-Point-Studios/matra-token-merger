@@ -123,22 +123,34 @@ def mock_pools_agent() -> list[dict[str, Any]]:
     """Sample TapTools pool data for AGENT."""
     return [
         {
-            "pairID": "pool_agent_1",
+            "onchainID": "pool_agent_1",
             "exchange": "minswap",
-            "adaLocked": "500000",
-            "tokenLocked": "1000000",
+            "tokenA": AGENT_UNIT,
+            "tokenATicker": "AGENT",
+            "tokenALocked": 1000000,
+            "tokenB": "",
+            "tokenBTicker": "ADA",
+            "tokenBLocked": 500000,
         },
         {
-            "pairID": "pool_agent_2",
+            "onchainID": "pool_agent_2",
             "exchange": "sundaeswap",
-            "adaLocked": "200000",
-            "tokenLocked": "400000",
+            "tokenA": AGENT_UNIT,
+            "tokenATicker": "AGENT",
+            "tokenALocked": 400000,
+            "tokenB": "",
+            "tokenBTicker": "ADA",
+            "tokenBLocked": 200000,
         },
         {
-            "pairID": "pool_agent_3",
+            "onchainID": "pool_agent_3",
             "exchange": "wingriders",
-            "adaLocked": "5000",
-            "tokenLocked": "10000",
+            "tokenA": AGENT_UNIT,
+            "tokenATicker": "AGENT",
+            "tokenALocked": 10000,
+            "tokenB": "",
+            "tokenBTicker": "ADA",
+            "tokenBLocked": 5000,
         },
     ]
 
