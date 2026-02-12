@@ -16,6 +16,8 @@ import requests
 from tools.config import (
     BLOCKFROST_BASE_URL,
     BLOCKFROST_PROJECT_ID,
+    KOIOS_API_KEY,
+    KOIOS_BASE_URL,
     TAP_TOOLS_API_KEY,
     TAPTOOLS_BASE_URL,
 )
@@ -47,7 +49,7 @@ def _request_with_retry(
                 headers=headers,
                 params=params,
                 json=json_body,
-                timeout=30,
+                timeout=60,
             )
             if resp.status_code == 200:
                 return resp.json()
@@ -252,3 +254,74 @@ class TapToolsClient:
         """Get current ADA/USD price via /token/quote."""
         data = self._get("/token/quote", params={"quote": "USD"})
         return float(data.get("price", 0))
+
+
+# ===================================================================
+# Koios client
+# ===================================================================
+
+class KoiosClient:
+    """Minimal Koios REST client for cross-checking holder data."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str = KOIOS_BASE_URL,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key or KOIOS_API_KEY
+        self._headers: dict[str, str] = {}
+        if self.api_key:
+            self._headers["authorization"] = f"Bearer {self.api_key}"
+
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        url = f"{self.base_url}{path}"
+        return _request_with_retry("GET", url, self._headers, params=params)
+
+    def _post(self, path: str, json_body: Any) -> Any:
+        url = f"{self.base_url}{path}"
+        headers = {**self._headers, "Content-Type": "application/json"}
+        return _request_with_retry("POST", url, headers, json_body=json_body)
+
+    def get_asset_addresses(
+        self,
+        policy_id: str,
+        asset_name_hex: str,
+    ) -> list[dict[str, Any]]:
+        """Return all addresses holding a specific asset (paginated).
+
+        Koios uses offset-based pagination with a default limit of 1000.
+        """
+        all_results: list[dict[str, Any]] = []
+        offset = 0
+        limit = 1000
+        while True:
+            data = self._get(
+                "/asset_addresses",
+                params={
+                    "_asset_policy": policy_id,
+                    "_asset_name": asset_name_hex,
+                    "offset": offset,
+                    "limit": limit,
+                },
+            )
+            if not data:
+                break
+            all_results.extend(data)
+            if len(data) < limit:
+                break
+            offset += limit
+        return all_results
+
+    def get_asset_info(
+        self,
+        policy_id: str,
+        asset_name_hex: str,
+    ) -> list[dict[str, Any]]:
+        """Return asset info (supply, metadata) from Koios."""
+        return self._post(
+            "/asset_info",
+            json_body={
+                "_asset_list": [[policy_id, asset_name_hex]],
+            },
+        )

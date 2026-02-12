@@ -307,6 +307,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--flux-asset-hex", type=str, default="464c5558")
     parser.add_argument("--check-only", action="store_true", default=False)
     parser.add_argument("--submit", action="store_true", default=False)
+    parser.add_argument("--preflight", action="store_true", default=False,
+                        help="Run evaluate_tx preflight check before submitting")
     parser.add_argument("--out-cbor", type=str, default=None)
     args = parser.parse_args(argv)
 
@@ -383,6 +385,19 @@ def main(argv: list[str] | None = None) -> None:
         bf, args.payment_skey, valid_claims,
         script_address, script_cbor, flux_policy, flux_asset,
     )
+
+    # Preflight evaluation
+    if args.preflight:
+        from pycardano import BlockFrostChainContext as _BFC
+        _ctx = _BFC(project_id=bf.project_id, base_url=bf.base_url)
+        try:
+            cbor_bytes = tx_cbor if isinstance(tx_cbor, bytes) else bytes.fromhex(tx_cbor)
+            eval_result = _ctx.evaluate_tx(cbor_bytes)
+            logger.info("Preflight evaluation OK: %s", eval_result)
+        except Exception as e:
+            logger.error("Preflight evaluation FAILED: %s", e)
+            logger.error("Aborting — fix the issue before submitting.")
+            sys.exit(1)
 
     if args.out_cbor:
         out_path = Path(args.out_cbor)

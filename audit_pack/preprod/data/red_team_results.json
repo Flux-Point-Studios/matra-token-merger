@@ -2,21 +2,37 @@
   {
     "test": "wrong_signer",
     "passed": true,
-    "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace(spend:0=Namespace(extraRedeemers=['spend:0']))))"
+    "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace()))"
   },
   {
     "test": "wrong_redeemer",
     "passed": true,
-    "rejection": "Namespace(type='jsonwsp/fault', version='1.0', servicename='ogmios', fault=Namespace(code='client', string='Invalid request: Deserialisation failure while decoding serialised transaction. CBOR failed with error: DeserialiseFailure 0 \"expected tag\".'), reflection=Namespace(id='91ae591f-c7f2-4092-834a"
+    "rejection": "Namespace(type='jsonwsp/fault', version='1.0', servicename='ogmios', fault=Namespace(code='client', string='Invalid request: Deserialisation failure while decoding serialised transaction. CBOR failed with error: DeserialiseFailure 0 \"expected tag\".'), reflection=Namespace(id='de328144-bdd0-4b20-81e3"
   },
   {
     "test": "datum_swap",
     "passed": true,
-    "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace(spend:0=Namespace(extraRedeemers=['spend:0']))))"
+    "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace()))"
   },
   {
     "test": "index_poisoning",
     "passed": true,
     "rejection": "Namespace(EvaluationFailure=Namespace(ScriptFailures=Namespace(spend:0=Namespace(extraRedeemers=['spend:0']))))"
+  },
+  {
+    "test": "franken_address",
+    "passed": true,
+    "rejection": "Minimum collateral amount 3823993 is greater than total provided collateral inputs {'coin': 0, 'multi_asset': {}}"
+  },
+  {
+    "test": "admin_reclaim_before_deadline",
+    "passed": true,
+    "rejection": "Failed to submit transaction. Error code: 400. Error message: {\"contents\":{\"contents\":{\"contents\":{\"era\":\"ShelleyBasedEraConway\",\"error\":[\"ConwayUtxowFailure (UtxoFailure (UtxosFailure (ValidationTagMismatch (IsValid True) (FailedUnexpectedly (PlutusFailure \\\"\\\\nThe PlutusV3 script failed:\\\\nBase64-"
+  },
+  {
+    "test": "admin_reclaim_after_deadline",
+    "passed": true,
+    "tx_hash": "387f70d73a27486b9fadb8b30de057d23026d2cbc4f727afedc9eebb3a8eaf94",
+    "note": "Admin successfully reclaimed after deadline"
   }
 ]

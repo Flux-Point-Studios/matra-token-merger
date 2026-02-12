@@ -57,6 +57,28 @@ logger = logging.getLogger(__name__)
 FLUX_ASSET_NAME_HEX = "464c5558"
 
 
+def extract_deadline_from_compiled(compiled_hex: str) -> int:
+    """Extract the baked-in deadline (POSIX ms) from the applied compiled code.
+
+    The deadline is the last CBOR integer parameter in the compiled code,
+    encoded as ``1b`` (8-byte unsigned int) near the end of the hex string.
+    """
+    # Find the last occurrence of "1b" followed by exactly 16 hex chars (8 bytes)
+    idx = compiled_hex.rfind("1b")
+    while idx >= 0:
+        candidate = compiled_hex[idx + 2 : idx + 18]
+        if len(candidate) == 16:
+            try:
+                value = int(candidate, 16)
+                # Sanity: POSIX ms should be in 2024-2030 range
+                if 1_700_000_000_000 < value < 2_000_000_000_000:
+                    return value
+            except ValueError:
+                pass
+        idx = compiled_hex.rfind("1b", 0, idx)
+    raise ValueError("Cannot extract deadline from compiled code")
+
+
 def encode_claim_datum(pkh_hex: str) -> bytes:
     from cbor2 import CBORTag
     pkh_bytes = bytes.fromhex(pkh_hex)
@@ -241,6 +263,113 @@ def test_index_poisoning(
         return {"test": "index_poisoning", "passed": True, "rejection": str(e)[:300]}
 
 
+def test_admin_reclaim_before_deadline(
+    context: BlockFrostChainContext,
+    admin,
+    victim,
+    victim_refs: list,
+    script_address: str,
+    script: PlutusV3Script,
+    flux_policy_id: ScriptHash,
+    deadline_posix_ms: int,
+) -> dict[str, Any]:
+    """Attack: admin tries to reclaim BEFORE deadline. Should FAIL.
+
+    The validator requires is_entirely_after(validity_range, deadline).
+    Setting invalid_before to a slot before the deadline should fail.
+
+    Uses explicit execution units to ensure the validator is actually
+    evaluated (not short-circuited by evaluate_tx failure).
+    """
+    try:
+        builder = TransactionBuilder(context)
+        redeemer = Redeemer(
+            RawPlutusData(cbor2.loads(b"\xd8\x79\x80")),
+            ExecutionUnits(500_000, 200_000_000),
+        )
+        for ref in victim_refs:
+            utxo = make_script_utxo(
+                ref[0], ref[1], ref[2], victim.pkh_hex,
+                script_address, flux_policy_id,
+            )
+            builder.add_script_input(utxo, script=script, redeemer=redeemer)
+
+        builder.required_signers = [admin.vkey.hash()]
+        builder.add_input_address(admin.address)
+
+        # Set validity_start to BEFORE deadline (genuinely before the on-chain deadline)
+        from tools.cardano_utils import posix_ms_to_slot
+        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
+        builder.validity_start = max(0, deadline_slot - 100)
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        context.submit_tx(signed_tx)
+        return {"test": "admin_reclaim_before_deadline", "passed": False,
+                "error": "Admin reclaim before deadline was accepted!"}
+    except Exception as e:
+        return {"test": "admin_reclaim_before_deadline", "passed": True,
+                "rejection": str(e)[:300]}
+
+
+def test_admin_reclaim_after_deadline(
+    context: BlockFrostChainContext,
+    admin,
+    claim_refs: list,
+    claimant_pkh: str,
+    script_address: str,
+    script: PlutusV3Script,
+    flux_policy_id: ScriptHash,
+    deadline_posix_ms: int,
+) -> dict[str, Any]:
+    """Test: admin reclaims AFTER deadline. Should SUCCEED.
+
+    This is a positive test — admin should be able to sweep after the
+    claim window closes.
+
+    Uses explicit execution units to bypass pycardano's evaluate_tx
+    (which can fail with extraRedeemers when using synthetic UTxOs).
+    The node validates execution budgets on submission.
+    """
+    try:
+        builder = TransactionBuilder(context)
+        # Provide explicit execution units so pycardano skips evaluate_tx.
+        # The claim validator is trivial (signature + time check), so these
+        # are generous but safe.  The node enforces actual usage on submit.
+        redeemer = Redeemer(
+            RawPlutusData(cbor2.loads(b"\xd8\x79\x80")),
+            ExecutionUnits(500_000, 200_000_000),
+        )
+        for ref in claim_refs:
+            utxo = make_script_utxo(
+                ref[0], ref[1], ref[2], claimant_pkh,
+                script_address, flux_policy_id,
+            )
+            builder.add_script_input(utxo, script=script, redeemer=redeemer)
+
+        builder.required_signers = [admin.vkey.hash()]
+        builder.add_input_address(admin.address)
+
+        # Set validity_start to AFTER deadline
+        from tools.cardano_utils import posix_ms_to_slot
+        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
+        builder.validity_start = deadline_slot + 1
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        context.submit_tx(signed_tx)
+        tx_hash = signed_tx.id.payload.hex()
+        return {"test": "admin_reclaim_after_deadline", "passed": True,
+                "tx_hash": tx_hash, "note": "Admin successfully reclaimed after deadline"}
+    except Exception as e:
+        return {"test": "admin_reclaim_after_deadline", "passed": False,
+                "error": str(e)[:300]}
+
+
 def test_franken_address_claim(
     context: BlockFrostChainContext,
     attacker,
@@ -332,19 +461,48 @@ def run_red_team(
     with open(state["claim_index_path"]) as f:
         index = json.load(f)
 
-    # Find wallets with unclaimed UTxOs
+    # Find wallets with unclaimed UTxOs that still exist on-chain.
+    # Previous runs may have consumed some UTxOs (e.g. admin reclaim tests),
+    # so we verify against the actual UTXO set at the script address.
     from scripts.preprod_harness import Wallet
     claimed_pkhs = {
         r["pkh"] for r in state.get("claim_results", [])
         if r.get("status") == "success"
     }
 
+    # Query on-chain UTxOs at script address to filter stale entries
+    live_utxo_set: set[tuple[str, int]] = set()
+    try:
+        from blockfrost import BlockFrostApi, ApiUrls
+        # BlockFrostApi does NOT auto-detect network from project_id prefix,
+        # unlike BlockFrostChainContext. Derive the base_url manually.
+        if blockfrost_project_id.startswith("preprod"):
+            bf_base = ApiUrls.preprod.value
+        elif blockfrost_project_id.startswith("preview"):
+            bf_base = ApiUrls.preview.value
+        else:
+            bf_base = ApiUrls.mainnet.value
+        bf_api = BlockFrostApi(project_id=blockfrost_project_id, base_url=bf_base)
+        on_chain_utxos = bf_api.address_utxos(script_address)
+        for u in on_chain_utxos:
+            live_utxo_set.add((u.tx_hash, u.tx_index))
+        logger.info("On-chain UTxOs at script address: %d", len(live_utxo_set))
+    except Exception as e:
+        logger.warning("Could not query script address UTxOs: %s — assuming all exist", e)
+
     available = []
     for w_info in state["test_wallets"]:
         pkh = w_info["pkh"]
         if pkh in index and pkh not in claimed_pkhs:
+            refs = index[pkh]
+            # If we have on-chain data, verify the UTxOs actually exist
+            if live_utxo_set:
+                refs = [r for r in refs if (r[0], r[1]) in live_utxo_set]
+                if not refs:
+                    logger.debug("Skipping %s — UTxOs consumed", w_info["name"])
+                    continue
             w = Wallet.load(w_info["name"], keys_dir)
-            available.append((w, index[pkh]))
+            available.append((w, refs))
 
     if len(available) < 2:
         logger.error("Need at least 2 unclaimed test wallets for red-team tests.")
@@ -391,6 +549,50 @@ def run_red_team(
     r = test_franken_address_claim(context, attacker, victim, victim_refs, script_address, script, flux_policy_id)
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+
+    # Test 6: Admin reclaim before deadline (should fail)
+    # Use the actual on-chain deadline baked into the compiled validator,
+    # NOT the state file's approximate value (which drifts on re-runs).
+    try:
+        deadline_ms = extract_deadline_from_compiled(compiled)
+        logger.info("On-chain deadline: %d ms (from blueprint)", deadline_ms)
+    except ValueError:
+        deadline_ms = state.get("claim_deadline_posix_ms", 0)
+        logger.warning("Could not extract deadline from blueprint, using state: %d ms", deadline_ms)
+    if deadline_ms > 0:
+        # Load admin wallet for reclaim tests
+        admin = Wallet.load("admin", keys_dir)
+
+        logger.info("-" * 40)
+        logger.info("TEST 6: Admin reclaim before deadline")
+        r = test_admin_reclaim_before_deadline(
+            context, admin, victim, victim_refs,
+            script_address, script, flux_policy_id, deadline_ms,
+        )
+        results.append(r)
+        logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+
+        # Test 7: Admin reclaim after deadline (should succeed)
+        # Only run if there are UTxOs left to reclaim
+        remaining_unclaimed = [
+            (w, refs) for w, refs in available
+            if w.pkh_hex != victim.pkh_hex and w.pkh_hex != attacker.pkh_hex
+        ]
+        if remaining_unclaimed:
+            reclaim_w, reclaim_refs = remaining_unclaimed[0]
+            logger.info("-" * 40)
+            logger.info("TEST 7: Admin reclaim after deadline")
+            rt_ctx2 = BlockFrostChainContext(project_id=blockfrost_project_id)
+            r = test_admin_reclaim_after_deadline(
+                rt_ctx2, admin, reclaim_refs, reclaim_w.pkh_hex,
+                script_address, script, flux_policy_id, deadline_ms,
+            )
+            results.append(r)
+            logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+        else:
+            logger.warning("No remaining UTxOs for admin reclaim after deadline test")
+    else:
+        logger.info("Skipping admin reclaim tests (no deadline in state)")
 
     # Summary
     logger.info("=" * 60)

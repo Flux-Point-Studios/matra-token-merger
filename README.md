@@ -62,7 +62,7 @@ A deterministic, auditable pipeline that consolidates two legacy Cardano native 
 
 ### On-chain components
 
-- **Claim Validator** (Aiken, Plutus V3) -- minimal signature-gated lockbox. Datum encodes a `VerificationKeyHash`; only that signer can spend the UTxO.
+- **Claim Validator** (Aiken, Plutus V3) -- parameterized signature-gated lockbox with admin reclaim. Datum encodes a `VerificationKeyHash`; only that signer can spend the UTxO. After a configurable deadline, the admin can sweep unclaimed UTxOs.
 - **FLUX Mint Policy** -- native script with admin signature + timelock to enforce one-time mint.
 
 ### Off-chain pipeline
@@ -107,7 +107,7 @@ Full end-to-end deployment on Cardano preprod testnet with synthetic data.
 | 6 | Deploy claim validator + build 20 claim UTxOs | Done |
 | 7 | Build claim index (20 keyhashes) | Done |
 | 8 | Happy-path claims (5/5 successful) | Done |
-| 9 | Red-team adversarial tests (6/6 pass) | Done |
+| 9 | Red-team adversarial tests (8/8 pass) | Done |
 
 **Preprod validator:** `addr_test1wplwxwujdq6t6lvc8j5agv7wurxpjx8dt094779t09whq4chqhwe6`
 Script hash: `7ee33b926834bd7d983ca9d433cee0cc1918ed5bcb5f78ab795d7057`
@@ -122,22 +122,27 @@ Script hash: `7ee33b926834bd7d983ca9d433cee0cc1918ed5bcb5f78ab795d7057`
 | Datum swap | Attacker substitutes own pkh in datum | PASS (rejected) |
 | Index poisoning | Fabricated UTxO reference | PASS (rejected) |
 | Franken address | Claim via addr(victim_pkh, attacker_stk) | PASS (rejected) |
+| Admin reclaim before deadline | Admin sweeps before deadline expires | PASS (rejected) |
+| Admin reclaim after deadline | Admin sweeps after deadline (expected success) | PASS (accepted) |
 
 ### Test suite
 
-129 unit/integration tests covering all tools, utilities, and E2E pipeline flow.
+~160 unit/integration tests covering all tools, utilities, and E2E pipeline flow.
 
 ```
-tests/test_api_clients.py        13 tests
-tests/test_build_claim_index.py   6 tests
-tests/test_build_claim_utxos.py  12 tests
-tests/test_cardano_utils.py      12 tests
-tests/test_claim_flux_indexed.py 13 tests
-tests/test_config.py             10 tests
-tests/test_e2e_pipeline.py       15 tests
+tests/test_api_clients.py          13 tests
+tests/test_build_claim_index.py     6 tests
+tests/test_build_claim_utxos.py    12 tests
+tests/test_cardano_utils.py        12 tests
+tests/test_claim_flux_indexed.py   13 tests
+tests/test_config.py               10 tests
+tests/test_e2e_pipeline.py         15 tests
 tests/test_flux_merge_valuation.py 11 tests
-tests/test_snapshot_allocate.py  18 tests  (incl. 4 franken address tests)
-tests/test_twap_snapshot_pools.py 19 tests
+tests/test_snapshot_allocate.py    18 tests  (incl. 4 franken address tests)
+tests/test_twap_snapshot_pools.py  19 tests
+tests/test_funding_calculator.py   10 tests  (NEW)
+tests/test_cross_check.py         11 tests  (NEW)
+tests/test_admin_reclaim.py       12 tests  (NEW)
 ```
 
 ---
@@ -271,26 +276,31 @@ Price manipulation resistance via:
 flux-merger/
   onchain/
     claim_validator/
-      validators/claim_validator.ak    # Aiken Plutus V3 validator
+      validators/claim_validator.ak    # Aiken Plutus V3 validator (parameterized)
       plutus.json                      # compiled blueprint
       aiken.toml
   tools/
     config.py                          # shared config + env loading
-    api_clients.py                     # Blockfrost + TapTools clients
-    cardano_utils.py                   # address parsing, datum encoding
+    api_clients.py                     # Blockfrost + TapTools + Koios clients
+    cardano_utils.py                   # address parsing, datum encoding, param application
     twap_snapshot_pools.py             # Phase 1: TWAP
     flux_merge_valuation_int.py        # Phase 2: valuation
     snapshot_allocate_flux.py          # Phase 3: snapshot + allocation
-    build_claim_utxos_flux.py          # Phase 6: claim vault builder
+    build_claim_utxos_flux.py          # Phase 6: claim vault builder (+ --preflight)
     build_flux_claim_index.py          # Phase 7: index builder
-    claim_flux_indexed.py              # Phase 8: claim client
+    claim_flux_indexed.py              # Phase 8: claim client (+ --preflight)
+    funding_calculator.py              # Funding estimate calculator
+    cross_check_holders.py             # Blockfrost vs Koios cross-check
+    admin_reclaim.py                   # Post-deadline admin sweep
   scripts/
     preprod_harness.py                 # 9-stage preprod rehearsal
-    red_team.py                        # adversarial test suite
-  tests/                               # 129 tests
+    red_team.py                        # adversarial test suite (7 tests)
+  tests/                               # ~160 tests
   audit_pack/
     2026-02-11/                        # mainnet artifacts (Phases 1-3)
     preprod/                           # preprod rehearsal state + data
+    token_registry/FLUX.json           # CIP-26 token registry template
+    MAINNET_RUNBOOK.md                 # Go/no-go checklist
   .env.example
   pyproject.toml
 ```
@@ -303,9 +313,10 @@ flux-merger/
 
 | File | Line | Description |
 |------|------|-------------|
-| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 15-18 | `ClaimDatum` type definition (`claimant_pkh: VerificationKeyHash`) |
-| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 21-33 | `claim_validator.spend` -- core validation logic |
-| [`onchain/claim_validator/plutus.json`](onchain/claim_validator/plutus.json) | -- | Compiled Plutus V3 blueprint (script hash: `7ee33b92...`) |
+| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 25-28 | `ClaimDatum` type definition (`claimant_pkh: VerificationKeyHash`) |
+| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 31-53 | `claim_validator.spend` -- parameterized validation (claimant claim + admin reclaim) |
+| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 62+ | On-chain tests (6 tests: claimant, admin before/at/after deadline, wrong key, third party) |
+| [`onchain/claim_validator/plutus.json`](onchain/claim_validator/plutus.json) | -- | Compiled Plutus V3 blueprint (hash changes after parameter application) |
 
 ### Shared infrastructure
 
@@ -392,28 +403,49 @@ flux-merger/
 
 | File | Line | Description |
 |------|------|-------------|
-| [`scripts/red_team.py`](scripts/red_team.py) | 105-134 | `test_wrong_signer` -- wrong key claims victim's UTxO |
-| [`scripts/red_team.py`](scripts/red_team.py) | 137-171 | `test_wrong_redeemer` -- garbage redeemer data |
-| [`scripts/red_team.py`](scripts/red_team.py) | 174-204 | `test_datum_swap` -- attacker substitutes own pkh in datum |
-| [`scripts/red_team.py`](scripts/red_team.py) | 207-236 | `test_index_poisoning` -- fabricated UTxO reference |
-| [`scripts/red_team.py`](scripts/red_team.py) | 244-285 | `test_franken_address_claim` -- franken address (shared pkh, different staking key) |
+| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_wrong_signer` -- wrong key claims victim's UTxO |
+| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_wrong_redeemer` -- garbage redeemer data |
+| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_datum_swap` -- attacker substitutes own pkh in datum |
+| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_index_poisoning` -- fabricated UTxO reference |
+| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_franken_address_claim` -- franken address (shared pkh, different staking key) |
+| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_admin_reclaim_before_deadline` -- admin sweep before deadline (rejected) |
+| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_admin_reclaim_after_deadline` -- admin sweep after deadline (accepted) |
+
+### Mainnet tooling
+
+| File | Description |
+|------|-------------|
+| [`tools/funding_calculator.py`](tools/funding_calculator.py) | Estimate total ADA required for claim vault deployment |
+| [`tools/cross_check_holders.py`](tools/cross_check_holders.py) | Blockfrost vs Koios holder cross-check |
+| [`tools/admin_reclaim.py`](tools/admin_reclaim.py) | Post-deadline admin sweep of unclaimed UTxOs |
+| [`audit_pack/token_registry/FLUX.json`](audit_pack/token_registry/FLUX.json) | CIP-26 token registry template |
+| [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md) | Go/no-go deployment checklist |
 
 ---
 
 ## Security model
 
-The claim validator is intentionally minimal (38 lines of Aiken). The only validation rule:
+The claim validator is a parameterized Plutus V3 lockbox with two spending paths:
 
 ```
-list.has(tx.extra_signatories, datum.claimant_pkh)
+claimant_claims = list.has(tx.extra_signatories, datum.claimant_pkh)
+admin_reclaims  = list.has(tx.extra_signatories, admin_pkh)
+                  && is_entirely_after(tx.validity_range, deadline)
+
+claimant_claims || admin_reclaims
 ```
 
-**Why this is sufficient:**
+**Claimant path (no time restriction):**
 - Each UTxO is keyed to exactly one payment key hash via inline datum
 - Inline datums are authoritative on Cardano -- attackers cannot substitute their own
 - The signer check prevents unauthorized spending
 - Double-claims are prevented by the UTXO model itself (spent UTxOs cease to exist)
-- No admin key, no backdoor, no governance -- pure lockbox
+
+**Admin reclaim path (post-deadline only):**
+- After the claim deadline, the admin can sweep unclaimed UTxOs
+- Requires both admin signature AND `invalid_before > deadline`
+- Before the deadline, the admin key has no special power over claim UTxOs
+- Deadline is baked into the script as a parameter (cannot be changed post-deployment)
 
 **Tested adversarial scenarios:**
 - Wrong signer (rejected by validator)
@@ -422,9 +454,14 @@ list.has(tx.extra_signatories, datum.claimant_pkh)
 - Index poisoning (rejected -- UTxO doesn't exist on chain)
 - Garbage redeemer (rejected at CBOR deserialization)
 - Franken address (rejected -- attacker constructs `addr(victim_pkh, attacker_stk)` but lacks the payment signing key; validator requires `extra_signatories` match)
+- Admin reclaim before deadline (rejected -- `is_entirely_after` check fails)
+- Admin reclaim after deadline (accepted -- this is the designed recovery mechanism)
 
 **Franken address defense:**
 The allocation pipeline groups holders by payment key hash, not by full address. Two addresses sharing the same payment credential (e.g., a base address and a franken address with a different staking part) merge into a single claim UTxO keyed to that payment key hash. Only the holder of the corresponding payment signing key can claim.
+
+**Mainnet readiness:**
+See [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md) for the full go/no-go checklist.
 
 ---
 

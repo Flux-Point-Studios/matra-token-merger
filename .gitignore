@@ -44,3 +44,6 @@ nul
 .pytest_cache/
 .coverage
 htmlcov/
+aiken_err.txt
+aiken_out.txt
+.env.example

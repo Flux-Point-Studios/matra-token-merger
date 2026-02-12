@@ -262,21 +262,21 @@
   },
   "stage_4_complete": true,
   "flux_test": {
-    "policy_id": "de18b15290b7c417ee58f56e2a10827a981715f5d268cf4c20e8f6a9",
+    "policy_id": "b1f5e3a08604ef995c07404472eaab4aa8f616502830e2f9494c499b",
     "asset_name_hex": "464c5558",
     "supply": 1000000000000000,
-    "timelock_slot": 115160833,
-    "mint_tx": "d56e6f183d150d5bc59ab795628d118b715b0f55bed712032cbce007bc619362"
+    "timelock_slot": 115175590,
+    "mint_tx": "c18b0d9ed189a5a241fc2d6ce5be0fac8589d4f2f459c9d76184c6065d9d1631"
   },
   "stage_5_complete": true,
   "claim_validator": {
-    "script_hash": "7ee33b926834bd7d983ca9d433cee0cc1918ed5bcb5f78ab795d7057",
-    "script_address": "addr_test1wplwxwujdq6t6lvc8j5agv7wurxpjx8dt094779t09whq4chqhwe6"
+    "script_hash": "8896ed8c86956c8c6f8547249009edc14ff02f949e2f24bb9fb601eb",
+    "script_address": "addr_test1wzyfdmvvs62kerr0s4rjfyqfahq5lup0jj0z7f9mn7mqr6c03dhut"
   },
   "claim_batches": [
     {
       "batch_index": 0,
-      "tx_hash": "05745b9c4172ff537b9d8d0dfda27a8bc02ded3768609ade222db75f2829849d",
+      "tx_hash": "64989f17a6b824f83c178189163aea2cf104ac0c4f2c49e1d9fa531c24266566",
       "num_outputs": 20,
       "claimants": [
         {
@@ -370,31 +370,31 @@
     {
       "wallet": "test_000",
       "pkh": "77ce0552d75f7c17a77c184ac37779321cc4e94cd59aa53a53fc34c9",
-      "tx_hash": "3b76ccc688728bc85e613724ce720b4aa5e981e8b767ca7ffe23bcd747e51e5c",
+      "tx_hash": "0c5e519bbffbc1efa33416470ff92b7999ba78df8ea3c6cebcc06524693b529a",
       "status": "success"
     },
     {
       "wallet": "test_001",
       "pkh": "915426253ddd8eb1c9c0a237d6f366843bda1b5794f9881c9e1224fb",
-      "tx_hash": "7b2f5a52b4f4d82e8e17d4bf37177335f50f7420616bba4da0928581c75f2e96",
+      "tx_hash": "083d10b34c32d28a451817b57a11bce6903a34e2a4dcca0cab64cf37e82f58bf",
       "status": "success"
     },
     {
       "wallet": "test_002",
       "pkh": "eadd98f389140ba742688662491371f42e08a63a265815886319ca44",
-      "tx_hash": "723f161f82cf6136fb684264b9f650c403e5c444b6ff8ee55fe2761bf9134baa",
+      "tx_hash": "b5eebc76012d4185d258a0e9efc9a129e18cd6c5bbfaf9f0b47f4ddcd23ffb01",
       "status": "success"
     },
     {
       "wallet": "test_003",
       "pkh": "fc1d01373817b486d97935421a5b524748190b19b8f9a359efdf9b94",
-      "tx_hash": "78c23917b99140fdda95318c2d00a6dfd14b4476e7d05fabb6c22d04743acc56",
+      "tx_hash": "b8dbadb5a677c0449dda63ae82b1d1853835486aa8d69f1c48086141bcc882b9",
       "status": "success"
     },
     {
       "wallet": "test_004",
       "pkh": "0047029e84b0799d1bc2d8d15cf02ea7e1d9d2bfe28da88069a24b61",
-      "tx_hash": "e50c469f1db8981e4715ea460f6e8af29bbfde4550c7d5f49b4518145f6357bd",
+      "tx_hash": "0c290c0107c447a7c5d2b8cc39e64cbd4caf10e53e66950f308f2db5b21b7769",
       "status": "success"
     }
   ],
@@ -409,5 +409,6 @@
       "passed": true
     }
   ],
-  "stage_9_complete": true
+  "stage_9_complete": true,
+  "claim_deadline_posix_ms": 1770851449450
 }

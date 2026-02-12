@@ -187,12 +187,40 @@ def build_batch_tx_cbor(
         "tx_cbor_hex": tx_cbor.hex() if isinstance(tx_cbor, bytes) else tx_cbor,
         "num_outputs": len(output_details),
         "outputs": output_details,
+        "signed_tx": signed_tx,
     }
 
 
 # ---------------------------------------------------------------------------
 # Full pipeline
 # ---------------------------------------------------------------------------
+
+
+def preflight_evaluate_tx(
+    bf: BlockfrostClient,
+    signed_tx,
+    batch_label: str = "",
+) -> dict[str, Any]:
+    """Run evaluate_tx (Blockfrost /utils/txs/evaluate) as preflight check.
+
+    Returns evaluation result dict. Logs warnings on failure.
+    """
+    from pycardano import BlockFrostChainContext
+
+    context = BlockFrostChainContext(
+        project_id=bf.project_id,
+        base_url=bf.base_url,
+    )
+
+    try:
+        tx_cbor = signed_tx.to_cbor()
+        cbor_bytes = tx_cbor if isinstance(tx_cbor, bytes) else bytes.fromhex(tx_cbor)
+        result = context.evaluate_tx(cbor_bytes)
+        logger.info("Preflight %s: evaluation OK — %s", batch_label, result)
+        return {"status": "ok", "result": str(result)}
+    except Exception as e:
+        logger.warning("Preflight %s: evaluation FAILED — %s", batch_label, e)
+        return {"status": "failed", "error": str(e)[:500]}
 
 
 def build_claim_vault(
@@ -206,6 +234,7 @@ def build_claim_vault(
     batch_size: int = 40,
     out_dir: Path | None = None,
     submit: bool = False,
+    preflight: bool = False,
 ) -> dict[str, Any]:
     """Build all claim vault transactions and optionally submit them."""
     allocs = load_allocations(allocations_csv)
@@ -231,6 +260,18 @@ def build_claim_vault(
             bf, batch, funding_address, funding_skey_path,
             script_address, flux_policy_hex, flux_asset_hex,
         )
+
+        # Preflight evaluation
+        if preflight and result.get("signed_tx"):
+            eval_result = preflight_evaluate_tx(
+                bf, result["signed_tx"], f"batch_{i}",
+            )
+            if eval_result["status"] == "failed":
+                logger.error(
+                    "Preflight FAILED for batch %d — aborting. Error: %s",
+                    i, eval_result["error"],
+                )
+                raise RuntimeError(f"Preflight failed for batch {i}: {eval_result['error']}")
 
         # Save CBOR
         if out_dir:
@@ -309,6 +350,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--out-dir", type=str, required=True)
     parser.add_argument("--submit", action="store_true", default=False)
+    parser.add_argument("--preflight", action="store_true", default=False,
+                        help="Run evaluate_tx preflight check before submitting")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -325,6 +368,7 @@ def main(argv: list[str] | None = None) -> None:
         batch_size=args.batch_size,
         out_dir=Path(args.out_dir),
         submit=args.submit,
+        preflight=args.preflight,
     )
 
 

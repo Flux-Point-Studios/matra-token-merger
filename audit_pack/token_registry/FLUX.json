@@ -1,0 +1,23 @@
+{
+  "subject": "<policy_id>464c5558",
+  "name": {
+    "value": "FLUX",
+    "sequenceNumber": 0
+  },
+  "description": {
+    "value": "Merged governance token (AGENT + SHARDS)",
+    "sequenceNumber": 0
+  },
+  "ticker": {
+    "value": "FLUX",
+    "sequenceNumber": 0
+  },
+  "decimals": {
+    "value": 6,
+    "sequenceNumber": 0
+  },
+  "url": {
+    "value": "https://fluxpoint.studio",
+    "sequenceNumber": 0
+  }
+}

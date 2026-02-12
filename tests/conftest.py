@@ -25,10 +25,14 @@ SHARDS_UNIT = (
 
 FLUX_MAX_SUPPLY_BASE = 1_000_000_000_000_000  # 1e15
 
-# A valid 28-byte payment key hash (64 hex chars)
+# A valid 28-byte payment key hash (64 hex chars → 56 hex chars)
 SAMPLE_PKH_1 = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
 SAMPLE_PKH_2 = "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5"
 SAMPLE_PKH_3 = "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6"
+
+# Admin reclaim fixtures
+SAMPLE_ADMIN_PKH = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+SAMPLE_DEADLINE_MS = 1_750_000_000_000  # POSIX ms — mid-2025
 
 SAMPLE_SCRIPT_ADDRESS = (
     "addr1w999999999999999999999999999999999999999999999999999999"

@@ -1,0 +1,119 @@
+{
+  "report_type": "cross_check_holders",
+  "all_pass": false,
+  "tokens": [
+    {
+      "token": "AGENT",
+      "blockfrost_holder_count": 2403,
+      "koios_holder_count": 2403,
+      "holder_count_match": true,
+      "blockfrost_total_supply": 1000000000,
+      "koios_total_supply": 1000000000,
+      "supply_match": true,
+      "blockfrost_only_addresses": 0,
+      "koios_only_addresses": 0,
+      "balance_mismatches": 0,
+      "discrepancies": [],
+      "all_match": true
+    },
+    {
+      "token": "SHARDS",
+      "blockfrost_holder_count": 4841,
+      "koios_holder_count": 4834,
+      "holder_count_match": false,
+      "blockfrost_total_supply": 3088534450001,
+      "koios_total_supply": 3098025294104,
+      "supply_match": false,
+      "blockfrost_only_addresses": 7,
+      "koios_only_addresses": 0,
+      "balance_mismatches": 14,
+      "discrepancies": [
+        {
+          "address": "addr1q8uzyg23tgfg6yy58wtvqgs43saxahl4p24kv9fzf0q85usd47e9cf3vx6ej9hmnn5aephgt2zhr4vcgjdjq7xw2qhps9h4vyg",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 0,
+          "diff": 1000000
+        },
+        {
+          "address": "DdzFFzCqrht2j5ccgA9G21GJHwwsQg1uo3Nt6HYsd4BLmGisYFyvBzya67hs6ESTza3VrY69sf6qhToaWzJhWXAy5yzSkH8ZnFDNDxeW",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 2000000,
+          "diff": -1000000
+        },
+        {
+          "address": "DdzFFzCqrht6pU9YEDQCuCeYYmCXBAHBT4Zctg3FeivDNRJokY9MQkv3t9dfd23QiuQgtE1rx4WiDSzPUFPFv3K4MtnYoot1nh7reZFC",
+          "blockfrost_qty": 29000000,
+          "koios_qty": 58000000,
+          "diff": -29000000
+        },
+        {
+          "address": "Ae2tdPwUPEZ24CQeLvo7dPGwHqx2hnqTnibbKuiRy8SGR9cmxJ9CJQ5jqpo",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 2000000,
+          "diff": -1000000
+        },
+        {
+          "address": "Ae2tdPwUPEYwSzuikszUhfpiE3L2qgFcPM28V4dAV8uB61az28uNqwy4Y5a",
+          "blockfrost_qty": 3000000,
+          "koios_qty": 6000000,
+          "diff": -3000000
+        },
+        {
+          "address": "addr1q8uzwtpzmvee9ymu2sr8kqth2w4fe64h828e703fpdm5twhkadz6cjxvkf7art0crj9n425s92d8aptw4xk3kasdduustr7sjt",
+          "blockfrost_qty": 10000000,
+          "koios_qty": 0,
+          "diff": 10000000
+        },
+        {
+          "address": "Ae2tdPwUPEZMdpR7yQ6Mck4Ags4nCXJKKVmdHJcYbm9cmRGKaQ49UsKqyH6",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 2000000,
+          "diff": -1000000
+        },
+        {
+          "address": "addr1q8v2e39hcp9p4rghpecp4yl0h5q9zf6ve0cetpfhlx9vakgh70t8f4jswlp8yfhdp5p8chf2esdd2q6rqz3ashm7efqsxm7mhq",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 0,
+          "diff": 1000000
+        },
+        {
+          "address": "addr1q8v2573dnan6gvh4lh9g4d8g08khmws8x4pk8c7zamsd3dts4hhrpujfheh2uwlp6a5tg3y5dkzckv4m6jyesrwr5cwsqflrae",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 0,
+          "diff": 1000000
+        },
+        {
+          "address": "addr1q8v3k83gxxthpgdwelh4dkl75xl3jjv0cpvhqe7vtymfcdg4tknwuh4c7tsg2w684g7gy5etjqdv2k3mduhsgsrsmxzqrdzrxv",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 0,
+          "diff": 1000000
+        },
+        {
+          "address": "DdzFFzCqrhswhbRX85PWxymQF7ERKZCd4QtK6DqAevLVfL6kPX7Z6qPiW4C6UZ3YCh1PA38werTRnVUG3eBnbcjUtcmaUgHMNsjZ4a5k",
+          "blockfrost_qty": 9692699444,
+          "koios_qty": 19385398888,
+          "diff": -9692699444
+        },
+        {
+          "address": "addr1q8v38dwcrvmcmdvxwectjfuu4jsqt4mjfhgsksvv0le2rt6m2uh59qe0c86d9yu6p04vtuc76wx6n36pl869rux2eacs6vjtm7",
+          "blockfrost_qty": 123855341,
+          "koios_qty": 0,
+          "diff": 123855341
+        },
+        {
+          "address": "addr1q8v3eqmm0vulavcmfgzgf9s0ele6zfey65qg4w6wu40c56675tqchdj6k8xuqcvgr7mtna7sdy2g4ampedhkplza9susqgpadz",
+          "blockfrost_qty": 100000000,
+          "koios_qty": 0,
+          "diff": 100000000
+        },
+        {
+          "address": "DdzFFzCqrhsoMUAVVf9KJ7Yoz9my1UFM3DmBmknXvuQYJHmfxdHGPpbCLEhPdzG4fhQocCsQscGxunPNrx7P9NqEJzoLfDyq2HwjLKJb",
+          "blockfrost_qty": 1000000,
+          "koios_qty": 2000000,
+          "diff": -1000000
+        }
+      ],
+      "all_match": false
+    }
+  ]
+}

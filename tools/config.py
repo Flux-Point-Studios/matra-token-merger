@@ -75,6 +75,13 @@ FLUX_MAX_SUPPLY_DISPLAY: int = 1_000_000_000  # 1 billion
 FLUX_MAX_SUPPLY_BASE: int = FLUX_MAX_SUPPLY_DISPLAY * (10 ** FLUX_DECIMALS)  # 1e15
 
 # ---------------------------------------------------------------------------
+# Admin / claim-validator parameters
+# ---------------------------------------------------------------------------
+
+ADMIN_PKH: str = os.environ.get("ADMIN_PKH", "")
+CLAIM_DEADLINE_POSIX_MS: int = int(os.environ.get("CLAIM_DEADLINE_POSIX_MS", "0"))
+
+# ---------------------------------------------------------------------------
 # API base URLs (network-aware)
 # ---------------------------------------------------------------------------
 
@@ -85,6 +92,14 @@ _BLOCKFROST_BASE_URLS = {
 }
 BLOCKFROST_BASE_URL: str = _BLOCKFROST_BASE_URLS[NETWORK]
 TAPTOOLS_BASE_URL: str = "https://openapi.taptools.io/api/v1"
+
+_KOIOS_BASE_URLS = {
+    "mainnet": "https://api.koios.rest/api/v1",
+    "preprod": "https://preprod.koios.rest/api/v1",
+    "preview": "https://preview.koios.rest/api/v1",
+}
+KOIOS_BASE_URL: str = _KOIOS_BASE_URLS[NETWORK]
+KOIOS_API_KEY: str = os.environ.get("KOIOS_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Default pipeline parameters

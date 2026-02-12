@@ -517,6 +517,9 @@ def mint_flux_test(
 def load_claim_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHash, str]:
     """Load compiled claim validator from Aiken blueprint.
 
+    For parameterized validators (with parameters already applied via
+    `aiken blueprint apply`), reads the applied compiledCode and hash.
+
     Returns (script, script_hash, script_address_bech32).
     """
     with open(blueprint_path) as f:
@@ -524,19 +527,29 @@ def load_claim_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHa
 
     validators = blueprint.get("validators", [])
     compiled_code = None
+    validator_hash = None
     for v in validators:
         if "spend" in v.get("title", "").lower():
             compiled_code = v.get("compiledCode")
+            validator_hash = v.get("hash")
             break
 
     if compiled_code is None and validators:
         compiled_code = validators[0].get("compiledCode")
+        validator_hash = validators[0].get("hash")
 
     if compiled_code is None:
         raise ValueError(f"No compiled validator in {blueprint_path}")
 
     script = PlutusV3Script(bytes.fromhex(compiled_code))
-    script_hash = ScriptHash(bytes.fromhex(blueprint["validators"][0]["hash"]))
+
+    if validator_hash:
+        script_hash = ScriptHash(bytes.fromhex(validator_hash))
+    else:
+        # Compute hash from script bytes
+        import hashlib
+        h = hashlib.blake2b(b"\x03" + script.to_primitive(), digest_size=28)
+        script_hash = ScriptHash(h.digest())
 
     # Derive testnet script address
     script_address = Address(payment_part=script_hash, network=Network.TESTNET)
@@ -1109,10 +1122,28 @@ def run_preprod_rehearsal(
         logger.info("Waiting for claim UTxO confirmations...")
         time.sleep(30)
 
+        # Store the actual on-chain deadline baked into the applied validator.
+        # Extract from the compiled code rather than computing a new value,
+        # so the state file matches what the validator actually enforces.
+        from scripts.red_team import extract_deadline_from_compiled
+        compiled_code = None
+        with open(blueprint_path) as _bp_f:
+            _bp = json.load(_bp_f)
+        for _v in _bp.get("validators", []):
+            if "spend" in _v.get("title", "").lower():
+                compiled_code = _v.get("compiledCode")
+                break
+        if compiled_code:
+            test_deadline_ms = extract_deadline_from_compiled(compiled_code)
+        else:
+            import time as _time
+            test_deadline_ms = int((_time.time() - 300) * 1000)
+
         state["claim_validator"] = {
             "script_hash": script_hash.payload.hex(),
             "script_address": script_address,
         }
+        state["claim_deadline_posix_ms"] = test_deadline_ms
         state["claim_batches"] = batches
         state["stage_6_complete"] = True
         save_state()
