@@ -7,7 +7,7 @@
   {
     "test": "wrong_redeemer",
     "passed": true,
-    "rejection": "Namespace(type='jsonwsp/fault', version='1.0', servicename='ogmios', fault=Namespace(code='client', string='Invalid request: Deserialisation failure while decoding serialised transaction. CBOR failed with error: DeserialiseFailure 0 \"expected tag\".'), reflection=Namespace(id='de328144-bdd0-4b20-81e3"
+    "rejection": "Namespace(type='jsonwsp/fault', version='1.0', servicename='ogmios', fault=Namespace(code='client', string='Invalid request: Deserialisation failure while decoding serialised transaction. CBOR failed with error: DeserialiseFailure 0 \"expected tag\".'), reflection=Namespace(id='1fed87c0-f872-4889-934b"
   },
   {
     "test": "datum_swap",
@@ -32,7 +32,7 @@
   {
     "test": "admin_reclaim_after_deadline",
     "passed": true,
-    "tx_hash": "387f70d73a27486b9fadb8b30de057d23026d2cbc4f727afedc9eebb3a8eaf94",
+    "tx_hash": "5a23f3143288ee90d1de384b8e8bd7ecfb318f84651b6fb7064daf80090fdc88",
     "note": "Admin successfully reclaimed after deadline"
   }
 ]

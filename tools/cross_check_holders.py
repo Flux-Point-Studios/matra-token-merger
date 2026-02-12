@@ -18,8 +18,8 @@ import logging
 import sys
 from typing import Any
 
-from tools.api_clients import BlockfrostClient, KoiosClient
-from tools.config import AGENT, SHARDS, TokenInfo
+from tools.api_clients import BlockfrostClient, KoiosClient, TapToolsClient
+from tools.config import AGENT, NFT_COLLECTIONS, NftCollectionInfo, SHARDS, TokenInfo
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +96,102 @@ def compare_holders(
     }
 
 
+def fetch_taptools_nft_holders(
+    tt: TapToolsClient,
+    collection: NftCollectionInfo,
+    max_pages: int = 10,
+) -> dict[str, int]:
+    """Fetch top NFT holders from TapTools (paginated, best-effort)."""
+    all_holders: dict[str, int] = {}
+    for page in range(1, max_pages + 1):
+        data = tt.get_nft_collection_holders_top(
+            collection.policy_id, page=page, per_page=100,
+        )
+        if not data:
+            break
+        for entry in data:
+            addr = entry.get("address") or entry.get("ownerAddress", "")
+            qty = int(entry.get("quantity", entry.get("amount", 0)))
+            if addr and qty > 0:
+                all_holders[addr] = all_holders.get(addr, 0) + qty
+        if len(data) < 100:
+            break
+    return all_holders
+
+
+def fetch_blockfrost_nft_holders(
+    bf: BlockfrostClient,
+    collection: NftCollectionInfo,
+) -> dict[str, int]:
+    """Fetch all NFT holders via Blockfrost policy asset enumeration."""
+    assets = bf.get_policy_assets(collection.policy_id)
+    holder_counts: dict[str, int] = {}
+    for asset_entry in assets:
+        unit = asset_entry.get("asset", "")
+        if not unit:
+            continue
+        addresses = bf.get_asset_addresses(unit)
+        for addr_entry in addresses:
+            addr = addr_entry["address"]
+            qty = int(addr_entry.get("quantity", 1))
+            holder_counts[addr] = holder_counts.get(addr, 0) + qty
+    return holder_counts
+
+
+def compare_nft_holders(
+    bf_holders: dict[str, int],
+    tt_holders: dict[str, int],
+    collection_name: str,
+) -> dict[str, Any]:
+    """Compare Blockfrost vs TapTools NFT holders (best-effort)."""
+    # TapTools may only return top holders, so we only compare the overlap
+    common_addrs = set(bf_holders.keys()) & set(tt_holders.keys())
+    tt_only = set(tt_holders.keys()) - set(bf_holders.keys())
+
+    balance_mismatches: list[dict[str, Any]] = []
+    for addr in common_addrs:
+        bf_qty = bf_holders.get(addr, 0)
+        tt_qty = tt_holders.get(addr, 0)
+        if bf_qty != tt_qty:
+            balance_mismatches.append({
+                "address": addr,
+                "blockfrost_qty": bf_qty,
+                "taptools_qty": tt_qty,
+                "diff": bf_qty - tt_qty,
+            })
+
+    bf_total = sum(bf_holders.values())
+    tt_total = sum(tt_holders.values())
+
+    return {
+        "token": collection_name,
+        "mode": "best_effort",
+        "is_nft": True,
+        "blockfrost_holder_count": len(bf_holders),
+        "taptools_holder_count": len(tt_holders),
+        "common_addresses": len(common_addrs),
+        "taptools_only_addresses": len(tt_only),
+        "blockfrost_total_supply": bf_total,
+        "taptools_total_supply": tt_total,
+        "supply_match": bf_total == tt_total,
+        "balance_mismatches": len(balance_mismatches),
+        "discrepancies": balance_mismatches[:50],
+        "all_match": len(balance_mismatches) == 0 and bf_total == tt_total,
+    }
+
+
 def run_cross_check(
     bf: BlockfrostClient,
     koios: KoiosClient,
+    taptools: TapToolsClient | None = None,
     tokens: list[TokenInfo] | None = None,
+    nft_collections: list[NftCollectionInfo] | None = None,
 ) -> dict[str, Any]:
     """Run the full cross-check and return a report dict."""
     if tokens is None:
         tokens = [AGENT, SHARDS]
+    if nft_collections is None:
+        nft_collections = NFT_COLLECTIONS if taptools is not None else []
 
     results: list[dict[str, Any]] = []
 
@@ -133,6 +221,39 @@ def run_cross_check(
                 comparison["balance_mismatches"],
             )
 
+    # -- NFT collection cross-checks -------------------------------------
+    for coll in nft_collections:
+        if taptools is None:
+            logger.warning("Skipping NFT cross-check for %s (no TapTools client)", coll.name)
+            continue
+
+        logger.info("Cross-checking NFT collection %s...", coll.name)
+
+        bf_holders = fetch_blockfrost_nft_holders(bf, coll)
+        logger.info("  Blockfrost: %d holders (%d total NFTs)",
+                     len(bf_holders), sum(bf_holders.values()))
+
+        tt_holders = fetch_taptools_nft_holders(taptools, coll)
+        logger.info("  TapTools: %d holders (%d total NFTs)",
+                     len(tt_holders), sum(tt_holders.values()))
+
+        comparison = compare_nft_holders(bf_holders, tt_holders, coll.name)
+        results.append(comparison)
+
+        if comparison["all_match"]:
+            logger.info("  %s: ALL MATCH", coll.name)
+        else:
+            logger.warning(
+                "  %s: DISCREPANCIES (best-effort) — holders: BF=%d vs TT=%d, "
+                "supply: BF=%d vs TT=%d, mismatches=%d",
+                coll.name,
+                comparison["blockfrost_holder_count"],
+                comparison["taptools_holder_count"],
+                comparison["blockfrost_total_supply"],
+                comparison["taptools_total_supply"],
+                comparison["balance_mismatches"],
+            )
+
     all_pass = all(r["all_match"] for r in results)
 
     return {
@@ -154,8 +275,9 @@ def main(argv: list[str] | None = None) -> None:
 
     bf = BlockfrostClient()
     koios = KoiosClient()
+    taptools = TapToolsClient()
 
-    report = run_cross_check(bf, koios)
+    report = run_cross_check(bf, koios, taptools=taptools)
 
     print(json.dumps(report, indent=2))
 

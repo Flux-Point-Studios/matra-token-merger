@@ -41,6 +41,8 @@ SAMPLE_SCRIPT_ADDRESS = (
 SAMPLE_FLUX_POLICY = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef01"
 SAMPLE_FLUX_ASSET = "464c5558"
 
+SAMPLE_NFT_POLICY = "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a"
+
 
 # ---------------------------------------------------------------------------
 # Mock API response factories
@@ -313,3 +315,83 @@ def tmp_audit_dir(tmp_path: Path) -> Path:
     d = tmp_path / "audit_pack" / "test"
     d.mkdir(parents=True)
     return d
+
+
+@pytest.fixture
+def mock_nft_candles() -> list[dict[str, Any]]:
+    """Sample NFT floor-price OHLCV candles."""
+    candles = []
+    base_price = 50.0  # 50 ADA floor
+    for i in range(7):
+        p = base_price + (i % 3) * 5.0
+        candles.append({
+            "open": p - 2.0,
+            "high": p + 5.0,
+            "low": p - 5.0,
+            "close": p,
+            "volume": 100 + i * 10,
+            "time": 1700000000 + i * 86400,
+        })
+    return candles
+
+
+@pytest.fixture
+def mock_policy_assets() -> list[dict[str, Any]]:
+    """Sample Blockfrost policy assets response (3 NFTs under a policy)."""
+    return [
+        {"asset": SAMPLE_NFT_POLICY + "4e465431", "quantity": "1"},
+        {"asset": SAMPLE_NFT_POLICY + "4e465432", "quantity": "1"},
+        {"asset": SAMPLE_NFT_POLICY + "4e465433", "quantity": "1"},
+    ]
+
+
+@pytest.fixture
+def mock_twap_report_with_nfts() -> dict[str, Any]:
+    """A TWAP report with both fungible tokens and NFT collections."""
+    return {
+        "report_type": "twap_snapshot_pools",
+        "generated_at": "2024-01-01T00:00:00+00:00",
+        "ada_usd_price": 0.50,
+        "tokens": {
+            "AGENT": {
+                "unit": AGENT_UNIT,
+                "decimals": 0,
+                "combined_twap": {"ada": 2.0, "usd": 1.0},
+            },
+            "SHARDS": {
+                "unit": SHARDS_UNIT,
+                "decimals": 6,
+                "combined_twap": {"ada": 0.001, "usd": 0.0005},
+            },
+            "FLUX_PASS": {
+                "policy_id": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+                "is_nft": True,
+                "decimals": 0,
+                "combined_twap": {"ada": 100.0, "usd": 50.0},
+            },
+            "SE_BRAWLERS": {
+                "policy_id": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc",
+                "is_nft": True,
+                "decimals": 0,
+                "combined_twap": {"ada": 30.0, "usd": 15.0},
+            },
+            "BRAWL_PASS_ETD": {
+                "policy_id": "d3a197c4814054623432c882c60e6a81e8f3b94158033432529a02d2",
+                "is_nft": True,
+                "decimals": 0,
+                "combined_twap": {"ada": 20.0, "usd": 10.0},
+            },
+            "T1_ADAM_PASS": {
+                "policy_id": "b46891456b77dbc77c16090fd92a37f087f9a68e953c56b00a20332f",
+                "is_nft": True,
+                "decimals": 0,
+                "combined_twap": {"ada": 10.0, "usd": 5.0},
+            },
+            "T2_ADAM_PASS": {
+                "policy_id": "06a64965c0ac1144a72a6ddfcb23aa9d4d7742a5b20ddd5cfb1164b9",
+                "is_nft": True,
+                "decimals": 0,
+                "combined_twap": {"ada": 5.0, "usd": 2.5},
+            },
+        },
+    }

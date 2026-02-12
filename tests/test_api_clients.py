@@ -139,3 +139,77 @@ class TestTapToolsClient:
         client = TapToolsClient(api_key="secret_key")
         client.get_token_pools("u")
         assert responses.calls[0].request.headers["x-api-key"] == "secret_key"
+
+
+class TestBlockfrostPolicyAssets:
+    @responses.activate
+    def test_get_policy_assets_single_page(self):
+        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/policy/abc123"
+        responses.add(responses.GET, base, json=[
+            {"asset": "abc123nft1", "quantity": "1"},
+            {"asset": "abc123nft2", "quantity": "1"},
+        ])
+        client = BlockfrostClient(project_id="test")
+        result = client.get_policy_assets("abc123")
+        assert len(result) == 2
+
+    @responses.activate
+    def test_get_policy_assets_paginated(self):
+        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/policy/abc123"
+        responses.add(responses.GET, base, json=[
+            {"asset": f"abc123nft{i}", "quantity": "1"} for i in range(100)
+        ])
+        responses.add(responses.GET, base, json=[
+            {"asset": "abc123nft100", "quantity": "1"},
+        ])
+        client = BlockfrostClient(project_id="test")
+        result = client.get_policy_assets("abc123")
+        assert len(result) == 101
+
+    @responses.activate
+    def test_get_policy_assets_empty(self):
+        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/policy/abc123"
+        responses.add(responses.GET, base, json=[])
+        client = BlockfrostClient(project_id="test")
+        result = client.get_policy_assets("abc123")
+        assert result == []
+
+
+class TestTapToolsNft:
+    @responses.activate
+    def test_get_nft_collection_ohlcv(self):
+        responses.add(
+            responses.GET,
+            "https://openapi.taptools.io/api/v1/nft/collection/ohlcv",
+            json=[{"close": 50.0, "volume": 100}],
+        )
+        client = TapToolsClient(api_key="test")
+        result = client.get_nft_collection_ohlcv("policy123", "1d", 7)
+        assert len(result) == 1
+        assert result[0]["close"] == 50.0
+
+    @responses.activate
+    def test_get_nft_collection_stats(self):
+        responses.add(
+            responses.GET,
+            "https://openapi.taptools.io/api/v1/nft/collection/stats",
+            json={"floor": 45.0, "supply": 1000, "owners": 500},
+        )
+        client = TapToolsClient(api_key="test")
+        result = client.get_nft_collection_stats("policy123")
+        assert result["floor"] == 45.0
+        assert result["supply"] == 1000
+
+    @responses.activate
+    def test_get_nft_collection_holders_top(self):
+        responses.add(
+            responses.GET,
+            "https://openapi.taptools.io/api/v1/nft/collection/holders/top",
+            json=[
+                {"address": "addr1_whale", "quantity": 50},
+                {"address": "addr1_holder", "quantity": 10},
+            ],
+        )
+        client = TapToolsClient(api_key="test")
+        result = client.get_nft_collection_holders_top("policy123")
+        assert len(result) == 2

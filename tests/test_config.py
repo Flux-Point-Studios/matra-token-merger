@@ -53,3 +53,38 @@ class TestFluxConstants:
 
     def test_decimals(self):
         assert FLUX_DECIMALS == 6
+
+
+class TestNftCollectionInfo:
+    def test_flux_pass_policy_id(self):
+        from tools.config import FLUX_PASS
+        assert len(FLUX_PASS.policy_id) == 56
+
+    def test_decimals_always_zero(self):
+        from tools.config import NFT_COLLECTIONS
+        for coll in NFT_COLLECTIONS:
+            assert coll.decimals == 0
+
+    def test_nft_collections_count(self):
+        from tools.config import NFT_COLLECTIONS
+        assert len(NFT_COLLECTIONS) == 5
+
+    def test_all_merge_assets_count(self):
+        from tools.config import ALL_MERGE_ASSETS
+        assert len(ALL_MERGE_ASSETS) == 7
+
+    def test_nft_collection_info_frozen(self):
+        import pytest
+        from tools.config import FLUX_PASS
+        with pytest.raises(AttributeError):
+            FLUX_PASS.name = "changed"  # type: ignore
+
+    def test_unique_policy_ids(self):
+        from tools.config import NFT_COLLECTIONS
+        policy_ids = [c.policy_id for c in NFT_COLLECTIONS]
+        assert len(set(policy_ids)) == len(policy_ids)
+
+    def test_unique_names(self):
+        from tools.config import NFT_COLLECTIONS, LEGACY_TOKENS
+        all_names = [t.name for t in LEGACY_TOKENS] + [c.name for c in NFT_COLLECTIONS]
+        assert len(set(all_names)) == len(all_names)

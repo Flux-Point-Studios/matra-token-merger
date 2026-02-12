@@ -32,6 +32,8 @@ from tools.config import (
     DEFAULT_TWAP_CANDLE_INTERVAL,
     DEFAULT_TWAP_WINDOW_HOURS,
     LEGACY_TOKENS,
+    NFT_COLLECTIONS,
+    NftCollectionInfo,
     SHARDS,
     TokenInfo,
 )
@@ -121,6 +123,12 @@ WINDOW_CONFIGS = {
     "30d": ("4h", 180),
 }
 
+NFT_WINDOW_CONFIGS = {
+    "7d": ("1d", 7),
+    "24h": ("1h", 24),
+    "30d": ("1d", 30),
+}
+
 
 def compute_pool_twap(
     client: TapToolsClient,
@@ -144,6 +152,30 @@ def compute_pool_twap(
     }
 
 
+def compute_nft_floor_twap(
+    client: TapToolsClient,
+    collection: NftCollectionInfo,
+    interval: str = "1d",
+    num_intervals: int = 7,
+) -> dict[str, Any]:
+    """Fetch floor-price candles for an NFT collection and compute TWAP."""
+    candles = client.get_nft_collection_ohlcv(
+        collection.policy_id, interval, num_intervals,
+    )
+    twap = compute_twap(candles)
+    close_prices = [float(c["close"]) for c in candles if c.get("close")]
+    return {
+        "policy_id": collection.policy_id,
+        "interval": interval,
+        "num_candles_requested": num_intervals,
+        "num_candles_received": len(candles),
+        "twap": twap,
+        "latest_close": close_prices[-1] if close_prices else None,
+        "min_close": min(close_prices) if close_prices else None,
+        "max_close": max(close_prices) if close_prices else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Full report builder
 # ---------------------------------------------------------------------------
@@ -152,6 +184,8 @@ def compute_pool_twap(
 def build_twap_report(
     client: TapToolsClient,
     tokens: list[TokenInfo] | None = None,
+    nft_collections: list[NftCollectionInfo] | None = None,
+    include_nfts: bool = True,
     primary_window: str = "7d",
     extra_windows: list[str] | None = None,
     min_tvl_ada: int = DEFAULT_MIN_TVL_ADA,
@@ -159,8 +193,12 @@ def build_twap_report(
     combine_mode: str = DEFAULT_COMBINE_MODE,
     ada_usd_price: float | None = None,
 ) -> dict[str, Any]:
-    """Build the complete TWAP report for all legacy tokens."""
-    tokens = tokens or LEGACY_TOKENS
+    """Build the complete TWAP report for all legacy tokens and NFT collections."""
+    tokens = tokens if tokens is not None else LEGACY_TOKENS
+    if include_nfts:
+        nft_collections = nft_collections if nft_collections is not None else NFT_COLLECTIONS
+    else:
+        nft_collections = []
     extra_windows = extra_windows or ["24h", "30d"]
 
     if ada_usd_price is None:
@@ -220,6 +258,42 @@ def build_twap_report(
                 "ada": combined_twap_ada,
                 "usd": combined_twap_usd,
                 "per_pool_twaps_ada": primary_twaps,
+            },
+        }
+
+    # -- NFT collections -------------------------------------------------
+    for coll in nft_collections:
+        logger.info("Processing NFT collection %s ...", coll.name)
+
+        nft_interval, nft_num = NFT_WINDOW_CONFIGS.get(
+            primary_window, ("1d", 7),
+        )
+        primary_data = compute_nft_floor_twap(
+            client, coll, nft_interval, nft_num,
+        )
+        combined_twap_ada = primary_data["twap"]
+        combined_twap_usd = combined_twap_ada * ada_usd_price
+
+        extra_data: dict[str, Any] = {}
+        for w in extra_windows:
+            if w in NFT_WINDOW_CONFIGS:
+                wi, wn = NFT_WINDOW_CONFIGS[w]
+                extra_data[w] = compute_nft_floor_twap(client, coll, wi, wn)
+
+        token_reports[coll.name] = {
+            "policy_id": coll.policy_id,
+            "display_name": coll.display_name,
+            "is_nft": True,
+            "decimals": 0,
+            "nft_floor_twap": {
+                "primary": primary_data,
+                "extra_windows": extra_data,
+            },
+            "combined_twap": {
+                "window": primary_window,
+                "mode": "floor_mean",
+                "ada": combined_twap_ada,
+                "usd": combined_twap_usd,
             },
         }
 
@@ -288,6 +362,14 @@ def main(argv: list[str] | None = None) -> None:
         help="How to combine per-pool TWAPs (default: median)",
     )
     parser.add_argument(
+        "--include-nfts", action="store_true", default=True,
+        help="Include NFT collections in TWAP report (default: true)",
+    )
+    parser.add_argument(
+        "--no-nfts", dest="include_nfts", action="store_false",
+        help="Exclude NFT collections from TWAP report",
+    )
+    parser.add_argument(
         "--quote", default="USD", choices=["USD", "ADA"],
         help="Quote currency for report (default: USD)",
     )
@@ -309,6 +391,7 @@ def main(argv: list[str] | None = None) -> None:
         min_tvl_ada=args.min_tvl_ada,
         top_pools=args.top_pools,
         combine_mode=args.combine,
+        include_nfts=args.include_nfts,
     )
 
     out_path = Path(args.out)

@@ -98,3 +98,106 @@ class TestDiscoverPools:
 
         pools = discover_pools(mock_client, AGENT, min_tvl_ada=10000, top_n=3)
         assert pools == []
+
+
+class TestComputeNftFloorTwap:
+    def test_basic_floor_twap(self, mock_nft_candles, mocker):
+        from tools.twap_snapshot_pools import compute_nft_floor_twap
+        from tools.config import FLUX_PASS
+
+        mock_client = mocker.MagicMock()
+        mock_client.get_nft_collection_ohlcv.return_value = mock_nft_candles
+
+        result = compute_nft_floor_twap(mock_client, FLUX_PASS, "1d", 7)
+        assert result["num_candles_received"] == 7
+        assert result["twap"] > 0
+        assert result["latest_close"] is not None
+
+    def test_empty_candles_returns_zero(self, mocker):
+        from tools.twap_snapshot_pools import compute_nft_floor_twap
+        from tools.config import FLUX_PASS
+
+        mock_client = mocker.MagicMock()
+        mock_client.get_nft_collection_ohlcv.return_value = []
+
+        result = compute_nft_floor_twap(mock_client, FLUX_PASS, "1d", 7)
+        assert result["twap"] == 0.0
+        assert result["num_candles_received"] == 0
+
+    def test_reuses_compute_twap(self, mocker):
+        """NFT floor TWAP should use the same compute_twap as fungible tokens."""
+        from tools.twap_snapshot_pools import compute_nft_floor_twap, compute_twap
+        from tools.config import SE_BRAWLERS
+
+        candles = [{"close": 10.0}, {"close": 20.0}, {"close": 30.0}]
+        mock_client = mocker.MagicMock()
+        mock_client.get_nft_collection_ohlcv.return_value = candles
+
+        result = compute_nft_floor_twap(mock_client, SE_BRAWLERS, "1d", 3)
+        expected = compute_twap(candles)
+        assert result["twap"] == pytest.approx(expected)
+
+
+class TestNftWindowConfigs:
+    def test_configs_defined(self):
+        from tools.twap_snapshot_pools import NFT_WINDOW_CONFIGS
+        assert "7d" in NFT_WINDOW_CONFIGS
+        assert "24h" in NFT_WINDOW_CONFIGS
+        assert "30d" in NFT_WINDOW_CONFIGS
+
+    def test_7d_config(self):
+        from tools.twap_snapshot_pools import NFT_WINDOW_CONFIGS
+        interval, num = NFT_WINDOW_CONFIGS["7d"]
+        assert interval == "1d"
+        assert num == 7
+
+
+class TestBuildTwapReportWithNfts:
+    def test_nft_entries_have_is_nft_flag(self, mocker):
+        from tools.twap_snapshot_pools import build_twap_report
+        from tools.config import FLUX_PASS
+
+        mock_client = mocker.MagicMock()
+        mock_client.get_ada_price.return_value = 0.50
+        mock_client.get_token_pools.return_value = []
+        mock_client.get_nft_collection_ohlcv.return_value = [
+            {"close": 50.0, "volume": 100},
+        ]
+
+        report = build_twap_report(
+            mock_client,
+            tokens=[],
+            nft_collections=[FLUX_PASS],
+        )
+        assert "FLUX_PASS" in report["tokens"]
+        assert report["tokens"]["FLUX_PASS"]["is_nft"] is True
+
+    def test_nft_combined_twap_has_usd(self, mocker):
+        from tools.twap_snapshot_pools import build_twap_report
+        from tools.config import FLUX_PASS
+
+        mock_client = mocker.MagicMock()
+        mock_client.get_ada_price.return_value = 0.50
+        mock_client.get_token_pools.return_value = []
+        mock_client.get_nft_collection_ohlcv.return_value = [
+            {"close": 100.0},
+        ]
+
+        report = build_twap_report(
+            mock_client,
+            tokens=[],
+            nft_collections=[FLUX_PASS],
+        )
+        twap = report["tokens"]["FLUX_PASS"]["combined_twap"]
+        assert twap["ada"] == pytest.approx(100.0)
+        assert twap["usd"] == pytest.approx(50.0)
+
+    def test_include_nfts_false(self, mocker):
+        from tools.twap_snapshot_pools import build_twap_report
+
+        mock_client = mocker.MagicMock()
+        mock_client.get_ada_price.return_value = 0.50
+        mock_client.get_token_pools.return_value = []
+
+        report = build_twap_report(mock_client, tokens=[], include_nfts=False)
+        assert len(report["tokens"]) == 0

@@ -25,6 +25,8 @@ from tools.config import (
     AGENT,
     FLUX_MAX_SUPPLY_BASE,
     LEGACY_TOKENS,
+    NFT_COLLECTIONS,
+    NftCollectionInfo,
     SHARDS,
     TokenInfo,
 )
@@ -42,13 +44,19 @@ def fetch_supply(bf: BlockfrostClient, token: TokenInfo) -> int:
     return int(info["quantity"])
 
 
+def fetch_nft_supply(bf: BlockfrostClient, collection: NftCollectionInfo) -> int:
+    """Fetch total NFT supply for a collection (count of assets under the policy)."""
+    assets = bf.get_policy_assets(collection.policy_id)
+    return len(assets)
+
+
 # ---------------------------------------------------------------------------
 # Valuation + weights
 # ---------------------------------------------------------------------------
 
 
 def compute_valuations(
-    tokens: list[TokenInfo],
+    tokens: list[TokenInfo | NftCollectionInfo],
     supplies: dict[str, int],
     twap_prices_usd: dict[str, float],
 ) -> dict[str, Any]:
@@ -81,7 +89,7 @@ def compute_valuations(
 
 
 def compute_integer_buckets(
-    tokens: list[TokenInfo],
+    tokens: list[TokenInfo | NftCollectionInfo],
     weights: dict[str, float],
     total_flux_base: int = FLUX_MAX_SUPPLY_BASE,
 ) -> dict[str, int]:
@@ -118,6 +126,7 @@ def build_merge_report(
     twap_report: dict[str, Any] | None = None,
     twap_report_path: Path | None = None,
     tokens: list[TokenInfo] | None = None,
+    nft_collections: list[NftCollectionInfo] | None = None,
     burn_adjustments: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build the merge report containing weights and integer buckets.
@@ -127,6 +136,7 @@ def build_merge_report(
     """
     tokens = tokens or LEGACY_TOKENS
     burn_adjustments = burn_adjustments or {}
+    nft_collections = nft_collections if nft_collections is not None else NFT_COLLECTIONS
 
     # Load TWAP data
     if twap_report is None and twap_report_path is not None:
@@ -136,69 +146,82 @@ def build_merge_report(
     if twap_report is None:
         raise ValueError("Must provide either twap_report or twap_report_path")
 
+    # Build unified asset list
+    all_assets: list[TokenInfo | NftCollectionInfo] = list(tokens) + list(nft_collections)
+
     # Extract prices
     twap_prices_usd: dict[str, float] = {}
-    for t in tokens:
-        token_data = twap_report["tokens"].get(t.name, {})
+    for asset in all_assets:
+        token_data = twap_report["tokens"].get(asset.name, {})
         combined = token_data.get("combined_twap", {})
-        twap_prices_usd[t.name] = combined.get("usd", 0.0)
-        if twap_prices_usd[t.name] <= 0:
-            logger.warning("TWAP price for %s is zero or missing!", t.name)
+        twap_prices_usd[asset.name] = combined.get("usd", 0.0)
+        if twap_prices_usd[asset.name] <= 0:
+            logger.warning("TWAP price for %s is zero or missing!", asset.name)
 
     # Fetch supplies
     raw_supplies: dict[str, int] = {}
     supplies: dict[str, int] = {}
-    for t in tokens:
-        raw = fetch_supply(bf, t)
-        raw_supplies[t.name] = raw
-        burned = burn_adjustments.get(t.name, 0)
-        supplies[t.name] = raw - burned
+    for asset in all_assets:
+        if isinstance(asset, TokenInfo):
+            raw = fetch_supply(bf, asset)
+        else:
+            raw = fetch_nft_supply(bf, asset)
+        raw_supplies[asset.name] = raw
+        burned = burn_adjustments.get(asset.name, 0)
+        supplies[asset.name] = raw - burned
         if burned > 0:
             logger.info(
-                "%s supply: %d on-chain − %d burned = %d circulating (%.2f display)",
-                t.name, raw, burned, supplies[t.name],
-                supplies[t.name] / (10 ** t.decimals),
+                "%s supply: %d on-chain - %d burned = %d circulating (%.2f display)",
+                asset.name, raw, burned, supplies[asset.name],
+                supplies[asset.name] / (10 ** asset.decimals),
             )
         else:
             logger.info(
                 "%s supply: %d base units (%.2f display)",
-                t.name, supplies[t.name],
-                supplies[t.name] / (10 ** t.decimals),
+                asset.name, supplies[asset.name],
+                supplies[asset.name] / (10 ** asset.decimals),
             )
 
     # Valuations + weights
-    val_data = compute_valuations(tokens, supplies, twap_prices_usd)
+    val_data = compute_valuations(all_assets, supplies, twap_prices_usd)
 
     # Integer buckets
-    buckets = compute_integer_buckets(tokens, val_data["weights"])
+    buckets = compute_integer_buckets(all_assets, val_data["weights"])
 
     warnings: list[str] = []
-    for t in tokens:
-        if supplies[t.name] == 0:
-            warnings.append(f"{t.name} has zero supply")
-        if twap_prices_usd[t.name] <= 0:
-            warnings.append(f"{t.name} has zero/missing TWAP price")
+    for asset in all_assets:
+        if supplies[asset.name] == 0:
+            warnings.append(f"{asset.name} has zero supply")
+        if twap_prices_usd[asset.name] <= 0:
+            warnings.append(f"{asset.name} has zero/missing TWAP price")
+
+    token_details: dict[str, Any] = {}
+    for asset in all_assets:
+        entry: dict[str, Any] = {
+            "decimals": asset.decimals,
+            "supply_onchain_base_units": raw_supplies[asset.name],
+            "burn_adjustment_base_units": burn_adjustments.get(asset.name, 0),
+            "supply_base_units": supplies[asset.name],
+            "supply_display": supplies[asset.name] / (10 ** asset.decimals),
+            "twap_usd": twap_prices_usd[asset.name],
+            "valuation_usd": val_data["valuations_usd"][asset.name],
+            "weight": val_data["weights"][asset.name],
+            "flux_bucket_base_units": buckets[asset.name],
+            "flux_bucket_display": buckets[asset.name] / (10 ** 6),
+        }
+        if isinstance(asset, TokenInfo):
+            entry["unit"] = asset.unit
+        else:
+            entry["policy_id"] = asset.policy_id
+            entry["display_name"] = asset.display_name
+            entry["is_nft"] = True
+        token_details[asset.name] = entry
 
     return {
         "report_type": "flux_merge_valuation",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "flux_total_base_units": FLUX_MAX_SUPPLY_BASE,
-        "tokens": {
-            t.name: {
-                "unit": t.unit,
-                "decimals": t.decimals,
-                "supply_onchain_base_units": raw_supplies[t.name],
-                "burn_adjustment_base_units": burn_adjustments.get(t.name, 0),
-                "supply_base_units": supplies[t.name],
-                "supply_display": supplies[t.name] / (10 ** t.decimals),
-                "twap_usd": twap_prices_usd[t.name],
-                "valuation_usd": val_data["valuations_usd"][t.name],
-                "weight": val_data["weights"][t.name],
-                "flux_bucket_base_units": buckets[t.name],
-                "flux_bucket_display": buckets[t.name] / (10 ** 6),
-            }
-            for t in tokens
-        },
+        "tokens": token_details,
         "burn_address": burn_adjustments.get("_address"),
         "totals": {
             "total_valuation_usd": val_data["total_valuation_usd"],

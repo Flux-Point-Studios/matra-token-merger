@@ -142,3 +142,57 @@ SHARDS = TokenInfo(
 )
 
 LEGACY_TOKENS: list[TokenInfo] = [AGENT, SHARDS]
+
+
+@dataclass(frozen=True)
+class NftCollectionInfo:
+    """Immutable descriptor for an NFT collection participating in the merge."""
+
+    name: str           # Short key, e.g. "FLUX_PASS"
+    policy_id: str      # 56-hex-char policy ID
+    display_name: str   # Human-readable name
+
+    @property
+    def decimals(self) -> int:
+        return 0
+
+
+FLUX_PASS = NftCollectionInfo(
+    name="FLUX_PASS",
+    policy_id="0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+    display_name="Flux Point Team Pass",
+)
+
+SE_BRAWLERS = NftCollectionInfo(
+    name="SE_BRAWLERS",
+    policy_id="25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc",
+    display_name="SE Brawlers",
+)
+
+BRAWL_PASS_ETD = NftCollectionInfo(
+    name="BRAWL_PASS_ETD",
+    policy_id="d3a197c4814054623432c882c60e6a81e8f3b94158033432529a02d2",
+    display_name="Brawl Pass: Enter the Dragon",
+)
+
+T1_ADAM_PASS = NftCollectionInfo(
+    name="T1_ADAM_PASS",
+    policy_id="b46891456b77dbc77c16090fd92a37f087f9a68e953c56b00a20332f",
+    display_name="T1 ADAM Launch Pass",
+)
+
+T2_ADAM_PASS = NftCollectionInfo(
+    name="T2_ADAM_PASS",
+    policy_id="06a64965c0ac1144a72a6ddfcb23aa9d4d7742a5b20ddd5cfb1164b9",
+    display_name="T2 ADAM Launch Pass",
+)
+
+NFT_COLLECTIONS: list[NftCollectionInfo] = [
+    FLUX_PASS,
+    SE_BRAWLERS,
+    BRAWL_PASS_ETD,
+    T1_ADAM_PASS,
+    T2_ADAM_PASS,
+]
+
+ALL_MERGE_ASSETS: list[TokenInfo | NftCollectionInfo] = LEGACY_TOKENS + NFT_COLLECTIONS  # type: ignore[list-item]

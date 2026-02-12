@@ -172,6 +172,12 @@ class BlockfrostClient:
             path += f"/{asset}"
         return self._get_all_pages(path)
 
+    # -- policy assets ---------------------------------------------------
+
+    def get_policy_assets(self, policy_id: str) -> list[dict[str, Any]]:
+        """Return all assets minted under *policy_id* (auto-paged)."""
+        return self._get_all_pages(f"/assets/policy/{policy_id}")
+
     # -- protocol params -------------------------------------------------
 
     def get_protocol_parameters(self) -> dict[str, Any]:
@@ -254,6 +260,50 @@ class TapToolsClient:
         """Get current ADA/USD price via /token/quote."""
         data = self._get("/token/quote", params={"quote": "USD"})
         return float(data.get("price", 0))
+
+    # -- NFT collection endpoints ----------------------------------------
+
+    def get_nft_collection_ohlcv(
+        self,
+        policy: str,
+        interval: str = "1d",
+        num_intervals: int = 7,
+    ) -> list[dict[str, Any]]:
+        """Get floor-price OHLCV candles for an NFT collection."""
+        return self._get(
+            "/nft/collection/ohlcv",
+            params={
+                "policy": policy,
+                "interval": interval,
+                "numIntervals": num_intervals,
+            },
+        )
+
+    def get_nft_collection_stats(
+        self,
+        policy: str,
+    ) -> dict[str, Any]:
+        """Get collection stats (floor, supply, owners, volume)."""
+        return self._get(
+            "/nft/collection/stats",
+            params={"policy": policy},
+        )
+
+    def get_nft_collection_holders_top(
+        self,
+        policy: str,
+        page: int = 1,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Get top holders of an NFT collection (paginated)."""
+        return self._get(
+            "/nft/collection/holders/top",
+            params={
+                "policy": policy,
+                "page": page,
+                "perPage": per_page,
+            },
+        )
 
 
 # ===================================================================

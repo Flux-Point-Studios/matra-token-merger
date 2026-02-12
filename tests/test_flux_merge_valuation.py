@@ -110,3 +110,94 @@ class TestComputeIntegerBuckets:
             weights = {"AGENT": w, "SHARDS": 1 - w}
             buckets = compute_integer_buckets(LEGACY_TOKENS, weights)
             assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+
+
+class TestSevenAssetValuations:
+    """Test valuations with all 7 merge assets (2 fungible + 5 NFT)."""
+
+    def _make_seven_assets(self):
+        from tools.config import LEGACY_TOKENS, NFT_COLLECTIONS
+        return list(LEGACY_TOKENS) + list(NFT_COLLECTIONS)
+
+    def _make_seven_supplies(self):
+        return {
+            "AGENT": 50_000_000,
+            "SHARDS": 100_000_000_000_000,
+            "FLUX_PASS": 500,
+            "SE_BRAWLERS": 10_000,
+            "BRAWL_PASS_ETD": 5_000,
+            "T1_ADAM_PASS": 2_000,
+            "T2_ADAM_PASS": 3_000,
+        }
+
+    def _make_seven_prices(self):
+        return {
+            "AGENT": 1.0,
+            "SHARDS": 0.0005,
+            "FLUX_PASS": 50.0,
+            "SE_BRAWLERS": 15.0,
+            "BRAWL_PASS_ETD": 10.0,
+            "T1_ADAM_PASS": 5.0,
+            "T2_ADAM_PASS": 2.5,
+        }
+
+    def test_seven_weights_sum_to_one(self):
+        assets = self._make_seven_assets()
+        supplies = self._make_seven_supplies()
+        prices = self._make_seven_prices()
+        result = compute_valuations(assets, supplies, prices)
+        assert sum(result["weights"].values()) == pytest.approx(1.0)
+
+    def test_seven_buckets_sum_to_max(self):
+        assets = self._make_seven_assets()
+        supplies = self._make_seven_supplies()
+        prices = self._make_seven_prices()
+        val_data = compute_valuations(assets, supplies, prices)
+        buckets = compute_integer_buckets(assets, val_data["weights"])
+        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+
+    def test_all_seven_buckets_positive(self):
+        assets = self._make_seven_assets()
+        supplies = self._make_seven_supplies()
+        prices = self._make_seven_prices()
+        val_data = compute_valuations(assets, supplies, prices)
+        buckets = compute_integer_buckets(assets, val_data["weights"])
+        for name, bucket in buckets.items():
+            assert bucket > 0, f"{name} bucket is zero"
+
+    def test_seven_buckets_invariant_randomized(self):
+        import random
+        random.seed(42)
+        assets = self._make_seven_assets()
+        for _ in range(50):
+            weights = {}
+            remaining = 1.0
+            for i, asset in enumerate(assets):
+                if i < len(assets) - 1:
+                    w = random.random() * remaining * 0.5
+                    weights[asset.name] = w
+                    remaining -= w
+                else:
+                    weights[asset.name] = remaining
+            buckets = compute_integer_buckets(assets, weights)
+            assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+
+
+class TestFetchNftSupply:
+    def test_counts_assets(self, mocker):
+        from tools.flux_merge_valuation_int import fetch_nft_supply
+        from tools.config import FLUX_PASS
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_policy_assets.return_value = [
+            {"asset": "nft1"}, {"asset": "nft2"}, {"asset": "nft3"},
+        ]
+        assert fetch_nft_supply(mock_bf, FLUX_PASS) == 3
+
+    def test_empty_policy(self, mocker):
+        from tools.flux_merge_valuation_int import fetch_nft_supply
+        from tools.config import FLUX_PASS
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_policy_assets.return_value = []
+        assert fetch_nft_supply(mock_bf, FLUX_PASS) == 0

@@ -57,6 +57,57 @@ logger = logging.getLogger(__name__)
 FLUX_ASSET_NAME_HEX = "464c5558"
 
 
+def _query_live_claim_utxos(
+    bf_client,
+    script_address: str,
+    flux_policy_hex: str,
+) -> dict[str, list[list]]:
+    """Query chain for live UTxOs at script address, grouped by datum PKH.
+
+    Returns ``{pkh_hex: [[tx_hash, output_index, flux_qty], ...]}`` —
+    the same ref format the claim index uses.  Because this reads
+    directly from the on-chain UTXO set, the refs are *never* stale.
+    """
+    utxos = bf_client.get_address_utxos(script_address)
+
+    flux_unit = flux_policy_hex + FLUX_ASSET_NAME_HEX
+    pkh_utxos: dict[str, list[list]] = {}
+
+    for u in utxos:
+        # Extract FLUX token amount
+        flux_qty = 0
+        for amt in u.get("amount", []):
+            if amt.get("unit") == flux_unit:
+                flux_qty = int(amt.get("quantity", 0))
+                break
+        if flux_qty <= 0:
+            continue  # not a FLUX claim UTxO
+
+        # Parse inline datum → PKH
+        datum_hex = u.get("inline_datum")
+        if not datum_hex:
+            continue
+        try:
+            obj = cbor2.loads(bytes.fromhex(datum_hex))
+            pkh_hex = None
+            if hasattr(obj, "value") and isinstance(obj.value, (list, tuple)):
+                for item in obj.value:
+                    if isinstance(item, bytes) and len(item) == 28:
+                        pkh_hex = item.hex()
+                        break
+            if pkh_hex is None:
+                continue
+        except Exception:
+            continue
+
+        output_idx = u.get("output_index", u.get("tx_index", 0))
+        pkh_utxos.setdefault(pkh_hex, []).append(
+            [u["tx_hash"], output_idx, flux_qty],
+        )
+
+    return pkh_utxos
+
+
 def extract_deadline_from_compiled(compiled_hex: str) -> int:
     """Extract the baked-in deadline (POSIX ms) from the applied compiled code.
 
@@ -457,51 +508,35 @@ def run_red_team(
     script_address = state["claim_validator"]["script_address"]
     flux_policy_id = ScriptHash(bytes.fromhex(state["flux_test"]["policy_id"]))
 
-    # Load claim index
-    with open(state["claim_index_path"]) as f:
-        index = json.load(f)
-
-    # Find wallets with unclaimed UTxOs that still exist on-chain.
-    # Previous runs may have consumed some UTxOs (e.g. admin reclaim tests),
-    # so we verify against the actual UTXO set at the script address.
+    # Query live UTxOs directly from chain — guarantees no stale refs.
+    # Previous runs may have consumed UTxOs (e.g. admin reclaim); reading
+    # from the on-chain UTXO set instead of the index file avoids this.
     from scripts.preprod_harness import Wallet
-    claimed_pkhs = {
-        r["pkh"] for r in state.get("claim_results", [])
-        if r.get("status") == "success"
+    from tools.api_clients import BlockfrostClient as BfClient
+
+    _BF_BASE_URLS = {
+        "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
+        "preview": "https://cardano-preview.blockfrost.io/api/v0",
     }
+    bf_network = "preprod" if blockfrost_project_id.startswith("preprod") else \
+                 "preview" if blockfrost_project_id.startswith("preview") else "mainnet"
+    bf_client = BfClient(
+        project_id=blockfrost_project_id,
+        base_url=_BF_BASE_URLS.get(bf_network, "https://cardano-mainnet.blockfrost.io/api/v0"),
+    )
 
-    # Query on-chain UTxOs at script address to filter stale entries
-    live_utxo_set: set[tuple[str, int]] = set()
-    try:
-        from blockfrost import BlockFrostApi, ApiUrls
-        # BlockFrostApi does NOT auto-detect network from project_id prefix,
-        # unlike BlockFrostChainContext. Derive the base_url manually.
-        if blockfrost_project_id.startswith("preprod"):
-            bf_base = ApiUrls.preprod.value
-        elif blockfrost_project_id.startswith("preview"):
-            bf_base = ApiUrls.preview.value
-        else:
-            bf_base = ApiUrls.mainnet.value
-        bf_api = BlockFrostApi(project_id=blockfrost_project_id, base_url=bf_base)
-        on_chain_utxos = bf_api.address_utxos(script_address)
-        for u in on_chain_utxos:
-            live_utxo_set.add((u.tx_hash, u.tx_index))
-        logger.info("On-chain UTxOs at script address: %d", len(live_utxo_set))
-    except Exception as e:
-        logger.warning("Could not query script address UTxOs: %s — assuming all exist", e)
+    live_index = _query_live_claim_utxos(
+        bf_client, script_address, state["flux_test"]["policy_id"],
+    )
+    total_live = sum(len(v) for v in live_index.values())
+    logger.info("Live claim UTxOs on-chain: %d PKHs, %d UTxOs", len(live_index), total_live)
 
+    # Match live UTxOs to test wallets
+    wallet_pkhs = {w["pkh"]: w["name"] for w in state["test_wallets"]}
     available = []
-    for w_info in state["test_wallets"]:
-        pkh = w_info["pkh"]
-        if pkh in index and pkh not in claimed_pkhs:
-            refs = index[pkh]
-            # If we have on-chain data, verify the UTxOs actually exist
-            if live_utxo_set:
-                refs = [r for r in refs if (r[0], r[1]) in live_utxo_set]
-                if not refs:
-                    logger.debug("Skipping %s — UTxOs consumed", w_info["name"])
-                    continue
-            w = Wallet.load(w_info["name"], keys_dir)
+    for pkh, refs in live_index.items():
+        if pkh in wallet_pkhs:
+            w = Wallet.load(wallet_pkhs[pkh], keys_dir)
             available.append((w, refs))
 
     if len(available) < 2:
@@ -579,16 +614,28 @@ def run_red_team(
             if w.pkh_hex != victim.pkh_hex and w.pkh_hex != attacker.pkh_hex
         ]
         if remaining_unclaimed:
-            reclaim_w, reclaim_refs = remaining_unclaimed[0]
-            logger.info("-" * 40)
-            logger.info("TEST 7: Admin reclaim after deadline")
-            rt_ctx2 = BlockFrostChainContext(project_id=blockfrost_project_id)
-            r = test_admin_reclaim_after_deadline(
-                rt_ctx2, admin, reclaim_refs, reclaim_w.pkh_hex,
-                script_address, script, flux_policy_id, deadline_ms,
+            reclaim_w = remaining_unclaimed[0][0]
+            # Re-query chain for fresh refs — earlier negative tests don't
+            # consume UTxOs, but an external process might have.
+            fresh_index = _query_live_claim_utxos(
+                bf_client, script_address, state["flux_test"]["policy_id"],
             )
-            results.append(r)
-            logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+            fresh_refs = fresh_index.get(reclaim_w.pkh_hex, [])
+            if not fresh_refs:
+                logger.warning(
+                    "UTxOs for %s consumed since start — skipping test 7",
+                    reclaim_w.name,
+                )
+            else:
+                logger.info("-" * 40)
+                logger.info("TEST 7: Admin reclaim after deadline")
+                rt_ctx2 = BlockFrostChainContext(project_id=blockfrost_project_id)
+                r = test_admin_reclaim_after_deadline(
+                    rt_ctx2, admin, fresh_refs, reclaim_w.pkh_hex,
+                    script_address, script, flux_policy_id, deadline_ms,
+                )
+                results.append(r)
+                logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
         else:
             logger.warning("No remaining UTxOs for admin reclaim after deadline test")
     else:

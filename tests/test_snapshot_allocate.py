@@ -307,3 +307,130 @@ class TestAllocationsCSV:
         assert len(read_rows) == 1
         assert read_rows[0]["payment_key_hash_hex"] == SAMPLE_PKH_1
         assert read_rows[0]["flux_total_units"] == "150"
+
+
+class TestBuildCsvColumns:
+    def test_fungible_only(self):
+        from tools.snapshot_allocate_flux import build_csv_columns
+        from tools.config import LEGACY_TOKENS
+        cols = build_csv_columns(tokens=LEGACY_TOKENS, nft_collections=[])
+        assert cols[0] == "payment_key_hash_hex"
+        assert cols[1] == "addresses"
+        assert "agent_balance_base" in cols
+        assert "shards_flux_units" in cols
+        assert cols[-2] == "flux_total_units"
+        assert cols[-1] == "flux_total_display"
+        assert len(cols) == 2 + 4 + 2  # header + 2 tokens * 2 cols + footer
+
+    def test_with_nfts(self):
+        from tools.snapshot_allocate_flux import build_csv_columns
+        from tools.config import LEGACY_TOKENS, NFT_COLLECTIONS
+        cols = build_csv_columns(tokens=LEGACY_TOKENS, nft_collections=NFT_COLLECTIONS)
+        assert len(cols) == 2 + (7 * 2) + 2  # 18 columns
+        assert "flux_pass_balance_base" in cols
+        assert "flux_pass_flux_units" in cols
+        assert "se_brawlers_balance_base" in cols
+        assert "t2_adam_pass_flux_units" in cols
+
+    def test_columns_end_with_totals(self):
+        from tools.snapshot_allocate_flux import build_csv_columns
+        from tools.config import LEGACY_TOKENS, NFT_COLLECTIONS
+        cols = build_csv_columns(tokens=LEGACY_TOKENS, nft_collections=NFT_COLLECTIONS)
+        assert cols[-2] == "flux_total_units"
+        assert cols[-1] == "flux_total_display"
+
+
+class TestNftHolders:
+    def test_fetch_nft_holders_basic(self, mocker):
+        from tools.snapshot_allocate_flux import fetch_nft_holders
+        from tools.config import FLUX_PASS
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_policy_assets.return_value = [
+            {"asset": "policy1nft1"},
+            {"asset": "policy1nft2"},
+        ]
+        mock_bf.get_asset_addresses.side_effect = [
+            [{"address": "addr1_alice", "quantity": "1"}],
+            [{"address": "addr1_alice", "quantity": "1"}],
+        ]
+
+        holders = fetch_nft_holders(mock_bf, FLUX_PASS, resolve_scripts=False)
+        assert len(holders) == 1  # aggregated by address
+        assert holders[0]["quantity"] == 2
+
+    def test_fetch_nft_holders_multiple_owners(self, mocker):
+        from tools.snapshot_allocate_flux import fetch_nft_holders
+        from tools.config import SE_BRAWLERS
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_policy_assets.return_value = [
+            {"asset": "policy1nft1"},
+            {"asset": "policy1nft2"},
+            {"asset": "policy1nft3"},
+        ]
+        mock_bf.get_asset_addresses.side_effect = [
+            [{"address": "addr1_alice", "quantity": "1"}],
+            [{"address": "addr1_bob", "quantity": "1"}],
+            [{"address": "addr1_alice", "quantity": "1"}],
+        ]
+
+        holders = fetch_nft_holders(mock_bf, SE_BRAWLERS, resolve_scripts=False)
+        holders_dict = {h["address"]: h["quantity"] for h in holders}
+        assert holders_dict["addr1_alice"] == 2
+        assert holders_dict["addr1_bob"] == 1
+
+
+class TestDatumPkhExtraction:
+    def test_find_28_byte_field_direct(self):
+        from tools.snapshot_allocate_flux import _find_28_byte_field
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        assert _find_28_byte_field(pkh_bytes) == SAMPLE_PKH_1
+
+    def test_find_28_byte_field_in_list(self):
+        from tools.snapshot_allocate_flux import _find_28_byte_field
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        obj = [42, pkh_bytes, b"short"]
+        assert _find_28_byte_field(obj) == SAMPLE_PKH_1
+
+    def test_find_28_byte_field_in_cbor_tag(self):
+        import cbor2
+        from tools.snapshot_allocate_flux import _find_28_byte_field
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        obj = cbor2.CBORTag(121, [pkh_bytes])
+        assert _find_28_byte_field(obj) == SAMPLE_PKH_1
+
+    def test_find_28_byte_field_nested(self):
+        import cbor2
+        from tools.snapshot_allocate_flux import _find_28_byte_field
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        obj = cbor2.CBORTag(121, [cbor2.CBORTag(0, [pkh_bytes, 1000])])
+        # Default max_depth=3 can't reach 4 levels; use higher depth
+        assert _find_28_byte_field(obj, max_depth=5) == SAMPLE_PKH_1
+
+    def test_find_28_byte_field_wrong_length(self):
+        from tools.snapshot_allocate_flux import _find_28_byte_field
+        assert _find_28_byte_field(b"short") is None
+        assert _find_28_byte_field(b"x" * 32) is None
+
+    def test_find_28_byte_field_max_depth(self):
+        from tools.snapshot_allocate_flux import _find_28_byte_field
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        deep = [[[[pkh_bytes]]]]  # 4 levels deep
+        assert _find_28_byte_field(deep, max_depth=3) is None
+
+    def test_extract_pkh_from_datum(self):
+        import cbor2
+        from tools.snapshot_allocate_flux import _extract_pkh_from_datum
+        pkh_bytes = bytes.fromhex(SAMPLE_PKH_1)
+        datum_hex = cbor2.dumps(cbor2.CBORTag(121, [pkh_bytes])).hex()
+        utxo = {"inline_datum": datum_hex}
+        assert _extract_pkh_from_datum(utxo) == SAMPLE_PKH_1
+
+    def test_extract_pkh_from_datum_no_datum(self):
+        from tools.snapshot_allocate_flux import _extract_pkh_from_datum
+        assert _extract_pkh_from_datum({}) is None
+
+    def test_extract_pkh_from_datum_invalid_cbor(self):
+        from tools.snapshot_allocate_flux import _extract_pkh_from_datum
+        assert _extract_pkh_from_datum({"inline_datum": "deadbeef"}) is None

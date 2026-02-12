@@ -422,3 +422,44 @@ class TestE2EBatchSizing:
         total_flux = sum(o["flux_units"] for batch in batches for o in batch)
         expected_flux = sum(a["flux_units"] for a in allocs)
         assert total_flux == expected_flux
+
+
+class TestE2ESevenAssetPipeline:
+    """E2E test with all 7 merge assets."""
+
+    def test_seven_asset_buckets_sum(self):
+        from tools.config import LEGACY_TOKENS, NFT_COLLECTIONS
+
+        all_assets = list(LEGACY_TOKENS) + list(NFT_COLLECTIONS)
+        supplies = {
+            "AGENT": 50_000_000,
+            "SHARDS": 100_000_000_000_000,
+            "FLUX_PASS": 500,
+            "SE_BRAWLERS": 10_000,
+            "BRAWL_PASS_ETD": 5_000,
+            "T1_ADAM_PASS": 2_000,
+            "T2_ADAM_PASS": 3_000,
+        }
+        prices = {
+            "AGENT": 1.0,
+            "SHARDS": 0.0005,
+            "FLUX_PASS": 50.0,
+            "SE_BRAWLERS": 15.0,
+            "BRAWL_PASS_ETD": 10.0,
+            "T1_ADAM_PASS": 5.0,
+            "T2_ADAM_PASS": 2.5,
+        }
+
+        val_data = compute_valuations(all_assets, supplies, prices)
+        buckets = compute_integer_buckets(all_assets, val_data["weights"])
+
+        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+        assert len(buckets) == 7
+
+    def test_dynamic_csv_columns_count(self):
+        from tools.snapshot_allocate_flux import build_csv_columns
+        from tools.config import LEGACY_TOKENS, NFT_COLLECTIONS
+
+        cols = build_csv_columns(LEGACY_TOKENS, NFT_COLLECTIONS)
+        # 2 header + 7 assets * 2 cols each + 2 footer = 18
+        assert len(cols) == 18
