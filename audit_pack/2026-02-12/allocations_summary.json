@@ -1,0 +1,91 @@
+{
+  "snapshot_anchor": {
+    "block_hash": "22e4375e881c53e929f29b85ab271ad72ac206cfebc4f2ef5fb19a726ec9fc7a",
+    "block_height": 13039354,
+    "block_time": 1771081494,
+    "block_slot": 179515203
+  },
+  "generated_at": "2026-02-14T15:10:28.002006+00:00",
+  "parameters": {
+    "exclude_script_addresses": true,
+    "denominator_mode": "eligible",
+    "dust_to": null,
+    "min_flux_threshold": 1
+  },
+  "per_token": {
+    "AGENT": {
+      "raw_holders": 2407,
+      "eligible_holders": 2119,
+      "raw_supply_base": 1000000000,
+      "eligible_supply_base": 394208847,
+      "bucket_base_units": 567157452509129,
+      "distributed_base_units": 567157452508077,
+      "dust_base_units": 1052
+    },
+    "SHARDS": {
+      "raw_holders": 4839,
+      "eligible_holders": 4697,
+      "raw_supply_base": 3088534450001,
+      "eligible_supply_base": 936814388218,
+      "bucket_base_units": 101532719900949,
+      "distributed_base_units": 101532719897863,
+      "dust_base_units": 3086
+    },
+    "FLUX_PASS": {
+      "is_nft": true,
+      "raw_holders": 112,
+      "eligible_holders": 112,
+      "raw_supply_base": 385,
+      "eligible_supply_base": 385,
+      "bucket_base_units": 52098746067916,
+      "distributed_base_units": 52098746067876,
+      "dust_base_units": 40
+    },
+    "SE_BRAWLERS": {
+      "is_nft": true,
+      "raw_holders": 84,
+      "eligible_holders": 84,
+      "raw_supply_base": 224,
+      "eligible_supply_base": 224,
+      "bucket_base_units": 15979787330871,
+      "distributed_base_units": 15979787330838,
+      "dust_base_units": 33
+    },
+    "BRAWL_PASS_ETD": {
+      "is_nft": true,
+      "raw_holders": 27,
+      "eligible_holders": 27,
+      "raw_supply_base": 43,
+      "eligible_supply_base": 43,
+      "bucket_base_units": 9454607455342,
+      "distributed_base_units": 9454607455325,
+      "dust_base_units": 17
+    },
+    "T1_ADAM_PASS": {
+      "is_nft": true,
+      "raw_holders": 39,
+      "eligible_holders": 39,
+      "raw_supply_base": 43,
+      "eligible_supply_base": 43,
+      "bucket_base_units": 235882188254882,
+      "distributed_base_units": 235882188254872,
+      "dust_base_units": 10
+    },
+    "T2_ADAM_PASS": {
+      "is_nft": true,
+      "raw_holders": 131,
+      "eligible_holders": 131,
+      "raw_supply_base": 148,
+      "eligible_supply_base": 148,
+      "bucket_base_units": 17894498480911,
+      "distributed_base_units": 17894498480827,
+      "dust_base_units": 84
+    }
+  },
+  "totals": {
+    "unique_claimants": 6645,
+    "total_flux_distributed": 999794199123815,
+    "total_dust_remaining": 205800876185,
+    "sum_equals_max_supply": true
+  }
+}
