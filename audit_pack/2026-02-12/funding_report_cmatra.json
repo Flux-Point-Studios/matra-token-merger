@@ -1,0 +1,25 @@
+{
+  "report_type": "funding_calculator",
+  "num_claims": 6619,
+  "total_flux_units": 999836424942778002097,
+  "batch_size": 40,
+  "num_batches": 166,
+  "locked_ada": {
+    "total_min_ada_lovelace": 6619000000,
+    "total_min_ada_display": 6619.0
+  },
+  "fees": {
+    "fee_per_batch_lovelace": 500000,
+    "total_fees_lovelace": 83000000,
+    "total_fees_display": 83.0
+  },
+  "safety_margin": {
+    "pct": 10.0,
+    "margin_lovelace": 670200000,
+    "margin_display": 670.2
+  },
+  "grand_total": {
+    "lovelace": 7372200000,
+    "ada": 7372.2
+  }
+}
