@@ -172,6 +172,9 @@ def fetch_nft_holders(
         unit = asset_entry.get("asset", "")
         if not unit:
             continue
+        # Skip fungible tokens (qty > 1) — only true 1/1 NFTs count
+        if int(asset_entry.get("quantity", 1)) != 1:
+            continue
         addresses = bf.get_asset_addresses(unit)
         for addr_entry in addresses:
             addr = addr_entry["address"]

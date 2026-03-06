@@ -148,9 +148,10 @@ class TestAllocateFlux:
 
     def test_display_values_correct(self):
         holders = [{"address": "a", "quantity": 1_000_000}]
-        result = allocate_flux(SHARDS, holders, bucket_base_units=6_000_000)
-        assert result[0]["token_balance_display"] == 1.0  # 1M / 10^6
-        assert result[0]["flux_display"] == 6.0  # 6M / 10^6
+        bucket = 6_000_000_000_000  # 6e12 base units = 6.0 display at 12 decimals
+        result = allocate_flux(SHARDS, holders, bucket_base_units=bucket)
+        assert result[0]["token_balance_display"] == 1.0  # 1M / 10^6 (SHARDS decimals)
+        assert result[0]["flux_display"] == 6.0  # 6e12 / 10^12
 
 
 class TestFrankenAddressGrouping:

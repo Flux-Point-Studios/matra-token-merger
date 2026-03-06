@@ -66,13 +66,19 @@ SHARDS_UNIT: str = SHARDS_POLICY + SHARDS_NAME_HEX
 SHARDS_DECIMALS: int = 6
 
 # ---------------------------------------------------------------------------
-# FLUX parameters
+# Output token parameters (cMATRA — Cardano representation of MATRA)
 # ---------------------------------------------------------------------------
 
-FLUX_TICKER: str = "FLUX"
-FLUX_DECIMALS: int = 6
-FLUX_MAX_SUPPLY_DISPLAY: int = 1_000_000_000  # 1 billion
-FLUX_MAX_SUPPLY_BASE: int = FLUX_MAX_SUPPLY_DISPLAY * (10 ** FLUX_DECIMALS)  # 1e15
+MERGE_TOKEN_TICKER: str = "cMATRA"
+MERGE_TOKEN_DECIMALS: int = 12
+MERGE_TOKEN_SUPPLY_DISPLAY: int = 1_000_000_000  # 1 billion
+MERGE_TOKEN_SUPPLY_BASE: int = MERGE_TOKEN_SUPPLY_DISPLAY * (10 ** MERGE_TOKEN_DECIMALS)  # 1e21
+
+# Legacy aliases (used by claim vault / downstream code)
+FLUX_TICKER: str = MERGE_TOKEN_TICKER
+FLUX_DECIMALS: int = MERGE_TOKEN_DECIMALS
+FLUX_MAX_SUPPLY_DISPLAY: int = MERGE_TOKEN_SUPPLY_DISPLAY
+FLUX_MAX_SUPPLY_BASE: int = MERGE_TOKEN_SUPPLY_BASE
 
 # ---------------------------------------------------------------------------
 # Admin / claim-validator parameters

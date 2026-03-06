@@ -184,15 +184,32 @@ class TestSevenAssetValuations:
 
 
 class TestFetchNftSupply:
-    def test_counts_assets(self, mocker):
+    def test_counts_only_nfts(self, mocker):
         from tools.flux_merge_valuation_int import fetch_nft_supply
         from tools.config import FLUX_PASS
 
         mock_bf = mocker.MagicMock()
         mock_bf.get_policy_assets.return_value = [
-            {"asset": "nft1"}, {"asset": "nft2"}, {"asset": "nft3"},
+            {"asset": "nft1", "quantity": "1"},
+            {"asset": "nft2", "quantity": "1"},
+            {"asset": "nft3", "quantity": "1"},
         ]
         assert fetch_nft_supply(mock_bf, FLUX_PASS) == 3
+
+    def test_excludes_fungible_assets(self, mocker):
+        """Assets with quantity > 1 are fungible tokens, not NFTs."""
+        from tools.flux_merge_valuation_int import fetch_nft_supply
+        from tools.config import FLUX_PASS
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_policy_assets.return_value = [
+            {"asset": "nft1", "quantity": "1"},
+            {"asset": "fungible1", "quantity": "3"},
+            {"asset": "nft2", "quantity": "1"},
+            {"asset": "fungible2", "quantity": "2"},
+        ]
+        # Only the two qty=1 assets count
+        assert fetch_nft_supply(mock_bf, FLUX_PASS) == 2
 
     def test_empty_policy(self, mocker):
         from tools.flux_merge_valuation_int import fetch_nft_supply

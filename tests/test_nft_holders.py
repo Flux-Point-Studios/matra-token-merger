@@ -161,6 +161,25 @@ class TestFetchNftHolders:
         assert len(holders) == 1
         mock_bf.get_asset_addresses.assert_called_once_with("p1nft1")
 
+    def test_skips_fungible_assets(self, mocker):
+        """Assets with quantity > 1 under the policy are fungible, not NFTs."""
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_policy_assets.return_value = [
+            {"asset": "nft1", "quantity": "1"},
+            {"asset": "fungible1", "quantity": "3"},
+            {"asset": "nft2", "quantity": "1"},
+        ]
+        mock_bf.get_asset_addresses.side_effect = [
+            [{"address": "addr_a", "quantity": "1"}],
+            [{"address": "addr_b", "quantity": "1"}],
+        ]
+
+        holders = fetch_nft_holders(mock_bf, FLUX_PASS, resolve_scripts=False)
+        # Only 2 calls — fungible1 was skipped
+        assert mock_bf.get_asset_addresses.call_count == 2
+        by_addr = {h["address"]: h["quantity"] for h in holders}
+        assert by_addr == {"addr_a": 1, "addr_b": 1}
+
     def test_format_matches_fetch_holders(self, mocker):
         """fetch_nft_holders returns same format as fetch_holders."""
         mock_bf = mocker.MagicMock()

@@ -41,9 +41,9 @@ class TestTokenInfo:
             AGENT.name = "changed"  # type: ignore
 
 
-class TestFluxConstants:
+class TestMergeTokenConstants:
     def test_max_supply_base(self):
-        assert FLUX_MAX_SUPPLY_BASE == 1_000_000_000_000_000
+        assert FLUX_MAX_SUPPLY_BASE == 1_000_000_000_000_000_000_000  # 1e21
 
     def test_max_supply_display(self):
         assert FLUX_MAX_SUPPLY_DISPLAY == 1_000_000_000
@@ -52,7 +52,7 @@ class TestFluxConstants:
         assert FLUX_MAX_SUPPLY_BASE == FLUX_MAX_SUPPLY_DISPLAY * (10 ** FLUX_DECIMALS)
 
     def test_decimals(self):
-        assert FLUX_DECIMALS == 6
+        assert FLUX_DECIMALS == 12
 
 
 class TestNftCollectionInfo:

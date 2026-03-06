@@ -23,6 +23,7 @@ from typing import Any
 from tools.api_clients import BlockfrostClient, TapToolsClient
 from tools.config import (
     AGENT,
+    FLUX_DECIMALS,
     FLUX_MAX_SUPPLY_BASE,
     LEGACY_TOKENS,
     NFT_COLLECTIONS,
@@ -45,9 +46,13 @@ def fetch_supply(bf: BlockfrostClient, token: TokenInfo) -> int:
 
 
 def fetch_nft_supply(bf: BlockfrostClient, collection: NftCollectionInfo) -> int:
-    """Fetch total NFT supply for a collection (count of assets under the policy)."""
+    """Fetch NFT supply for a collection (count of true 1/1 NFTs only).
+
+    Assets with quantity > 1 under the same policy are fungible tokens,
+    not NFTs, and are excluded from the count.
+    """
     assets = bf.get_policy_assets(collection.policy_id)
-    return len(assets)
+    return sum(1 for a in assets if int(a.get("quantity", 1)) == 1)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +212,7 @@ def build_merge_report(
             "valuation_usd": val_data["valuations_usd"][asset.name],
             "weight": val_data["weights"][asset.name],
             "flux_bucket_base_units": buckets[asset.name],
-            "flux_bucket_display": buckets[asset.name] / (10 ** 6),
+            "flux_bucket_display": buckets[asset.name] / (10 ** FLUX_DECIMALS),
         }
         if isinstance(asset, TokenInfo):
             entry["unit"] = asset.unit
