@@ -34,6 +34,7 @@ from tools.config import (
     NFT_COLLECTIONS,
     NftCollectionInfo,
     TokenInfo,
+    filter_nft_assets,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,9 +166,11 @@ def fetch_nft_holders(
     ``{"asset_unit": ..., "script_address": ...}`` — used to build the
     conditional reserve ledger.
     """
-    assets = bf.get_policy_assets(collection.policy_id)
+    all_assets = bf.get_policy_assets(collection.policy_id)
+    assets = filter_nft_assets(all_assets)
     logger.info(
-        "%s: found %d NFT assets under policy", collection.name, len(assets),
+        "%s: %d total assets, %d true NFTs after CIP-68/qty filtering",
+        collection.name, len(all_assets), len(assets),
     )
 
     holder_counts: dict[str, int] = defaultdict(int)
@@ -176,9 +179,6 @@ def fetch_nft_holders(
     for asset_entry in assets:
         unit = asset_entry.get("asset", "")
         if not unit:
-            continue
-        # Skip fungible tokens (qty > 1) — only true 1/1 NFTs count
-        if int(asset_entry.get("quantity", 1)) != 1:
             continue
         addresses = bf.get_asset_addresses(unit)
         for addr_entry in addresses:

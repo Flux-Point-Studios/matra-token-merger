@@ -88,3 +88,60 @@ class TestNftCollectionInfo:
         from tools.config import NFT_COLLECTIONS, LEGACY_TOKENS
         all_names = [t.name for t in LEGACY_TOKENS] + [c.name for c in NFT_COLLECTIONS]
         assert len(set(all_names)) == len(all_names)
+
+
+class TestFilterNftAssets:
+    """Tests for CIP-68 aware NFT asset filtering."""
+
+    def test_cip68_only_counts_user_tokens(self):
+        from tools.config import filter_nft_assets
+        # 56-char policy + CIP-68 prefixed asset names
+        policy = "a" * 56
+        assets = [
+            {"asset": policy + "000de140aabb", "quantity": "1"},  # user token
+            {"asset": policy + "000643b0aabb", "quantity": "1"},  # reference token
+            {"asset": policy + "000de140ccdd", "quantity": "1"},  # user token
+            {"asset": policy + "000643b0ccdd", "quantity": "1"},  # reference token
+        ]
+        result = filter_nft_assets(assets)
+        assert len(result) == 2
+        assert all("000de140" in a["asset"] for a in result)
+
+    def test_non_cip68_counts_all_qty1(self):
+        from tools.config import filter_nft_assets
+        assets = [
+            {"asset": "nft1", "quantity": "1"},
+            {"asset": "nft2", "quantity": "1"},
+            {"asset": "fungible1", "quantity": "5"},
+        ]
+        result = filter_nft_assets(assets)
+        assert len(result) == 2
+
+    def test_excludes_fungible_regardless(self):
+        from tools.config import filter_nft_assets
+        policy = "a" * 56
+        assets = [
+            {"asset": policy + "000de140aabb", "quantity": "1"},
+            {"asset": policy + "000643b0aabb", "quantity": "1"},
+            {"asset": policy + "somefungible", "quantity": "100"},
+        ]
+        result = filter_nft_assets(assets)
+        assert len(result) == 1
+
+    def test_cip68_mixed_with_non_cip68(self):
+        """CIP-68 collection with extra non-prefixed assets: only user tokens."""
+        from tools.config import filter_nft_assets
+        policy = "a" * 56
+        assets = [
+            {"asset": policy + "000de140aabb", "quantity": "1"},  # user token
+            {"asset": policy + "000643b0aabb", "quantity": "1"},  # reference token
+            {"asset": policy + "otherthing01", "quantity": "1"},  # other qty=1
+        ]
+        result = filter_nft_assets(assets)
+        # Has CIP-68 user tokens, so only those count
+        assert len(result) == 1
+        assert "000de140" in result[0]["asset"]
+
+    def test_empty_assets(self):
+        from tools.config import filter_nft_assets
+        assert filter_nft_assets([]) == []

@@ -28,6 +28,7 @@ from tools.config import (
     LEGACY_TOKENS,
     NFT_COLLECTIONS,
     NftCollectionInfo,
+    filter_nft_assets,
     SHARDS,
     TokenInfo,
 )
@@ -48,11 +49,12 @@ def fetch_supply(bf: BlockfrostClient, token: TokenInfo) -> int:
 def fetch_nft_supply(bf: BlockfrostClient, collection: NftCollectionInfo) -> int:
     """Fetch NFT supply for a collection (count of true 1/1 NFTs only).
 
-    Assets with quantity > 1 under the same policy are fungible tokens,
-    not NFTs, and are excluded from the count.
+    - Assets with quantity > 1 are fungible tokens, excluded.
+    - CIP-68 reference tokens (000643b0 prefix) are excluded.
+    - For CIP-68 collections, only user tokens (000de140 prefix) are counted.
     """
     assets = bf.get_policy_assets(collection.policy_id)
-    return sum(1 for a in assets if int(a.get("quantity", 1)) == 1)
+    return len(filter_nft_assets(assets))
 
 
 # ---------------------------------------------------------------------------

@@ -202,3 +202,33 @@ NFT_COLLECTIONS: list[NftCollectionInfo] = [
 ]
 
 ALL_MERGE_ASSETS: list[TokenInfo | NftCollectionInfo] = LEGACY_TOKENS + NFT_COLLECTIONS  # type: ignore[list-item]
+
+# ---------------------------------------------------------------------------
+# CIP-68 asset name prefixes
+# ---------------------------------------------------------------------------
+
+CIP68_USER_TOKEN_PREFIX: str = "000de140"      # label 222 — user-facing NFT
+CIP68_REFERENCE_TOKEN_PREFIX: str = "000643b0"  # label 100 — on-chain metadata
+
+
+def filter_nft_assets(assets: list[dict], policy_id_len: int = 56) -> list[dict]:
+    """Filter NFT assets from a policy, handling CIP-68 collections.
+
+    CIP-68 policies mint a user token (000de140 prefix) and a reference token
+    (000643b0 prefix) per NFT.  Only user tokens should be counted.
+
+    For non-CIP-68 policies, all qty=1 assets are returned.
+    """
+    qty1 = [a for a in assets if int(a.get("quantity", 1)) == 1]
+    user_tokens = [
+        a for a in qty1
+        if a.get("asset", "")[policy_id_len:].startswith(CIP68_USER_TOKEN_PREFIX)
+    ]
+    if user_tokens:
+        # CIP-68 collection: only count user tokens
+        return user_tokens
+    # Non-CIP-68: return all qty=1 except any stray reference tokens
+    return [
+        a for a in qty1
+        if not a.get("asset", "")[policy_id_len:].startswith(CIP68_REFERENCE_TOKEN_PREFIX)
+    ]
