@@ -1,35 +1,43 @@
 {
   "snapshot_anchor": {
-    "block_hash": "c0023dbeeb122959b1de9d4228b583064057fd45da728f4f617c2a82f03ea84e",
-    "block_height": 13122072,
-    "block_time": 1772756885,
-    "block_slot": 181190594
+    "block_hash": "b566c677aef5378ac5fa37300f380b2dfddb4e009c7460a7d248293dd05a4b35",
+    "block_height": 13138126,
+    "block_time": 1773088100,
+    "block_slot": 181521809
   },
-  "generated_at": "2026-03-06T00:33:09.116622+00:00",
+  "generated_at": "2026-03-09T20:30:48.819193+00:00",
   "parameters": {
     "exclude_script_addresses": true,
     "denominator_mode": "eligible",
     "dust_to": null,
-    "min_flux_threshold": 1
+    "min_flux_threshold": 1,
+    "reserve_addresses": {
+      "addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9": "FPS DAO Treasury",
+      "addr1wx84ytuumke8gxex0l8par4852ey7l4eq6h325rnez0yluc56x0dj": "$TALOS Treasury"
+    }
   },
   "per_token": {
     "AGENT": {
       "raw_holders": 2369,
-      "eligible_holders": 2120,
+      "eligible_holders": 2123,
       "raw_supply_base": 1000000000,
-      "eligible_supply_base": 504608184,
-      "bucket_base_units": 638136903946384965632,
-      "distributed_base_units": 638136903946384964569,
-      "dust_base_units": 1063
+      "eligible_supply_base": 511955940,
+      "bucket_base_units": 667272332905119481856,
+      "team_reserve_base_units": 19781058767289747678,
+      "eligible_bucket_base_units": 647491274137829734178,
+      "distributed_base_units": 647491274137829733028,
+      "dust_base_units": 1150
     },
     "SHARDS": {
-      "raw_holders": 4830,
-      "eligible_holders": 4716,
+      "raw_holders": 4829,
+      "eligible_holders": 4718,
       "raw_supply_base": 3088534450001,
-      "eligible_supply_base": 1363995475635,
-      "bucket_base_units": 114239485420152782848,
-      "distributed_base_units": 114239485420152782280,
-      "dust_base_units": 568
+      "eligible_supply_base": 1400387069443,
+      "bucket_base_units": 119455319814242091008,
+      "team_reserve_base_units": 17287457635694675734,
+      "eligible_bucket_base_units": 102167862178547415274,
+      "distributed_base_units": 102167862178547412641,
+      "dust_base_units": 2633
     },
     "FLUX_PASS": {
       "is_nft": true,
@@ -37,9 +45,12 @@
       "eligible_holders": 112,
       "raw_supply_base": 393,
       "eligible_supply_base": 393,
-      "bucket_base_units": 58473058136458002432,
-      "distributed_base_units": 58473058136458002412,
-      "dust_base_units": 20
+      "bucket_base_units": 30571381841042350080,
+      "nft_reserve_base_units": 609902879621792520,
+      "unresolvable_nfts": 8,
+      "eligible_bucket_base_units": 29961478961420557560,
+      "distributed_base_units": 29961478961420557548,
+      "dust_base_units": 12
     },
     "SE_BRAWLERS": {
       "is_nft": true,
@@ -47,9 +58,12 @@
       "eligible_holders": 85,
       "raw_supply_base": 228,
       "eligible_supply_base": 228,
-      "bucket_base_units": 17979649157267994624,
-      "distributed_base_units": 17979649157267994590,
-      "dust_base_units": 34
+      "bucket_base_units": 9400273173194954752,
+      "nft_reserve_base_units": 543817456300534572,
+      "unresolvable_nfts": 14,
+      "eligible_bucket_base_units": 8856455716894420180,
+      "distributed_base_units": 8856455716894420152,
+      "dust_base_units": 28
     },
     "BRAWL_PASS_ETD": {
       "is_nft": true,
@@ -57,9 +71,12 @@
       "eligible_holders": 28,
       "raw_supply_base": 44,
       "eligible_supply_base": 44,
-      "bucket_base_units": 10637846514912503808,
-      "distributed_base_units": 10637846514912503793,
-      "dust_base_units": 15
+      "bucket_base_units": 5438174563005344768,
+      "nft_reserve_base_units": 0,
+      "unresolvable_nfts": 0,
+      "eligible_bucket_base_units": 5438174563005344768,
+      "distributed_base_units": 5438174563005344747,
+      "dust_base_units": 21
     },
     "T1_ADAM_PASS": {
       "is_nft": true,
@@ -67,9 +84,12 @@
       "eligible_holders": 38,
       "raw_supply_base": 43,
       "eligible_supply_base": 43,
-      "bucket_base_units": 144459707149880819712,
-      "distributed_base_units": 144459707149880819679,
-      "dust_base_units": 33
+      "bucket_base_units": 151055306791644430336,
+      "nft_reserve_base_units": 0,
+      "unresolvable_nfts": 0,
+      "eligible_bucket_base_units": 151055306791644430336,
+      "distributed_base_units": 151055306791644430329,
+      "dust_base_units": 7
     },
     "T2_ADAM_PASS": {
       "is_nft": true,
@@ -77,15 +97,76 @@
       "eligible_holders": 84,
       "raw_supply_base": 94,
       "eligible_supply_base": 94,
-      "bucket_base_units": 16073349674942930944,
-      "distributed_base_units": 16073349674942930895,
-      "dust_base_units": 49
+      "bucket_base_units": 16807210911751347200,
+      "nft_reserve_base_units": 176918009597382602,
+      "unresolvable_nfts": 1,
+      "eligible_bucket_base_units": 16630292902153964598,
+      "distributed_base_units": 16630292902153964588,
+      "dust_base_units": 10
     }
   },
+  "reserve": {
+    "team_treasury": {
+      "AGENT": {
+        "total_balance_base": 29644656,
+        "total_cmatra_base": 19781058767289747678,
+        "addresses": [
+          {
+            "address": "addr1wx84ytuumke8gxex0l8par4852ey7l4eq6h325rnez0yluc56x0dj",
+            "label": "$TALOS Treasury",
+            "balance_base": 29634754,
+            "cmatra_base": 19774451436649321185
+          },
+          {
+            "address": "addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9",
+            "label": "FPS DAO Treasury",
+            "balance_base": 9902,
+            "cmatra_base": 6607330640426493
+          }
+        ]
+      },
+      "SHARDS": {
+        "total_balance_base": 446969700000,
+        "total_cmatra_base": 17287457635694675734,
+        "addresses": [
+          {
+            "address": "addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9",
+            "label": "FPS DAO Treasury",
+            "balance_base": 446969700000,
+            "cmatra_base": 17287457635694675734
+          }
+        ]
+      }
+    },
+    "nft_conditional": {
+      "FLUX_PASS": {
+        "total_supply": 401,
+        "unresolvable_count": 8,
+        "total_cmatra_base": 609902879621792520,
+        "per_nft_cmatra_base": 76237859952724065
+      },
+      "SE_BRAWLERS": {
+        "total_supply": 242,
+        "unresolvable_count": 14,
+        "total_cmatra_base": 543817456300534572,
+        "per_nft_cmatra_base": 38844104021466755
+      },
+      "T2_ADAM_PASS": {
+        "total_supply": 95,
+        "unresolvable_count": 1,
+        "total_cmatra_base": 176918009597382602,
+        "per_nft_cmatra_base": 176918009597382602
+      }
+    },
+    "total_team_reserve_base": 37068516402984423412,
+    "total_nft_reserve_base": 1330638345519709694,
+    "total_reserve_base": 38399154748504133106
+  },
   "totals": {
-    "unique_claimants": 6619,
-    "total_flux_distributed": 999836424942778002097,
-    "total_dust_remaining": 163575057221997903,
+    "unique_claimants": 6621,
+    "total_flux_distributed": 961455657805385123242,
+    "total_reserve": 38399154748504133106,
+    "total_dust_remaining": 145187446110743652,
     "sum_equals_max_supply": true
   }
 }
