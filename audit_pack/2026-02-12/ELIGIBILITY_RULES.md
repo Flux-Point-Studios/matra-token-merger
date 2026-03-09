@@ -1,6 +1,6 @@
 # cMATRA Merger -- Eligibility Rules
 
-**Version:** 2.0
+**Version:** 2.1
 **Date:** 2026-03-09
 **Applies to:** All reports in `audit_pack/2026-02-12/` with `cmatra` prefix
 
@@ -91,15 +91,22 @@ fungible tokens minted under the same policy. Treating fungible tokens
 (qty > 1) as NFTs would inflate supply counts, dilute per-NFT allocations,
 and misattribute value.
 
+### CIP-68 Handling
+
+Three collections (FLUX_PASS, SE_BRAWLERS, BRAWL_PASS_ETD) use the CIP-68
+standard, where each NFT has both a user token (`000de140` prefix, label 222)
+and a reference token (`000643b0` prefix, label 100), each with qty=1. Only
+the user token counts for eligibility; reference tokens are excluded.
+
 ### Impact of this filter
 
-| Collection | Total Assets Under Policy | True NFTs (qty=1) | Excluded (qty>1) |
-|------------|--------------------------|-------------------|-------------------|
-| FLUX_PASS | 804 | 802 | 2 |
-| SE_BRAWLERS | 484 | 484 | 0 |
-| BRAWL_PASS_ETD | 90 | 90 | 0 |
-| T1_ADAM_PASS | 79 | 43 | 36 |
-| T2_ADAM_PASS | 119 | 95 | 24 |
+| Collection | Total Assets | CIP-68 User Tokens | True NFTs (qty=1) | Excluded |
+|------------|-------------|--------------------|--------------------|----------|
+| FLUX_PASS | 804 | 401 | 401 | 403 (ref tokens + fungible) |
+| SE_BRAWLERS | 484 | 242 | 242 | 242 (ref tokens) |
+| BRAWL_PASS_ETD | 90 | 44 | 44 | 46 (ref tokens + fungible) |
+| T1_ADAM_PASS | 79 | n/a (non-CIP-68) | 43 | 36 (fungible) |
+| T2_ADAM_PASS | 119 | n/a (non-CIP-68) | 95 | 24 (fungible) |
 
 ---
 
@@ -127,12 +134,12 @@ and misattribute value.
 
 | Collection | Unresolvable Count |
 |------------|--------------------|
-| FLUX_PASS | 409 |
-| SE_BRAWLERS | 256 |
-| BRAWL_PASS_ETD | 46 |
+| FLUX_PASS | 8 |
+| SE_BRAWLERS | 14 |
+| BRAWL_PASS_ETD | 0 |
 | T1_ADAM_PASS | 0 |
 | T2_ADAM_PASS | 1 |
-| **Total** | **712** |
+| **Total** | **23** |
 
 ---
 
@@ -212,3 +219,4 @@ and must be documented in a supplementary addendum to this file.
 |---------|------|---------|
 | 1.0 | 2026-03-05 | Initial eligibility rules |
 | 2.0 | 2026-03-09 | Added 3-bucket model (Team treasury carve-out + conditional NFT reserve), 6-month claim window, reserve ledger |
+| 2.1 | 2026-03-09 | Updated NFT counts for CIP-68 correction (ref tokens excluded), updated unresolvable counts (712→23) |
