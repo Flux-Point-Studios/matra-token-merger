@@ -153,12 +153,17 @@ def fetch_nft_holders(
     bf: BlockfrostClient,
     collection: NftCollectionInfo,
     resolve_scripts: bool = True,
+    unresolved_out: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch all holders of NFTs in a collection.
 
     Enumerates all assets under the policy, looks up the holder of each,
     and optionally resolves script addresses back to original owners.
     Returns [{address, quantity}] in the same format as fetch_holders().
+
+    If *unresolved_out* is provided, appends one dict per unresolvable NFT:
+    ``{"asset_unit": ..., "script_address": ...}`` — used to build the
+    conditional reserve ledger.
     """
     assets = bf.get_policy_assets(collection.policy_id)
     logger.info(
@@ -187,6 +192,11 @@ def fetch_nft_holders(
                     addr = f"__resolved_pkh__{pkh}"
                 else:
                     unresolved += 1
+                    if unresolved_out is not None:
+                        unresolved_out.append({
+                            "asset_unit": unit,
+                            "script_address": addr,
+                        })
                     logger.debug(
                         "Could not resolve script holder for %s at %s",
                         unit, addr,
@@ -286,10 +296,24 @@ def run_snapshot_and_allocate(
     nft_collections: list[NftCollectionInfo] | None = None,
     resolve_nft_scripts: bool = True,
     min_flux_threshold: int = 1,
+    reserve_addresses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Run the full snapshot + allocation pipeline."""
-    tokens = tokens or LEGACY_TOKENS
+    """Run the full snapshot + allocation pipeline.
+
+    Three-bucket model when *reserve_addresses* is provided:
+
+    1. **Normal claimants** - resolvable holders get claim UTxOs.
+    2. **Team treasury** - holdings at *reserve_addresses* are carved out
+       as immediate Team allocation (not redistributed).
+    3. **Conditional reserve** - unresolvable script-held NFTs get a frozen
+       per-asset reserve amount; claimable during the window, swept after.
+
+    When *reserve_addresses* is ``None``, the pipeline behaves as before
+    (excluded holdings are redistributed via eligible denominator).
+    """
+    tokens = tokens if tokens is not None else LEGACY_TOKENS
     nft_collections = nft_collections if nft_collections is not None else NFT_COLLECTIONS
+    reserve_addresses = reserve_addresses or {}
 
     # Capture snapshot anchor
     anchor = capture_snapshot_anchor(bf)
@@ -301,18 +325,61 @@ def run_snapshot_and_allocate(
 
     all_allocations: list[dict[str, Any]] = []
     token_summaries: dict[str, Any] = {}
+    reserve_info: dict[str, Any] = {
+        "team_treasury": {},
+        "nft_conditional": {},
+    }
 
     for token in tokens:
         token_data = merge_report["tokens"][token.name]
         bucket = token_data["flux_bucket_base_units"]
+        total_supply = token_data["supply_base_units"]
 
         # Fetch holders
         raw_holders = fetch_holders(bf, token)
         raw_supply = sum(h["quantity"] for h in raw_holders)
 
-        # Filter
+        # Separate reserve-address holdings (Team treasury carve-out)
+        team_reserve_balance = 0
+        team_reserve_detail: list[dict[str, Any]] = []
+        remaining_holders: list[dict[str, Any]] = []
+        for h in raw_holders:
+            label = reserve_addresses.get(h["address"])
+            if label is not None:
+                team_reserve_balance += h["quantity"]
+                team_reserve_detail.append({
+                    "address": h["address"],
+                    "label": label,
+                    "balance_base": h["quantity"],
+                })
+            else:
+                remaining_holders.append(h)
+
+        # Compute Team reserve share and adjusted bucket
+        team_reserve_cmatra = 0
+        adjusted_bucket = bucket
+        if team_reserve_balance > 0 and total_supply > 0:
+            team_reserve_cmatra = (team_reserve_balance * bucket) // total_supply
+            adjusted_bucket = bucket - team_reserve_cmatra
+            logger.info(
+                "%s: carved out %d base units at reserve addresses "
+                "= %d cMATRA reserve (%.2f%% of bucket)",
+                token.name,
+                team_reserve_balance,
+                team_reserve_cmatra,
+                team_reserve_cmatra / bucket * 100,
+            )
+            for det in team_reserve_detail:
+                det["cmatra_base"] = (det["balance_base"] * bucket) // total_supply
+            reserve_info["team_treasury"][token.name] = {
+                "total_balance_base": team_reserve_balance,
+                "total_cmatra_base": team_reserve_cmatra,
+                "addresses": team_reserve_detail,
+            }
+
+        # Filter remaining holders (exclude other script addresses)
         eligible_holders = filter_holders(
-            raw_holders,
+            remaining_holders,
             exclude_script=exclude_script,
             exclude_addresses=exclude_addresses,
             script_whitelist=script_whitelist,
@@ -320,7 +387,7 @@ def run_snapshot_and_allocate(
         eligible_supply = sum(h["quantity"] for h in eligible_holders)
 
         logger.info(
-            "%s: %d raw holders → %d eligible (supply: %d → %d base units)",
+            "%s: %d raw holders -> %d eligible (supply: %d -> %d base units)",
             token.name,
             len(raw_holders),
             len(eligible_holders),
@@ -328,17 +395,17 @@ def run_snapshot_and_allocate(
             eligible_supply,
         )
 
-        # Allocate
+        # Allocate from adjusted bucket (reserve already carved out)
         allocs = allocate_flux(
             token,
             eligible_holders,
-            bucket,
+            adjusted_bucket,
             denominator_mode=denominator_mode,
             total_supply_base=token_data.get("supply_base_units"),
         )
 
         distributed = sum(a["flux_units"] for a in allocs)
-        dust = bucket - distributed
+        dust = adjusted_bucket - distributed
 
         token_summaries[token.name] = {
             "raw_holders": len(raw_holders),
@@ -346,6 +413,8 @@ def run_snapshot_and_allocate(
             "raw_supply_base": raw_supply,
             "eligible_supply_base": eligible_supply,
             "bucket_base_units": bucket,
+            "team_reserve_base_units": team_reserve_cmatra,
+            "eligible_bucket_base_units": adjusted_bucket,
             "distributed_base_units": distributed,
             "dust_base_units": dust,
         }
@@ -356,13 +425,53 @@ def run_snapshot_and_allocate(
     for coll in nft_collections:
         coll_data = merge_report["tokens"].get(coll.name)
         if coll_data is None:
-            logger.warning("No merge data for NFT collection %s — skipping", coll.name)
+            logger.warning("No merge data for NFT collection %s -- skipping", coll.name)
             continue
         bucket = coll_data["flux_bucket_base_units"]
+        total_supply = coll_data["supply_base_units"]
 
-        # Fetch NFT holders
-        raw_holders = fetch_nft_holders(bf, coll, resolve_scripts=resolve_nft_scripts)
+        # Fetch NFT holders, tracking unresolvable units for reserve ledger
+        unresolved_units: list[dict[str, Any]] = []
+        raw_holders = fetch_nft_holders(
+            bf, coll,
+            resolve_scripts=resolve_nft_scripts,
+            unresolved_out=unresolved_units,
+        )
         raw_supply = sum(h["quantity"] for h in raw_holders)
+
+        # Compute conditional reserve for unresolvable NFTs
+        unresolvable_count = len(unresolved_units)
+        nft_reserve_cmatra = 0
+        adjusted_bucket = bucket
+        per_nft_reserve = 0
+        if unresolvable_count > 0 and total_supply > 0:
+            nft_reserve_cmatra = (unresolvable_count * bucket) // total_supply
+            adjusted_bucket = bucket - nft_reserve_cmatra
+            per_nft_reserve = bucket // total_supply
+            logger.info(
+                "%s: %d/%d unresolvable NFTs -> %d cMATRA conditional reserve (%.2f%%)",
+                coll.name,
+                unresolvable_count,
+                total_supply,
+                nft_reserve_cmatra,
+                nft_reserve_cmatra / bucket * 100,
+            )
+            # Build per-asset reserve ledger
+            reserve_ledger = []
+            for entry in unresolved_units:
+                reserve_ledger.append({
+                    "asset_unit": entry["asset_unit"],
+                    "script_address": entry["script_address"],
+                    "reserved_cmatra_base": per_nft_reserve,
+                    "status": "pending",
+                })
+            reserve_info["nft_conditional"][coll.name] = {
+                "total_supply": total_supply,
+                "unresolvable_count": unresolvable_count,
+                "total_cmatra_base": nft_reserve_cmatra,
+                "per_nft_cmatra_base": per_nft_reserve,
+                "ledger": reserve_ledger,
+            }
 
         # Filter (resolved PKH addresses are not script addresses)
         eligible_holders = filter_holders(
@@ -374,7 +483,7 @@ def run_snapshot_and_allocate(
         eligible_supply = sum(h["quantity"] for h in eligible_holders)
 
         logger.info(
-            "%s: %d raw holders → %d eligible (supply: %d → %d NFTs)",
+            "%s: %d raw holders -> %d eligible (supply: %d -> %d NFTs)",
             coll.name,
             len(raw_holders),
             len(eligible_holders),
@@ -393,13 +502,13 @@ def run_snapshot_and_allocate(
         allocs = allocate_flux(
             nft_as_token,
             eligible_holders,
-            bucket,
+            adjusted_bucket,
             denominator_mode=denominator_mode,
             total_supply_base=coll_data.get("supply_base_units"),
         )
 
         distributed = sum(a["flux_units"] for a in allocs)
-        dust = bucket - distributed
+        dust = adjusted_bucket - distributed
 
         token_summaries[coll.name] = {
             "is_nft": True,
@@ -408,6 +517,9 @@ def run_snapshot_and_allocate(
             "raw_supply_base": raw_supply,
             "eligible_supply_base": eligible_supply,
             "bucket_base_units": bucket,
+            "nft_reserve_base_units": nft_reserve_cmatra,
+            "unresolvable_nfts": unresolvable_count,
+            "eligible_bucket_base_units": adjusted_bucket,
             "distributed_base_units": distributed,
             "dust_base_units": dust,
         }
@@ -458,7 +570,18 @@ def run_snapshot_and_allocate(
         final_rows.append(row)
 
     total_distributed = sum(r["flux_total_units"] for r in final_rows)
-    total_dust = FLUX_MAX_SUPPLY_BASE - total_distributed
+
+    # Reserve totals
+    total_team_reserve = sum(
+        v["total_cmatra_base"]
+        for v in reserve_info["team_treasury"].values()
+    )
+    total_nft_reserve = sum(
+        v["total_cmatra_base"]
+        for v in reserve_info["nft_conditional"].values()
+    )
+    total_reserve = total_team_reserve + total_nft_reserve
+    total_dust = FLUX_MAX_SUPPLY_BASE - total_distributed - total_reserve
 
     # Dust sweep
     if dust_to and total_dust > 0:
@@ -483,7 +606,7 @@ def run_snapshot_and_allocate(
                 })
             total_distributed += total_dust
             total_dust = 0
-            logger.info("Dust swept %d FLUX base units to %s", total_dust, dust_to)
+            logger.info("Dust swept %d base units to %s", total_dust, dust_to)
 
     summary = {
         "snapshot_anchor": anchor,
@@ -493,19 +616,36 @@ def run_snapshot_and_allocate(
             "denominator_mode": denominator_mode,
             "dust_to": dust_to,
             "min_flux_threshold": min_flux_threshold,
+            "reserve_addresses": {
+                addr: label for addr, label in reserve_addresses.items()
+            } if reserve_addresses else None,
         },
         "per_token": token_summaries,
+        "reserve": {
+            "team_treasury": reserve_info["team_treasury"],
+            "nft_conditional": {
+                name: {k: v for k, v in data.items() if k != "ledger"}
+                for name, data in reserve_info["nft_conditional"].items()
+            },
+            "total_team_reserve_base": total_team_reserve,
+            "total_nft_reserve_base": total_nft_reserve,
+            "total_reserve_base": total_reserve,
+        },
         "totals": {
             "unique_claimants": len(final_rows),
             "total_flux_distributed": total_distributed,
+            "total_reserve": total_reserve,
             "total_dust_remaining": total_dust,
-            "sum_equals_max_supply": total_distributed + total_dust == FLUX_MAX_SUPPLY_BASE,
+            "sum_equals_max_supply": (
+                total_distributed + total_reserve + total_dust == FLUX_MAX_SUPPLY_BASE
+            ),
         },
     }
 
     return {
         "allocations": final_rows,
         "summary": summary,
+        "reserve_ledger": reserve_info,
     }
 
 
@@ -602,6 +742,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Treasury address to sweep dust to",
     )
     parser.add_argument(
+        "--reserve-address", type=str, nargs=2, action="append",
+        metavar=("ADDRESS", "LABEL"), default=[],
+        help="Address whose holdings are carved out as Team reserve "
+             "(can be specified multiple times)",
+    )
+    parser.add_argument(
         "--out", type=str, required=True,
         help="Output path for allocations CSV",
     )
@@ -609,12 +755,18 @@ def main(argv: list[str] | None = None) -> None:
         "--out-summary", type=str, required=True,
         help="Output path for allocations summary JSON",
     )
+    parser.add_argument(
+        "--out-reserve-ledger", type=str, default=None,
+        help="Output path for NFT conditional reserve ledger JSON",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     with open(args.merge_report) as f:
         merge_report = json.load(f)
+
+    reserve_addrs = {addr: label for addr, label in args.reserve_address}
 
     bf = BlockfrostClient()
     result = run_snapshot_and_allocate(
@@ -626,6 +778,7 @@ def main(argv: list[str] | None = None) -> None:
         denominator_mode=args.denominator_mode,
         dust_to=args.dust_to,
         resolve_nft_scripts=args.resolve_nft_scripts,
+        reserve_addresses=reserve_addrs if reserve_addrs else None,
     )
 
     # Write CSV
@@ -641,10 +794,20 @@ def main(argv: list[str] | None = None) -> None:
         json.dump(result["summary"], f, indent=2)
     logger.info("Summary: %s", summary_path)
 
+    # Write reserve ledger
+    if args.out_reserve_ledger and result.get("reserve_ledger"):
+        ledger_path = Path(args.out_reserve_ledger)
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(ledger_path, "w") as f:
+            json.dump(result["reserve_ledger"], f, indent=2)
+        logger.info("Reserve ledger: %s", ledger_path)
+
     # Validate
     totals = result["summary"]["totals"]
     if totals["sum_equals_max_supply"]:
-        logger.info("Total distributed + dust == %d (OK)", FLUX_MAX_SUPPLY_BASE)
+        logger.info(
+            "distributed + reserve + dust == %d (OK)", FLUX_MAX_SUPPLY_BASE,
+        )
     else:
         logger.error("SUPPLY MISMATCH!")
         sys.exit(1)

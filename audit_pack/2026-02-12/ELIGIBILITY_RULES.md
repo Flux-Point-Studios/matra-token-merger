@@ -1,7 +1,7 @@
-# cMATRA Merger — Eligibility Rules
+# cMATRA Merger -- Eligibility Rules
 
-**Version:** 1.0
-**Date:** 2026-03-05
+**Version:** 2.0
+**Date:** 2026-03-09
 **Applies to:** All reports in `audit_pack/2026-02-12/` with `cmatra` prefix
 
 ---
@@ -29,18 +29,67 @@ The cMATRA merger consolidates 7 assets into a single cMATRA allocation:
 
 ---
 
-## 2. NFT Eligibility Rule
+## 2. Three-Bucket Allocation Model
 
-> For NFT collections, only assets under the included policy with on-chain quantity
-> exactly `1` are treated as NFTs for merger eligibility. Any asset under the same
-> policy with quantity greater than `1` is treated as a fungible token and is
-> **excluded** from NFT allocation math.
+The total cMATRA supply is divided into three buckets:
+
+### Bucket 1: Normal Claimants
+
+Resolvable holders at snapshot time receive regular claim UTxOs. They may
+claim at any time during the 6-month claim window by signing with their
+payment key.
+
+### Bucket 2: Team Treasury (immediate)
+
+AGENT and SHARDS holdings at the following Team-controlled addresses are
+carved out as Team allocation. These are not distributed to other holders
+and are not subject to the claim window.
+
+| Address | Label |
+|---------|-------|
+| `addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9` | FPS DAO Treasury |
+| `addr1wx84ytuumke8gxex0l8par4852ey7l4eq6h325rnez0yluc56x0dj` | $TALOS Treasury Wallet |
+
+The Team's share is computed as:
+
+    team_share = (team_balance / total_on_chain_supply) * bucket
+
+This amount is subtracted from the bucket BEFORE distribution to eligible
+holders, ensuring it is not redistributed.
+
+### Bucket 3: Conditional Reserve (script-held NFTs)
+
+> For unresolved assets held in script or marketplace custody at snapshot
+> time, a per-asset cMATRA reserve allocation is recorded but not immediately
+> distributed. During the 6-month claim window, the holder of the corresponding
+> asset may claim that reserved allocation by moving the asset to a personal
+> wallet and proving current control of that wallet. After the claim deadline,
+> any unclaimed reserve allocations associated with unresolved script-held
+> assets are sweepable by the Team and become Team allocation.
+
+The reserve amount per NFT is:
+
+    per_nft_reserve = collection_bucket / total_nft_supply
+
+The claim right attaches to the **asset**, not to an assumed owner. Whoever
+moves that exact asset into a normal PKH wallet before the deadline, and
+signs from that wallet, can claim that asset's reserved cMATRA amount.
+
+---
+
+## 3. NFT Eligibility Rule
+
+> For NFT collections, only assets under the included policy with on-chain
+> quantity exactly `1` are treated as NFTs for merger eligibility. Any asset
+> under the same policy with quantity greater than `1` is treated as a
+> fungible token and is **excluded** from NFT allocation math.
 
 ### Rationale
 
-Several NFT policies contain both true 1-of-1 NFTs and semi-fungible or fungible
-tokens minted under the same policy. Treating fungible tokens (qty > 1) as NFTs
-would inflate supply counts, dilute per-NFT allocations, and misattribute value.
+Several NFT policies contain both true 1-of-1 NFTs and semi-fungible or
+fungible tokens minted under the same policy. Treating fungible tokens
+(qty > 1) as NFTs would inflate supply counts, dilute per-NFT allocations,
+and misattribute value.
 
 ### Impact of this filter
 
@@ -54,53 +103,53 @@ would inflate supply counts, dilute per-NFT allocations, and misattribute value.
 
 ---
 
-## 3. Script Address / Marketplace Rule
+## 4. Script Address / Marketplace Resolution
 
-> NFTs held in script/marketplace custody are excluded from the allocation unless
-> beneficial ownership can be deterministically resolved from on-chain data.
+> NFTs held in script/marketplace custody are placed in the conditional
+> reserve (Bucket 3) unless beneficial ownership can be deterministically
+> resolved from on-chain data at snapshot time.
 
 ### Resolution strategies (applied in order)
 
-1. **Datum parsing**: Parse the UTxO's inline datum (CBOR) for a 28-byte field
-   matching a payment key hash. Most Cardano marketplaces (JPG Store, etc.)
-   encode the seller's PKH in the top-level datum structure.
+1. **Datum parsing**: Parse the UTxO's inline datum (CBOR) for a 28-byte
+   field matching a payment key hash. Most Cardano marketplaces (JPG Store,
+   etc.) encode the seller's PKH in the top-level datum structure.
 
-2. **Deposit transaction tracing**: If datum parsing fails, trace the transaction
-   that deposited the NFT to the script address. If the sending input came from
-   a public-key address, that address's PKH is used as the beneficial owner.
+2. **Deposit transaction tracing**: If datum parsing fails, trace the
+   transaction that deposited the NFT to the script address. If the sending
+   input came from a public-key address, that address's PKH is used as the
+   beneficial owner.
 
-3. **Exclusion**: If neither strategy resolves to a public-key hash, the NFT is
-   excluded from the allocation. The holder cannot be deterministically identified.
+3. **Conditional reserve**: If neither strategy resolves to a public-key
+   hash, the NFT's allocation enters the conditional reserve ledger.
 
 ### Unresolvable NFTs (at time of snapshot)
 
 | Collection | Unresolvable Count |
 |------------|--------------------|
-| FLUX_PASS | 419 |
-| SE_BRAWLERS | 260 |
-| BRAWL_PASS_ETD | 47 |
+| FLUX_PASS | 409 |
+| SE_BRAWLERS | 256 |
+| BRAWL_PASS_ETD | 46 |
 | T1_ADAM_PASS | 0 |
-| T2_ADAM_PASS | 2 |
-| **Total** | **728** |
-
-These NFTs are excluded from the allocation. Their share of the bucket is
-redistributed proportionally among resolved (eligible) holders within the
-same collection.
+| T2_ADAM_PASS | 1 |
+| **Total** | **712** |
 
 ---
 
-## 4. Fungible Token Holder Rules
+## 5. Fungible Token Holder Rules
 
-- All addresses holding AGENT or SHARDS are eligible.
-- **Script addresses** (Plutus/native scripts) are **excluded** — only public-key
-  addresses participate.
-- There is no script-resolution fallback for fungible tokens (unlike NFTs), because
-  fungible tokens at script addresses typically represent DEX liquidity, lending
-  positions, or other protocol-managed holdings with no single beneficial owner.
+- All addresses holding AGENT or SHARDS are eligible, EXCEPT:
+  - **Team treasury addresses** (Bucket 2) -- carved out as Team allocation
+  - **Other script addresses** (DEX pools, lending protocols) -- excluded
+    and redistributed proportionally among eligible PKH holders
+- There is no script-resolution fallback for fungible tokens, because
+  fungible tokens at script addresses typically represent DEX liquidity,
+  lending positions, or other protocol-managed holdings with no single
+  beneficial owner.
 
 ---
 
-## 5. Allocation Parameters
+## 6. Allocation Parameters
 
 | Parameter | Value |
 |-----------|-------|
@@ -108,28 +157,58 @@ same collection.
 | Decimals | 12 |
 | Total supply (base units) | 1,000,000,000,000,000,000,000 (1e21) |
 | Total supply (display) | 1,000,000,000 (1 billion) |
-| Denominator mode | `eligible` (sum of eligible holder balances) |
+| Denominator mode | `eligible` (sum of eligible holder balances, after reserve carve-out) |
 | Min allocation threshold | 1 base unit |
+| Claim window | 6 months from deployment |
 | Dust handling | Retained as remainder (not swept) |
 
 ---
 
-## 6. Pricing
+## 7. Claim Window and Expiry
 
-Each asset's share of the total cMATRA supply is weighted by its TWAP-based USD
-valuation:
+- **Normal claimants** (Bucket 1): May claim at any time during the 6-month
+  window by signing a transaction with their payment key.
 
-- **Fungible tokens**: 7-day TWAP from top-3 DEX pools (by TVL) via TapTools
-- **NFT collections**: 7-day TWAP of floor price via TapTools NFT OHLCV data
-- **Combination**: Median across pool/window TWAPs for fungible; arithmetic mean
-  of close prices for NFTs
+- **Conditional reserve holders** (Bucket 3): May claim by:
+  1. Moving the exact NFT asset from the script/marketplace address to a
+     personal (PKH) wallet
+  2. Proving current control of that wallet
+  3. The service verifies: asset unit matches a reserve ledger entry, asset
+     is now at a PKH address, claimant signs with that wallet, deadline has
+     not passed, entry has not already been claimed
+
+- **After the deadline**: The admin may sweep all unclaimed claim UTxOs and
+  any unclaimed conditional reserve allocations. These become Team allocation.
+  The claim validator enforces this on-chain: admin signature required AND
+  transaction validity range must be entirely after the deadline.
 
 ---
 
-## 7. Appeals
+## 8. Pricing
+
+Each asset's share of the total cMATRA supply is weighted by its TWAP-based
+USD valuation:
+
+- **Fungible tokens**: 7-day TWAP from top-3 DEX pools (by TVL) via TapTools
+- **NFT collections**: 7-day TWAP of floor price via TapTools NFT OHLCV data
+- **Combination**: Median across pool/window TWAPs for fungible; arithmetic
+  mean of close prices for NFTs
+
+---
+
+## 9. Appeals
 
 If a holder believes their NFT was incorrectly excluded (e.g., listed on a
-marketplace whose datum format is not recognized), they may request manual review.
-The deterministic filter described above is the default; any exception requires
-explicit governance approval and must be documented in a supplementary addendum
-to this file.
+marketplace whose datum format is not recognized), they may request manual
+review during the 6-month claim window. The deterministic filter described
+above is the default; any exception requires explicit governance approval
+and must be documented in a supplementary addendum to this file.
+
+---
+
+## Changelog
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-03-05 | Initial eligibility rules |
+| 2.0 | 2026-03-09 | Added 3-bucket model (Team treasury carve-out + conditional NFT reserve), 6-month claim window, reserve ledger |

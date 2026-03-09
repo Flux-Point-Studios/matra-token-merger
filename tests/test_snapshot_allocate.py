@@ -435,3 +435,173 @@ class TestDatumPkhExtraction:
     def test_extract_pkh_from_datum_invalid_cbor(self):
         from tools.snapshot_allocate_flux import _extract_pkh_from_datum
         assert _extract_pkh_from_datum({"inline_datum": "deadbeef"}) is None
+
+
+class TestThreeBucketReserve:
+    """Tests for the 3-bucket model: claimants + team treasury + NFT reserve."""
+
+    def test_reserve_addresses_carved_out(self, mocker):
+        """Holdings at reserve addresses are subtracted from the bucket."""
+        from tools.snapshot_allocate_flux import run_snapshot_and_allocate
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_latest_block.return_value = {
+            "hash": "aa" * 32, "height": 100, "time": 1000, "slot": 500,
+        }
+        # AGENT holders: treasury has 300/1000
+        mock_bf.get_asset_addresses.return_value = [
+            {"address": "addr1_treasury", "quantity": "300"},
+            {"address": "addr1_alice", "quantity": "400"},
+            {"address": "addr1_bob", "quantity": "300"},
+        ]
+
+        merge_report = {
+            "tokens": {
+                "AGENT": {
+                    "flux_bucket_base_units": 1000,
+                    "supply_base_units": 1000,
+                },
+            },
+        }
+        result = run_snapshot_and_allocate(
+            mock_bf, merge_report,
+            exclude_script=False,
+            tokens=[AGENT],
+            nft_collections=[],
+            reserve_addresses={"addr1_treasury": "Treasury"},
+        )
+        summary = result["summary"]
+
+        # Treasury carved out: 300/1000 * 1000 = 300
+        assert summary["per_token"]["AGENT"]["team_reserve_base_units"] == 300
+        assert summary["per_token"]["AGENT"]["eligible_bucket_base_units"] == 700
+
+        # Reserve in summary
+        assert summary["reserve"]["total_team_reserve_base"] == 300
+
+        # distributed + reserve + dust == bucket
+        totals = summary["totals"]
+        assert totals["sum_equals_max_supply"]
+
+    def test_no_reserve_addresses_backward_compatible(self, mocker):
+        """Without reserve_addresses, behavior is unchanged."""
+        from tools.snapshot_allocate_flux import run_snapshot_and_allocate
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_latest_block.return_value = {
+            "hash": "aa" * 32, "height": 100, "time": 1000, "slot": 500,
+        }
+        mock_bf.get_asset_addresses.return_value = [
+            {"address": "addr1_alice", "quantity": "500"},
+            {"address": "addr1_bob", "quantity": "500"},
+        ]
+
+        merge_report = {
+            "tokens": {
+                "AGENT": {
+                    "flux_bucket_base_units": 1000,
+                    "supply_base_units": 1000,
+                },
+            },
+        }
+        result = run_snapshot_and_allocate(
+            mock_bf, merge_report,
+            exclude_script=False,
+            tokens=[AGENT],
+            nft_collections=[],
+        )
+        summary = result["summary"]
+        assert summary["per_token"]["AGENT"]["team_reserve_base_units"] == 0
+        assert summary["reserve"]["total_reserve_base"] == 0
+
+    def test_nft_unresolved_reserve_ledger(self, mocker):
+        """Unresolvable NFTs produce a per-asset reserve ledger."""
+        from tools.snapshot_allocate_flux import fetch_nft_holders
+        from tools.config import FLUX_PASS
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_policy_assets.return_value = [
+            {"asset": "nft1"}, {"asset": "nft2"}, {"asset": "nft3"},
+        ]
+        # nft1 -> script (unresolvable), nft2 -> alice, nft3 -> bob
+        mock_bf.get_asset_addresses.side_effect = [
+            [{"address": "addr1w_script", "quantity": "1"}],
+            [{"address": "addr1_alice", "quantity": "1"}],
+            [{"address": "addr1_bob", "quantity": "1"}],
+        ]
+        # Script resolution fails
+        mock_bf.get_address_utxos.return_value = []
+
+        mocker.patch(
+            "tools.snapshot_allocate_flux.is_script_address",
+            side_effect=lambda a: a.startswith("addr1w"),
+        )
+
+        unresolved: list = []
+        holders = fetch_nft_holders(
+            mock_bf, FLUX_PASS, resolve_scripts=True, unresolved_out=unresolved,
+        )
+
+        assert len(holders) == 2  # alice + bob
+        assert len(unresolved) == 1
+        assert unresolved[0]["asset_unit"] == "nft1"
+        assert unresolved[0]["script_address"] == "addr1w_script"
+
+    def test_three_bucket_invariant(self, mocker):
+        """distributed + team_reserve + nft_reserve + dust == total supply."""
+        from tools.snapshot_allocate_flux import run_snapshot_and_allocate
+        from tools.config import FLUX_PASS
+
+        mock_bf = mocker.MagicMock()
+        mock_bf.get_latest_block.return_value = {
+            "hash": "aa" * 32, "height": 100, "time": 1000, "slot": 500,
+        }
+        # AGENT: treasury holds 200/1000
+        mock_bf.get_asset_addresses.return_value = [
+            {"address": "addr1_treasury", "quantity": "200"},
+            {"address": "addr1_alice", "quantity": "800"},
+        ]
+        # NFT collection: 3 on-chain, 1 unresolvable
+        mock_bf.get_policy_assets.return_value = [
+            {"asset": "nft1"}, {"asset": "nft2"}, {"asset": "nft3"},
+        ]
+
+        nft_addr_calls = iter([
+            [{"address": "addr1w_script", "quantity": "1"}],
+            [{"address": "addr1_alice", "quantity": "1"}],
+            [{"address": "addr1_bob", "quantity": "1"}],
+        ])
+        mock_bf.get_asset_addresses.side_effect = lambda *a, **kw: next(nft_addr_calls)
+        mock_bf.get_address_utxos.return_value = []
+
+        mocker.patch(
+            "tools.snapshot_allocate_flux.is_script_address",
+            side_effect=lambda a: a.startswith("addr1w"),
+        )
+        mocker.patch(
+            "tools.snapshot_allocate_flux.address_to_payment_key_hash",
+            side_effect=lambda a: SAMPLE_PKH_1 if "alice" in a else "bb" * 14,
+        )
+
+        merge_report = {
+            "tokens": {
+                "FLUX_PASS": {
+                    "flux_bucket_base_units": FLUX_MAX_SUPPLY_BASE,
+                    "supply_base_units": 3,
+                },
+            },
+        }
+        result = run_snapshot_and_allocate(
+            mock_bf, merge_report,
+            exclude_script=False,
+            tokens=[],
+            nft_collections=[FLUX_PASS],
+            reserve_addresses={"addr1_treasury": "Treasury"},
+        )
+        totals = result["summary"]["totals"]
+        assert totals["sum_equals_max_supply"]
+
+        # NFT reserve should exist for 1 unresolvable NFT
+        nft_res = result["summary"]["reserve"]["nft_conditional"]
+        assert "FLUX_PASS" in nft_res
+        assert nft_res["FLUX_PASS"]["unresolvable_count"] == 1

@@ -1,0 +1,83 @@
+{
+  "treasury_reserves": {
+    "AGENT_FPS DAO Treasury": {
+      "address": "addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9",
+      "label": "FPS DAO Treasury",
+      "token": "AGENT",
+      "balance_base": 9902,
+      "balance_display": 9902.0,
+      "reserve_cmatra_base": 6318831622877103,
+      "reserve_cmatra_display": 6318.831622877103,
+      "pct_of_supply": 0.0009901999999999999
+    },
+    "AGENT_$TALOS Treasury Wallet": {
+      "address": "addr1wx84ytuumke8gxex0l8par4852ey7l4eq6h325rnez0yluc56x0dj",
+      "label": "$TALOS Treasury Wallet",
+      "token": "AGENT",
+      "balance_base": 29634754,
+      "balance_display": 29634754.0,
+      "reserve_cmatra_base": 18911030166772747645,
+      "reserve_cmatra_display": 18911030.16677275,
+      "pct_of_supply": 2.9634754
+    },
+    "SHARDS_FPS DAO Treasury": {
+      "address": "addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9",
+      "label": "FPS DAO Treasury",
+      "token": "SHARDS",
+      "balance_base": 446969700000,
+      "balance_display": 446969.7,
+      "reserve_cmatra_base": 16532627157965983081,
+      "reserve_cmatra_display": 16532627.157965982,
+      "pct_of_supply": 14.471902685102162
+    }
+  },
+  "nft_reserves": {
+    "FLUX_PASS": {
+      "collection": "FLUX_PASS",
+      "total_supply": 802,
+      "eligible_supply": 393,
+      "unresolvable": 409,
+      "reserve_cmatra_base": 29819801468592672063,
+      "reserve_cmatra_display": 29819801.468592674,
+      "pct_unresolvable": 50.99750623441397
+    },
+    "SE_BRAWLERS": {
+      "collection": "SE_BRAWLERS",
+      "total_supply": 484,
+      "eligible_supply": 228,
+      "unresolvable": 256,
+      "reserve_cmatra_base": 9509897074918608726,
+      "reserve_cmatra_display": 9509897.07491861,
+      "pct_unresolvable": 52.892561983471076
+    },
+    "BRAWL_PASS_ETD": {
+      "collection": "BRAWL_PASS_ETD",
+      "total_supply": 90,
+      "eligible_supply": 44,
+      "unresolvable": 46,
+      "reserve_cmatra_base": 5437121552066390835,
+      "reserve_cmatra_display": 5437121.55206639,
+      "pct_unresolvable": 51.11111111111111
+    },
+    "T2_ADAM_PASS": {
+      "collection": "T2_ADAM_PASS",
+      "total_supply": 95,
+      "eligible_supply": 94,
+      "unresolvable": 1,
+      "reserve_cmatra_base": 169193154473083483,
+      "reserve_cmatra_display": 169193.15447308347,
+      "pct_unresolvable": 1.0526315789473684
+    }
+  },
+  "totals": {
+    "treasury_reserve_cmatra_base": 35449976156361607829,
+    "treasury_reserve_cmatra_display": 35449976.15636161,
+    "nft_reserve_cmatra_base": 44936013250050755107,
+    "nft_reserve_cmatra_display": 44936013.25005075,
+    "total_reserve_cmatra_base": 80385989406412362936,
+    "total_reserve_cmatra_display": 80385989.40641236,
+    "total_reserve_pct": 8.038598940641236,
+    "remaining_for_claimants_base": 919614010593587637064,
+    "remaining_for_claimants_display": 919614010.5935876
+  }
+}
