@@ -2,6 +2,10 @@
 """
 Phase 6 — Build Claim-Vault UTxOs (Distribution Transactions)
 
+.. deprecated::
+    This module implements the old per-claimant claim-UTxO model.
+    Use :mod:`tools.build_surrender_pool` for the surrender-and-redeem model (v3.0).
+
 Reads the allocations CSV and creates batched transactions that lock FLUX
 tokens at the claim validator script address with inline datums encoding
 each claimant's payment key hash.

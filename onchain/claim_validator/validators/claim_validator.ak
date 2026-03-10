@@ -1,57 +1,74 @@
-/// FLUX Claim Validator (Parameterized)
+/// Surrender Pool Validator (Parameterized)
 ///
-/// A signature-gated lockbox with admin reclaim.  Each UTxO at this script
-/// address contains an inline datum encoding a claimant's payment key hash.
+/// Location: onchain/claim_validator/validators/claim_validator.ak
 ///
-/// Spending paths:
-///   1. **Claimant claim** — the claimant (identified by `extra_signatories`)
-///      can spend their UTxO at any time.
-///   2. **Admin reclaim** — after the deadline, the admin can sweep unclaimed
-///      UTxOs (requires admin signature + validity range entirely after deadline).
+/// A surrender-and-redeem pool validator for the cMATRA merger. Pool UTxOs at
+/// this script address hold cMATRA tokens. The admin processes user surrender
+/// requests during a 6-month window, then reclaims any remaining pool balance
+/// after the deadline expires.
+///
+/// This file replaces the previous per-claimant claim validator. Instead of
+/// per-user datums, pool UTxOs use Void (unit) datums — the pool is fungible,
+/// and the admin orchestrates all spending.
 ///
 /// Parameters (applied at compile time via `aiken blueprint apply`):
 ///   - admin_pkh:  VerificationKeyHash of the admin wallet
-///   - deadline:   POSIX milliseconds after which admin may reclaim
+///   - deadline:   POSIX milliseconds after which admin may withdraw remaining pool
 ///
-/// Datum:  Constr 0 [ VerificationKeyHash ]   (28-byte payment key hash)
-/// Redeemer: ignored (unit / Void)
+/// Datum:  Void (unit) — no per-UTxO data needed
+///
+/// Redeemer:
+///   ProcessSurrender — Admin fulfills a user surrender during the window
+///   AdminWithdraw    — Admin reclaims remaining pool after deadline
+///
+/// Spending paths:
+///   1. **ProcessSurrender** — admin signs + tx validity entirely before deadline
+///   2. **AdminWithdraw**    — admin signs + tx validity entirely after deadline
+///
+/// Used by: off-chain Python tooling in tools/ and scripts/ for building
+/// surrender transactions and post-deadline sweep transactions.
 
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
 use aiken/interval.{
-  Interval, IntervalBound, Finite, PositiveInfinity, is_entirely_after,
+  Interval, IntervalBound, Finite, NegativeInfinity, PositiveInfinity,
+  is_entirely_after, is_entirely_before,
 }
 use cardano/transaction.{OutputReference, Transaction, placeholder}
 
-/// The inline datum stored in every claim UTxO.
-pub type ClaimDatum {
-  /// Payment verification-key hash of the authorised claimant.
-  claimant_pkh: VerificationKeyHash,
+/// Redeemer type: which spending path to take.
+pub type SurrenderAction {
+  /// Admin processes a user's surrender request during the open window.
+  ProcessSurrender
+  /// Admin withdraws remaining pool balance after the deadline.
+  AdminWithdraw
 }
 
-/// Parameterized spend validator: claimant claims or admin reclaims after deadline.
-validator claim_validator(admin_pkh: VerificationKeyHash, deadline: Int) {
+/// Parameterized spend validator: admin processes surrenders or withdraws after deadline.
+validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
   spend(
-    datum: Option<ClaimDatum>,
-    _redeemer: Data,
+    datum: Option<Void>,
+    redeemer: SurrenderAction,
     _own_ref: OutputReference,
     tx: Transaction,
   ) {
-    // Datum is required — fail if missing.
-    expect Some(d) = datum
+    // Datum is required — fail if missing (even though it is Void).
+    expect Some(_) = datum
 
-    // Path 1: Claimant claims — must sign with their payment key.
-    let claimant_claims = list.has(tx.extra_signatories, d.claimant_pkh)
+    // Admin must always sign regardless of path.
+    let admin_signed = list.has(tx.extra_signatories, admin_pkh)
 
-    // Path 2: Admin reclaims — must sign AND tx validity range is entirely
-    // after the deadline (i.e. invalid_before > deadline).
-    let admin_reclaims =
-      list.has(tx.extra_signatories, admin_pkh) && is_entirely_after(
-        tx.validity_range,
-        deadline,
-      )
+    when redeemer is {
+      // Path 1: ProcessSurrender — admin signs and window is still open.
+      // The tx validity range must be entirely before the deadline.
+      ProcessSurrender ->
+        admin_signed && is_entirely_before(tx.validity_range, deadline)
 
-    claimant_claims || admin_reclaims
+      // Path 2: AdminWithdraw — admin signs and window has closed.
+      // The tx validity range must be entirely after the deadline.
+      AdminWithdraw ->
+        admin_signed && is_entirely_after(tx.validity_range, deadline)
+    }
   }
 
   else(_) {
@@ -63,9 +80,13 @@ validator claim_validator(admin_pkh: VerificationKeyHash, deadline: Int) {
 // Tests
 // =========================================================================
 
-fn test_tx(
+/// Build a test transaction with given signers and a validity range
+/// from lower_bound (inclusive) to upper_bound (exclusive-ish).
+/// For "entirely before deadline" tests we need a finite upper bound.
+fn test_tx_bounded(
   signers: List<VerificationKeyHash>,
   lower_bound: Int,
+  upper_bound_type: IntervalBound<Int>,
 ) -> Transaction {
   Transaction {
     ..placeholder,
@@ -75,8 +96,40 @@ fn test_tx(
         bound_type: Finite(lower_bound),
         is_inclusive: True,
       },
+      upper_bound: upper_bound_type,
+    },
+  }
+}
+
+/// Build a test transaction with validity range [lower, +inf).
+/// This is useful for "entirely after" checks.
+fn test_tx_open_end(
+  signers: List<VerificationKeyHash>,
+  lower_bound: Int,
+) -> Transaction {
+  test_tx_bounded(
+    signers,
+    lower_bound,
+    IntervalBound { bound_type: PositiveInfinity, is_inclusive: True },
+  )
+}
+
+/// Build a test transaction with validity range (-inf, upper].
+/// This is useful for "entirely before" checks.
+fn test_tx_open_start(
+  signers: List<VerificationKeyHash>,
+  upper_bound: Int,
+) -> Transaction {
+  Transaction {
+    ..placeholder,
+    extra_signatories: signers,
+    validity_range: Interval {
+      lower_bound: IntervalBound {
+        bound_type: NegativeInfinity,
+        is_inclusive: True,
+      },
       upper_bound: IntervalBound {
-        bound_type: PositiveInfinity,
+        bound_type: Finite(upper_bound),
         is_inclusive: True,
       },
     },
@@ -85,9 +138,6 @@ fn test_tx(
 
 const test_admin_pkh: VerificationKeyHash =
   #"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb"
-
-const test_claimant_pkh: VerificationKeyHash =
-  #"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcc"
 
 const test_random_pkh: VerificationKeyHash =
   #"ccccccccccccccccccccccccccccccccccccccccccccccccccccccdd"
@@ -102,44 +152,108 @@ fn test_own_ref() -> OutputReference {
   }
 }
 
-test claimant_can_spend() {
-  let datum = Some(ClaimDatum { claimant_pkh: test_claimant_pkh })
-  let tx = test_tx([test_claimant_pkh], 0)
-  claim_validator.spend(test_admin_pkh, test_deadline, datum, Void, test_own_ref(), tx)
+// ----- ProcessSurrender tests -----
+
+test admin_can_process_surrender() {
+  // Admin signs, upper bound is before deadline -> passes
+  let datum = Some(Void)
+  let tx = test_tx_open_start([test_admin_pkh], test_deadline - 1)
+  surrender_pool.spend(
+    test_admin_pkh,
+    test_deadline,
+    datum,
+    ProcessSurrender,
+    test_own_ref(),
+    tx,
+  )
 }
 
-test admin_reclaim_before_deadline_fails() fail {
-  let datum = Some(ClaimDatum { claimant_pkh: test_claimant_pkh })
-  // lower_bound = deadline - 1 → NOT entirely after deadline
-  let tx = test_tx([test_admin_pkh], test_deadline - 1)
-  claim_validator.spend(test_admin_pkh, test_deadline, datum, Void, test_own_ref(), tx)
+test process_surrender_after_deadline_fails() fail {
+  // Admin signs, but validity range is after deadline -> must fail
+  let datum = Some(Void)
+  let tx = test_tx_open_end([test_admin_pkh], test_deadline + 1)
+  surrender_pool.spend(
+    test_admin_pkh,
+    test_deadline,
+    datum,
+    ProcessSurrender,
+    test_own_ref(),
+    tx,
+  )
 }
 
-test admin_reclaim_at_deadline_fails() fail {
-  let datum = Some(ClaimDatum { claimant_pkh: test_claimant_pkh })
-  // lower_bound = deadline exactly → NOT entirely after (is_entirely_after
-  // with inclusive bound checks low > point, which is false when equal)
-  let tx = test_tx([test_admin_pkh], test_deadline)
-  claim_validator.spend(test_admin_pkh, test_deadline, datum, Void, test_own_ref(), tx)
+// ----- AdminWithdraw tests -----
+
+test admin_withdraw_before_deadline_fails() fail {
+  // Admin signs, but validity range is before deadline -> must fail
+  let datum = Some(Void)
+  let tx = test_tx_open_start([test_admin_pkh], test_deadline - 1)
+  surrender_pool.spend(
+    test_admin_pkh,
+    test_deadline,
+    datum,
+    AdminWithdraw,
+    test_own_ref(),
+    tx,
+  )
 }
 
-test admin_reclaim_after_deadline_passes() {
-  let datum = Some(ClaimDatum { claimant_pkh: test_claimant_pkh })
-  // lower_bound = deadline + 1 → entirely after deadline
-  let tx = test_tx([test_admin_pkh], test_deadline + 1)
-  claim_validator.spend(test_admin_pkh, test_deadline, datum, Void, test_own_ref(), tx)
+test admin_withdraw_after_deadline_passes() {
+  // Admin signs, lower bound after deadline -> passes
+  let datum = Some(Void)
+  let tx = test_tx_open_end([test_admin_pkh], test_deadline + 1)
+  surrender_pool.spend(
+    test_admin_pkh,
+    test_deadline,
+    datum,
+    AdminWithdraw,
+    test_own_ref(),
+    tx,
+  )
 }
 
-test admin_reclaim_wrong_key_fails() fail {
-  let datum = Some(ClaimDatum { claimant_pkh: test_claimant_pkh })
-  // random key signs, even though after deadline
-  let tx = test_tx([test_random_pkh], test_deadline + 1)
-  claim_validator.spend(test_admin_pkh, test_deadline, datum, Void, test_own_ref(), tx)
+// ----- Authorization tests -----
+
+test random_signer_process_fails() fail {
+  // Non-admin tries ProcessSurrender during window -> must fail
+  let datum = Some(Void)
+  let tx = test_tx_open_start([test_random_pkh], test_deadline - 1)
+  surrender_pool.spend(
+    test_admin_pkh,
+    test_deadline,
+    datum,
+    ProcessSurrender,
+    test_own_ref(),
+    tx,
+  )
 }
 
-test random_third_party_fails() fail {
-  let datum = Some(ClaimDatum { claimant_pkh: test_claimant_pkh })
-  // random key, before deadline
-  let tx = test_tx([test_random_pkh], 0)
-  claim_validator.spend(test_admin_pkh, test_deadline, datum, Void, test_own_ref(), tx)
+test random_signer_withdraw_fails() fail {
+  // Non-admin tries AdminWithdraw after deadline -> must fail
+  let datum = Some(Void)
+  let tx = test_tx_open_end([test_random_pkh], test_deadline + 1)
+  surrender_pool.spend(
+    test_admin_pkh,
+    test_deadline,
+    datum,
+    AdminWithdraw,
+    test_own_ref(),
+    tx,
+  )
+}
+
+// ----- Datum robustness test -----
+
+test no_datum_fails() fail {
+  // Missing datum (None) should fail even with valid admin + timing
+  let datum: Option<Void> = None
+  let tx = test_tx_open_start([test_admin_pkh], test_deadline - 1)
+  surrender_pool.spend(
+    test_admin_pkh,
+    test_deadline,
+    datum,
+    ProcessSurrender,
+    test_own_ref(),
+    tx,
+  )
 }

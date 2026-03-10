@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.funding_calculator import compute_funding_report
+from tools.funding_calculator import compute_funding_report, compute_pool_funding_report
 
 
 def _make_allocations(n: int, flux_per: int = 1_000_000) -> list[dict]:
@@ -96,3 +96,61 @@ class TestComputeFundingReport:
         lovelace = report["grand_total"]["lovelace"]
         ada = report["grand_total"]["ada"]
         assert ada == lovelace / 1_000_000
+
+
+class TestComputePoolFundingReport:
+    """Tests for the surrender pool funding calculator (new model)."""
+
+    def test_basic_report_structure(self):
+        report = compute_pool_funding_report(
+            total_cmatra_base=850_000_000_000_000_000_000,
+            num_pool_utxos=10,
+        )
+        assert report["report_type"] == "pool_funding_calculator"
+        assert report["model"] == "surrender_pool"
+        assert report["num_pool_utxos"] == 10
+        assert "locked_ada" in report
+        assert "fees" in report
+        assert "safety_margin" in report
+        assert "grand_total" in report
+
+    def test_locked_ada_scales_with_utxos(self):
+        r5 = compute_pool_funding_report(total_cmatra_base=1_000_000, num_pool_utxos=5)
+        r10 = compute_pool_funding_report(total_cmatra_base=1_000_000, num_pool_utxos=10)
+        assert r10["locked_ada"]["total_min_ada_lovelace"] == 2 * r5["locked_ada"]["total_min_ada_lovelace"]
+
+    def test_fees_scale_with_deploy_txs(self):
+        report = compute_pool_funding_report(
+            total_cmatra_base=1_000_000,
+            fee_per_deploy_tx_lovelace=400_000,
+            num_deploy_txs=3,
+        )
+        assert report["fees"]["total_fees_lovelace"] == 3 * 400_000
+
+    def test_safety_margin_applied(self):
+        r0 = compute_pool_funding_report(total_cmatra_base=1_000_000, safety_margin_pct=0.0)
+        r10 = compute_pool_funding_report(total_cmatra_base=1_000_000, safety_margin_pct=10.0)
+        assert r10["grand_total"]["lovelace"] > r0["grand_total"]["lovelace"]
+        assert r0["safety_margin"]["margin_lovelace"] == 0
+
+    def test_grand_total_formula(self):
+        report = compute_pool_funding_report(
+            total_cmatra_base=1_000_000,
+            num_pool_utxos=10,
+            fee_per_deploy_tx_lovelace=500_000,
+            num_deploy_txs=2,
+            safety_margin_pct=10.0,
+        )
+        locked = report["locked_ada"]["total_min_ada_lovelace"]
+        fees = report["fees"]["total_fees_lovelace"]
+        subtotal = locked + fees
+        margin = int(subtotal * 10.0 / 100)
+        assert report["grand_total"]["lovelace"] == subtotal + margin
+
+    def test_ada_display_conversion(self):
+        report = compute_pool_funding_report(total_cmatra_base=1_000_000)
+        assert report["grand_total"]["ada"] == report["grand_total"]["lovelace"] / 1_000_000
+
+    def test_per_utxo_min_ada_positive(self):
+        report = compute_pool_funding_report(total_cmatra_base=1_000_000)
+        assert report["per_utxo_min_ada_lovelace"] > 0

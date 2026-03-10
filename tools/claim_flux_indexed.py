@@ -2,6 +2,10 @@
 """
 Phase 8 — Claim Client (Indexed)
 
+.. deprecated::
+    This module implements the old per-claimant claim model.
+    Use :mod:`tools.process_surrender` for the surrender-and-redeem model (v3.0).
+
 Uses the claim index to look up a claimant's UTxOs, verifies on-chain
 state (address, datum, FLUX quantity, not-yet-spent), builds a claim
 transaction, and optionally submits it.

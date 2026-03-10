@@ -2,6 +2,10 @@
 """
 Phase 7 — Build Claim Index (No-Scan Claims)
 
+.. deprecated::
+    This module implements the old per-claimant claim-index model.
+    The surrender-and-redeem model (v3.0) does not use per-claimant indices.
+
 Reads the claim vault manifest and queries Blockfrost for each transaction's
 UTxOs. Matches script outputs by inline datum to claimant key hashes and
 builds a lookup index: keyhash → [tx_hash, output_index, flux_units].
