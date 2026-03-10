@@ -29,7 +29,6 @@ from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import address_to_payment_key_hash, is_script_address
 from tools.config import (
     FLUX_DECIMALS,
-    FLUX_MAX_SUPPLY_BASE,
     LEGACY_TOKENS,
     NFT_COLLECTIONS,
     NftCollectionInfo,
@@ -581,7 +580,11 @@ def run_snapshot_and_allocate(
         for v in reserve_info["nft_conditional"].values()
     )
     total_reserve = total_team_reserve + total_nft_reserve
-    total_dust = FLUX_MAX_SUPPLY_BASE - total_distributed - total_reserve
+    total_bucket_sum = sum(
+        merge_report["tokens"][name]["flux_bucket_base_units"]
+        for name in token_summaries
+    )
+    total_dust = total_bucket_sum - total_distributed - total_reserve
 
     # Dust sweep
     if dust_to and total_dust > 0:
@@ -636,8 +639,9 @@ def run_snapshot_and_allocate(
             "total_flux_distributed": total_distributed,
             "total_reserve": total_reserve,
             "total_dust_remaining": total_dust,
-            "sum_equals_max_supply": (
-                total_distributed + total_reserve + total_dust == FLUX_MAX_SUPPLY_BASE
+            "total_bucket_sum": total_bucket_sum,
+            "sum_equals_bucket_total": (
+                total_distributed + total_reserve + total_dust == total_bucket_sum
             ),
         },
     }
@@ -804,9 +808,9 @@ def main(argv: list[str] | None = None) -> None:
 
     # Validate
     totals = result["summary"]["totals"]
-    if totals["sum_equals_max_supply"]:
+    if totals["sum_equals_bucket_total"]:
         logger.info(
-            "distributed + reserve + dust == %d (OK)", FLUX_MAX_SUPPLY_BASE,
+            "distributed + reserve + dust == %d (OK)", totals["total_bucket_sum"],
         )
     else:
         logger.error("SUPPLY MISMATCH!")

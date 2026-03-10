@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Phase 2 — Merge Weights → Integer Token Buckets
+Phase 2 — Merge Weights → Integer Token Buckets + Redemption Rate Table
 
 Consumes the TWAP report (Phase 1 output or computes fresh),
 fetches exact on-chain supplies from Blockfrost, computes valuations
-and weights, then derives integer FLUX bucket sizes that sum to exactly 1e15.
+and weights, then derives integer cMATRA bucket sizes that sum to
+the public redemption pool (85% of max supply).
 
 Outputs:
-  - merge_report.json
+  - merge_valuation_cmatra.json  (buckets + weights)
+  - rate_table.json              (fixed per-asset redemption rates)
 """
 
 from __future__ import annotations
@@ -26,8 +28,11 @@ from tools.config import (
     FLUX_DECIMALS,
     FLUX_MAX_SUPPLY_BASE,
     LEGACY_TOKENS,
+    MERGE_TOKEN_SUPPLY_BASE,
     NFT_COLLECTIONS,
     NftCollectionInfo,
+    PUBLIC_POOL_BASE,
+    VALIDATOR_RESERVE_BASE,
     filter_nft_assets,
     SHARDS,
     TokenInfo,
@@ -98,10 +103,11 @@ def compute_valuations(
 def compute_integer_buckets(
     tokens: list[TokenInfo | NftCollectionInfo],
     weights: dict[str, float],
-    total_flux_base: int = FLUX_MAX_SUPPLY_BASE,
+    total_flux_base: int = PUBLIC_POOL_BASE,
 ) -> dict[str, int]:
-    """Allocate FLUX base units to each legacy token bucket.
+    """Allocate cMATRA base units to each legacy token bucket.
 
+    Default pool is PUBLIC_POOL_BASE (85% of max supply).
     Uses floor for all tokens except the last, which receives the remainder
     to guarantee sum == total_flux_base.
     """
@@ -224,19 +230,82 @@ def build_merge_report(
             entry["is_nft"] = True
         token_details[asset.name] = entry
 
+    bucket_total = sum(buckets.values())
     return {
         "report_type": "flux_merge_valuation",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "flux_total_base_units": FLUX_MAX_SUPPLY_BASE,
+        "max_supply_base_units": MERGE_TOKEN_SUPPLY_BASE,
+        "public_pool_base_units": PUBLIC_POOL_BASE,
+        "validator_reserve_base_units": VALIDATOR_RESERVE_BASE,
         "tokens": token_details,
         "burn_address": burn_adjustments.get("_address"),
         "totals": {
             "total_valuation_usd": val_data["total_valuation_usd"],
             "sum_weights": sum(val_data["weights"].values()),
-            "sum_buckets_base_units": sum(buckets.values()),
-            "buckets_sum_equals_max": sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE,
+            "sum_buckets_base_units": bucket_total,
+            "buckets_sum_equals_pool": bucket_total == PUBLIC_POOL_BASE,
         },
         "warnings": warnings,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Rate table builder
+# ---------------------------------------------------------------------------
+
+
+def build_rate_table(
+    merge_report: dict[str, Any],
+    team_waiver_supplies: dict[str, int] | None = None,
+    legacy_reward_adjustments: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Build a fixed redemption rate table from the merge report.
+
+    *team_waiver_supplies*: asset-name → base units excluded (team treasury).
+    *legacy_reward_adjustments*: asset-name → base units of materialized
+    rewards added to redeemable supply.
+
+    Rate = asset_bucket / redeemable_supply  (integer floor division in base units).
+    """
+    team_waivers = team_waiver_supplies or {}
+    reward_adj = legacy_reward_adjustments or {}
+
+    tokens: dict[str, Any] = {}
+    for name, entry in merge_report["tokens"].items():
+        bucket = entry["flux_bucket_base_units"]
+        on_chain_supply = entry["supply_base_units"]
+        decimals = entry["decimals"]
+        waived = team_waivers.get(name, 0)
+        materialized = reward_adj.get(name, 0)
+
+        redeemable = on_chain_supply - waived + materialized
+        if redeemable <= 0:
+            rate_base = 0
+        else:
+            rate_base = bucket // redeemable
+
+        tokens[name] = {
+            "bucket_base": bucket,
+            "bucket_display": bucket / (10 ** FLUX_DECIMALS),
+            "on_chain_supply_base": on_chain_supply,
+            "team_waiver_base": waived,
+            "legacy_reward_adjustment_base": materialized,
+            "redeemable_supply_base": redeemable,
+            "redeemable_supply_display": redeemable / (10 ** decimals),
+            "rate_base_per_unit": rate_base,
+            "rate_display": rate_base / (10 ** FLUX_DECIMALS),
+            "is_nft": entry.get("is_nft", False),
+        }
+
+    return {
+        "report_type": "redemption_rate_table",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "public_pool_base": merge_report["public_pool_base_units"],
+        "public_pool_display": merge_report["public_pool_base_units"] / (10 ** FLUX_DECIMALS),
+        "validator_reserve_base": merge_report["validator_reserve_base_units"],
+        "team_waiver_supplies": team_waivers,
+        "legacy_reward_adjustments": reward_adj,
+        "tokens": tokens,
     }
 
 
@@ -247,7 +316,7 @@ def build_merge_report(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description="FLUX merger — Phase 2: Merge Weights & Integer Buckets",
+        description="cMATRA merger — Phase 2: Merge Weights, Integer Buckets & Rate Table",
     )
     parser.add_argument(
         "--twap-report", type=str, required=True,
@@ -256,6 +325,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--out-json", type=str, required=True,
         help="Output path for merge report JSON",
+    )
+    parser.add_argument(
+        "--out-rate-table", type=str, default=None,
+        help="Output path for redemption rate table JSON",
+    )
+    parser.add_argument(
+        "--team-waiver", type=str, nargs="*", default=[],
+        help="Team waiver as TOKEN:BASE_UNITS (e.g. AGENT:29644656)",
     )
     parser.add_argument(
         "--burn", type=str, nargs="*", default=[],
@@ -277,6 +354,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.burn_address:
         burn_adj["_address"] = args.burn_address
 
+    # Parse team waivers
+    team_waivers: dict[str, int] = {}
+    for w in args.team_waiver:
+        token_name, amount_str = w.split(":")
+        team_waivers[token_name] = int(amount_str)
+
     bf = BlockfrostClient()
     report = build_merge_report(
         bf, twap_report_path=Path(args.twap_report),
@@ -289,8 +372,8 @@ def main(argv: list[str] | None = None) -> None:
         json.dump(report, f, indent=2)
 
     # Validation
-    if report["totals"]["buckets_sum_equals_max"]:
-        logger.info("Bucket sum == %d (OK)", FLUX_MAX_SUPPLY_BASE)
+    if report["totals"]["buckets_sum_equals_pool"]:
+        logger.info("Bucket sum == %d (PUBLIC_POOL_BASE OK)", PUBLIC_POOL_BASE)
     else:
         logger.error("BUCKET SUM MISMATCH!")
         sys.exit(1)
@@ -300,6 +383,18 @@ def main(argv: list[str] | None = None) -> None:
             logger.warning("WARNING: %s", w)
 
     logger.info("Merge report written to %s", out_path)
+
+    # Rate table
+    if args.out_rate_table:
+        rate_table = build_rate_table(
+            report,
+            team_waiver_supplies=team_waivers if team_waivers else None,
+        )
+        rt_path = Path(args.out_rate_table)
+        rt_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(rt_path, "w") as f:
+            json.dump(rate_table, f, indent=2)
+        logger.info("Rate table written to %s", rt_path)
 
 
 if __name__ == "__main__":

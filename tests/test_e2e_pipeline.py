@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tools.cardano_utils import encode_claim_datum
-from tools.config import AGENT, FLUX_DECIMALS, FLUX_MAX_SUPPLY_BASE, LEGACY_TOKENS, SHARDS
+from tools.config import AGENT, FLUX_DECIMALS, FLUX_MAX_SUPPLY_BASE, LEGACY_TOKENS, PUBLIC_POOL_BASE, SHARDS
 from tools.flux_merge_valuation_int import (
     build_merge_report,
     compute_integer_buckets,
@@ -95,7 +95,9 @@ class TestE2EFullPipeline:
 
         return {
             "report_type": "flux_merge_valuation",
-            "flux_total_base_units": FLUX_MAX_SUPPLY_BASE,
+            "max_supply_base_units": FLUX_MAX_SUPPLY_BASE,
+            "public_pool_base_units": PUBLIC_POOL_BASE,
+            "validator_reserve_base_units": FLUX_MAX_SUPPLY_BASE - PUBLIC_POOL_BASE,
             "tokens": {
                 "AGENT": {
                     "unit": AGENT.unit,
@@ -118,18 +120,18 @@ class TestE2EFullPipeline:
             },
             "totals": {
                 "sum_buckets_base_units": sum(buckets.values()),
-                "buckets_sum_equals_max": sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE,
+                "buckets_sum_equals_pool": sum(buckets.values()) == PUBLIC_POOL_BASE,
             },
         }
 
     def test_phase2_buckets_sum_invariant(self, merge_report):
-        """Critical invariant: FLUX buckets must sum to exactly 1e15."""
-        assert merge_report["totals"]["buckets_sum_equals_max"] is True
+        """Critical invariant: buckets must sum to exactly PUBLIC_POOL_BASE."""
+        assert merge_report["totals"]["buckets_sum_equals_pool"] is True
         total = sum(
             t["flux_bucket_base_units"]
             for t in merge_report["tokens"].values()
         )
-        assert total == FLUX_MAX_SUPPLY_BASE
+        assert total == PUBLIC_POOL_BASE
 
     # Phase 3+4: Allocation
     @pytest.fixture
@@ -453,7 +455,7 @@ class TestE2ESevenAssetPipeline:
         val_data = compute_valuations(all_assets, supplies, prices)
         buckets = compute_integer_buckets(all_assets, val_data["weights"])
 
-        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+        assert sum(buckets.values()) == PUBLIC_POOL_BASE
         assert len(buckets) == 7
 
     def test_dynamic_csv_columns_count(self):

@@ -3,10 +3,11 @@
 import pytest
 
 from tools.flux_merge_valuation_int import (
+    build_rate_table,
     compute_integer_buckets,
     compute_valuations,
 )
-from tools.config import AGENT, FLUX_MAX_SUPPLY_BASE, LEGACY_TOKENS, SHARDS
+from tools.config import AGENT, FLUX_MAX_SUPPLY_BASE, LEGACY_TOKENS, PUBLIC_POOL_BASE, SHARDS
 
 
 class TestComputeValuations:
@@ -57,24 +58,24 @@ class TestComputeValuations:
 
 
 class TestComputeIntegerBuckets:
-    def test_buckets_sum_to_max(self):
+    def test_buckets_sum_to_public_pool(self):
         weights = {"AGENT": 0.7, "SHARDS": 0.3}
         buckets = compute_integer_buckets(LEGACY_TOKENS, weights)
-        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+        assert sum(buckets.values()) == PUBLIC_POOL_BASE
 
     def test_exact_split(self):
         weights = {"AGENT": 0.5, "SHARDS": 0.5}
         buckets = compute_integer_buckets(LEGACY_TOKENS, weights)
-        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+        assert sum(buckets.values()) == PUBLIC_POOL_BASE
         # Both should be exactly half
-        assert buckets["AGENT"] == FLUX_MAX_SUPPLY_BASE // 2
-        assert buckets["SHARDS"] == FLUX_MAX_SUPPLY_BASE - buckets["AGENT"]
+        assert buckets["AGENT"] == PUBLIC_POOL_BASE // 2
+        assert buckets["SHARDS"] == PUBLIC_POOL_BASE - buckets["AGENT"]
 
     def test_extreme_weight_disparity(self):
         """When one token dominates, the other still gets its share."""
         weights = {"AGENT": 0.999999, "SHARDS": 0.000001}
         buckets = compute_integer_buckets(LEGACY_TOKENS, weights)
-        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+        assert sum(buckets.values()) == PUBLIC_POOL_BASE
         assert buckets["AGENT"] > 0
         assert buckets["SHARDS"] > 0
 
@@ -82,12 +83,11 @@ class TestComputeIntegerBuckets:
         """Floor rounding means the last token absorbs any remainder."""
         weights = {"AGENT": 1 / 3, "SHARDS": 2 / 3}
         buckets = compute_integer_buckets(LEGACY_TOKENS, weights)
-        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+        assert sum(buckets.values()) == PUBLIC_POOL_BASE
 
-        # AGENT bucket should be floor(1/3 * 1e15)
-        expected_agent = int((1 / 3) * FLUX_MAX_SUPPLY_BASE)
+        expected_agent = int((1 / 3) * PUBLIC_POOL_BASE)
         assert buckets["AGENT"] == expected_agent
-        assert buckets["SHARDS"] == FLUX_MAX_SUPPLY_BASE - expected_agent
+        assert buckets["SHARDS"] == PUBLIC_POOL_BASE - expected_agent
 
     def test_custom_total(self):
         weights = {"AGENT": 0.6, "SHARDS": 0.4}
@@ -98,18 +98,18 @@ class TestComputeIntegerBuckets:
     def test_all_weight_to_one(self):
         weights = {"AGENT": 1.0, "SHARDS": 0.0}
         buckets = compute_integer_buckets(LEGACY_TOKENS, weights)
-        assert buckets["AGENT"] == FLUX_MAX_SUPPLY_BASE
+        assert buckets["AGENT"] == PUBLIC_POOL_BASE
         assert buckets["SHARDS"] == 0
 
     def test_invariant_across_many_weights(self):
-        """Buckets must always sum to FLUX_MAX_SUPPLY_BASE."""
+        """Buckets must always sum to PUBLIC_POOL_BASE."""
         import random
         random.seed(42)
         for _ in range(100):
             w = random.random()
             weights = {"AGENT": w, "SHARDS": 1 - w}
             buckets = compute_integer_buckets(LEGACY_TOKENS, weights)
-            assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+            assert sum(buckets.values()) == PUBLIC_POOL_BASE
 
 
 class TestSevenAssetValuations:
@@ -148,13 +148,13 @@ class TestSevenAssetValuations:
         result = compute_valuations(assets, supplies, prices)
         assert sum(result["weights"].values()) == pytest.approx(1.0)
 
-    def test_seven_buckets_sum_to_max(self):
+    def test_seven_buckets_sum_to_public_pool(self):
         assets = self._make_seven_assets()
         supplies = self._make_seven_supplies()
         prices = self._make_seven_prices()
         val_data = compute_valuations(assets, supplies, prices)
         buckets = compute_integer_buckets(assets, val_data["weights"])
-        assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+        assert sum(buckets.values()) == PUBLIC_POOL_BASE
 
     def test_all_seven_buckets_positive(self):
         assets = self._make_seven_assets()
@@ -180,7 +180,77 @@ class TestSevenAssetValuations:
                 else:
                     weights[asset.name] = remaining
             buckets = compute_integer_buckets(assets, weights)
-            assert sum(buckets.values()) == FLUX_MAX_SUPPLY_BASE
+            assert sum(buckets.values()) == PUBLIC_POOL_BASE
+
+
+class TestBuildRateTable:
+    """Tests for the redemption rate table builder."""
+
+    def test_basic_rate_table(self):
+        report = {
+            "public_pool_base_units": PUBLIC_POOL_BASE,
+            "validator_reserve_base_units": FLUX_MAX_SUPPLY_BASE - PUBLIC_POOL_BASE,
+            "tokens": {
+                "AGENT": {
+                    "decimals": 0,
+                    "supply_base_units": 1_000_000_000,
+                    "flux_bucket_base_units": int(0.667 * PUBLIC_POOL_BASE),
+                },
+                "SHARDS": {
+                    "decimals": 6,
+                    "supply_base_units": 3_000_000_000_000,
+                    "flux_bucket_base_units": PUBLIC_POOL_BASE - int(0.667 * PUBLIC_POOL_BASE),
+                },
+            },
+        }
+        rt = build_rate_table(report)
+        assert rt["report_type"] == "redemption_rate_table"
+        assert rt["public_pool_base"] == PUBLIC_POOL_BASE
+        for name, entry in rt["tokens"].items():
+            assert entry["rate_base_per_unit"] > 0
+            assert entry["redeemable_supply_base"] == report["tokens"][name]["supply_base_units"]
+
+    def test_team_waiver_reduces_denominator(self):
+        bucket = 100_000_000_000_000_000_000  # 100B base
+        supply = 1_000_000_000
+        waiver = 100_000_000  # 10% waived
+        report = {
+            "public_pool_base_units": PUBLIC_POOL_BASE,
+            "validator_reserve_base_units": FLUX_MAX_SUPPLY_BASE - PUBLIC_POOL_BASE,
+            "tokens": {
+                "AGENT": {
+                    "decimals": 0,
+                    "supply_base_units": supply,
+                    "flux_bucket_base_units": bucket,
+                },
+            },
+        }
+        rt_no_waiver = build_rate_table(report)
+        rt_waiver = build_rate_table(report, team_waiver_supplies={"AGENT": waiver})
+
+        # With waiver, rate should be higher (same bucket, fewer redeemable units)
+        assert rt_waiver["tokens"]["AGENT"]["rate_base_per_unit"] > rt_no_waiver["tokens"]["AGENT"]["rate_base_per_unit"]
+        assert rt_waiver["tokens"]["AGENT"]["redeemable_supply_base"] == supply - waiver
+
+    def test_nft_rate(self):
+        nft_bucket = 30_000_000_000_000_000_000  # 30B base
+        nft_count = 401
+        report = {
+            "public_pool_base_units": PUBLIC_POOL_BASE,
+            "validator_reserve_base_units": FLUX_MAX_SUPPLY_BASE - PUBLIC_POOL_BASE,
+            "tokens": {
+                "FLUX_PASS": {
+                    "decimals": 0,
+                    "supply_base_units": nft_count,
+                    "flux_bucket_base_units": nft_bucket,
+                    "is_nft": True,
+                },
+            },
+        }
+        rt = build_rate_table(report)
+        entry = rt["tokens"]["FLUX_PASS"]
+        assert entry["is_nft"] is True
+        assert entry["rate_base_per_unit"] == nft_bucket // nft_count
 
 
 class TestFetchNftSupply:

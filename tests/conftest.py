@@ -24,6 +24,7 @@ SHARDS_UNIT = (
 )
 
 FLUX_MAX_SUPPLY_BASE = 1_000_000_000_000_000_000_000  # 1e21 (cMATRA: 12 decimals)
+PUBLIC_POOL_BASE = 850_000_000_000_000_000_000  # 85% of max supply
 
 # A valid 28-byte payment key hash (64 hex chars → 56 hex chars)
 SAMPLE_PKH_1 = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
@@ -232,13 +233,15 @@ def mock_merge_report() -> dict[str, Any]:
     # Total: $50,050,000
     # AGENT weight ≈ 0.999001
     # SHARDS weight ≈ 0.000999
-    agent_bucket = 999_001_000_000_000  # ~99.9%
-    shards_bucket = FLUX_MAX_SUPPLY_BASE - agent_bucket
+    agent_bucket = int(0.999001 * PUBLIC_POOL_BASE)
+    shards_bucket = PUBLIC_POOL_BASE - agent_bucket
 
     return {
         "report_type": "flux_merge_valuation",
         "generated_at": "2024-01-01T00:00:00+00:00",
-        "flux_total_base_units": FLUX_MAX_SUPPLY_BASE,
+        "max_supply_base_units": FLUX_MAX_SUPPLY_BASE,
+        "public_pool_base_units": PUBLIC_POOL_BASE,
+        "validator_reserve_base_units": FLUX_MAX_SUPPLY_BASE - PUBLIC_POOL_BASE,
         "tokens": {
             "AGENT": {
                 "unit": AGENT_UNIT,
@@ -249,7 +252,7 @@ def mock_merge_report() -> dict[str, Any]:
                 "valuation_usd": 50_000_000.0,
                 "weight": 0.999001,
                 "flux_bucket_base_units": agent_bucket,
-                "flux_bucket_display": agent_bucket / 1e6,
+                "flux_bucket_display": agent_bucket / 1e12,
             },
             "SHARDS": {
                 "unit": SHARDS_UNIT,
@@ -260,14 +263,14 @@ def mock_merge_report() -> dict[str, Any]:
                 "valuation_usd": 50_000.0,
                 "weight": 0.000999,
                 "flux_bucket_base_units": shards_bucket,
-                "flux_bucket_display": shards_bucket / 1e6,
+                "flux_bucket_display": shards_bucket / 1e12,
             },
         },
         "totals": {
             "total_valuation_usd": 50_050_000.0,
             "sum_weights": 1.0,
-            "sum_buckets_base_units": FLUX_MAX_SUPPLY_BASE,
-            "buckets_sum_equals_max": True,
+            "sum_buckets_base_units": PUBLIC_POOL_BASE,
+            "buckets_sum_equals_pool": True,
         },
         "warnings": [],
     }

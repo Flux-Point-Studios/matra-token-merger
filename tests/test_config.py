@@ -8,10 +8,13 @@ from tools.config import (
     FLUX_MAX_SUPPLY_BASE,
     FLUX_MAX_SUPPLY_DISPLAY,
     LEGACY_TOKENS,
+    MERGE_TOKEN_SUPPLY_BASE,
+    PUBLIC_POOL_BASE,
     SHARDS,
     SHARDS_DECIMALS,
     SHARDS_UNIT,
     TokenInfo,
+    VALIDATOR_RESERVE_BASE,
 )
 
 
@@ -53,6 +56,15 @@ class TestMergeTokenConstants:
 
     def test_decimals(self):
         assert FLUX_DECIMALS == 12
+
+    def test_public_pool_is_85_percent(self):
+        assert PUBLIC_POOL_BASE == 850_000_000_000_000_000_000
+
+    def test_validator_reserve_is_15_percent(self):
+        assert VALIDATOR_RESERVE_BASE == 150_000_000_000_000_000_000
+
+    def test_pool_plus_reserve_equals_max(self):
+        assert PUBLIC_POOL_BASE + VALIDATOR_RESERVE_BASE == MERGE_TOKEN_SUPPLY_BASE
 
 
 class TestNftCollectionInfo:

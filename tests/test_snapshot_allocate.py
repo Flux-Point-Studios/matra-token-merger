@@ -481,7 +481,7 @@ class TestThreeBucketReserve:
 
         # distributed + reserve + dust == bucket
         totals = summary["totals"]
-        assert totals["sum_equals_max_supply"]
+        assert totals["sum_equals_bucket_total"]
 
     def test_no_reserve_addresses_backward_compatible(self, mocker):
         """Without reserve_addresses, behavior is unchanged."""
@@ -599,7 +599,7 @@ class TestThreeBucketReserve:
             reserve_addresses={"addr1_treasury": "Treasury"},
         )
         totals = result["summary"]["totals"]
-        assert totals["sum_equals_max_supply"]
+        assert totals["sum_equals_bucket_total"]
 
         # NFT reserve should exist for 1 unresolvable NFT
         nft_res = result["summary"]["reserve"]["nft_conditional"]
