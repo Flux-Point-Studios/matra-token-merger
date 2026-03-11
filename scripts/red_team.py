@@ -1,22 +1,33 @@
 #!/usr/bin/env python3
 """
-Red-Team Test Suite for the FLUX Claim Validator (Preprod)
-==========================================================
+scripts/red_team.py — Red-Team Test Suite for Surrender Pool Validator v3.0
+===========================================================================
 
-Runs adversarial tests against the deployed claim validator on preprod.
-Requires a completed preprod rehearsal (stages 1-7 at minimum).
+Runs adversarial tests against the deployed surrender pool validator on preprod.
+Requires a completed preprod rehearsal (stages 1-6 at minimum — pool deployed).
 
-Tests:
-  1. Wrong signer — claim someone else's UTxO
-  2. Double claim — spend already-spent UTxO
-  3. Wrong redeemer — garbage/oversized redeemer data
-  4. Datum swap — submit tx with mismatched datum
-  5. Multi-drain — attempt to spend multiple UTxOs in one tx to a different address
-  6. Fee starvation — set absurdly low execution units
-  7. Index poisoning — give the client a fabricated UTxO ref
+The surrender model uses Void datums and admin-only spending. Two paths:
+  - ProcessSurrender: admin signs + tx validity entirely BEFORE deadline
+  - AdminWithdraw:    admin signs + tx validity entirely AFTER deadline
 
-Each test should FAIL (i.e., the validator should reject the tx).
+Tests (negative — validator must REJECT):
+  1. Non-admin ProcessSurrender — random wallet tries to spend pool UTxO
+  2. Post-deadline ProcessSurrender — admin ProcessSurrender after deadline
+  3. Pre-deadline AdminWithdraw — admin AdminWithdraw before deadline
+  4. Non-admin AdminWithdraw — random wallet tries AdminWithdraw after deadline
+  5. Wrong redeemer data — garbage Constr(99, [...]) redeemer
+  6. Fabricated UTxO reference — non-existent pool UTxO (all-zero tx hash)
+
+Tests (positive — validator must ACCEPT):
+  7. Admin ProcessSurrender before deadline — happy-path surrender
+  8. Admin AdminWithdraw after deadline — happy-path sweep
+
+Each negative test should FAIL (i.e., the validator rejects the tx).
 A "PASS" means the validator correctly rejected the attack.
+
+Used by: manual operator invocation after preprod deployment.
+Depends on: scripts/preprod_harness.py (Wallet class), tools/cardano_utils.py,
+            tools/api_clients.py (BlockfrostClient), pycardano 0.19.x, cbor2.
 """
 
 from __future__ import annotations
@@ -31,12 +42,15 @@ from pathlib import Path
 from typing import Any
 
 import cbor2
+from cbor2 import CBORTag
 from pycardano import (
     Address,
     Asset,
     AssetName,
     BlockFrostChainContext,
+    ExecutionUnits,
     MultiAsset,
+    Network,
     PaymentSigningKey,
     PaymentVerificationKey,
     PlutusV3Script,
@@ -47,65 +61,119 @@ from pycardano import (
     TransactionOutput,
     UTxO,
     Value,
-    Network,
-    ExecutionUnits,
 )
 from pycardano.hash import ScriptHash, TransactionId
 
 logger = logging.getLogger(__name__)
 
-FLUX_ASSET_NAME_HEX = "464c5558"
+# ---------------------------------------------------------------------------
+# CBOR constants for surrender model redeemers and datums
+# ---------------------------------------------------------------------------
+
+# Void datum: Constr(0, []) = CBORTag(121, [])
+VOID_DATUM_CBOR = cbor2.dumps(CBORTag(121, []))
+
+# ProcessSurrender redeemer: Constr(0, []) = CBORTag(121, [])
+PROCESS_SURRENDER_REDEEMER_CBOR = cbor2.dumps(CBORTag(121, []))
+
+# AdminWithdraw redeemer: Constr(1, []) = CBORTag(122, [])
+ADMIN_WITHDRAW_REDEEMER_CBOR = cbor2.dumps(CBORTag(122, []))
+
+# cMATRA asset name in hex: "cMATRA"
+CMATRA_ASSET_NAME_HEX = "634d41545241"
 
 
-def _query_live_claim_utxos(
+# ---------------------------------------------------------------------------
+# Pool UTxO helpers
+# ---------------------------------------------------------------------------
+
+
+def _query_live_pool_utxos(
     bf_client,
     script_address: str,
-    flux_policy_hex: str,
-) -> dict[str, list[list]]:
-    """Query chain for live UTxOs at script address, grouped by datum PKH.
+    cmatra_policy_hex: str,
+    cmatra_asset_hex: str,
+) -> list[dict[str, Any]]:
+    """Query chain for live pool UTxOs at the script address containing cMATRA.
 
-    Returns ``{pkh_hex: [[tx_hash, output_index, flux_qty], ...]}`` —
-    the same ref format the claim index uses.  Because this reads
-    directly from the on-chain UTXO set, the refs are *never* stale.
+    Returns a list of dicts sorted by cmatra_amount descending:
+        [{tx_hash, output_index, cmatra_amount, ada_amount}, ...]
+
+    Reads directly from the on-chain UTxO set so refs are never stale.
     """
     utxos = bf_client.get_address_utxos(script_address)
+    cmatra_unit = cmatra_policy_hex + cmatra_asset_hex
 
-    flux_unit = flux_policy_hex + FLUX_ASSET_NAME_HEX
-    pkh_utxos: dict[str, list[list]] = {}
+    pool_utxos: list[dict[str, Any]] = []
 
     for u in utxos:
-        # Extract FLUX token amount
-        flux_qty = 0
+        cmatra_qty = 0
+        ada_qty = 0
         for amt in u.get("amount", []):
-            if amt.get("unit") == flux_unit:
-                flux_qty = int(amt.get("quantity", 0))
-                break
-        if flux_qty <= 0:
-            continue  # not a FLUX claim UTxO
-
-        # Parse inline datum → PKH
-        datum_hex = u.get("inline_datum")
-        if not datum_hex:
-            continue
-        try:
-            obj = cbor2.loads(bytes.fromhex(datum_hex))
-            pkh_hex = None
-            if hasattr(obj, "value") and isinstance(obj.value, (list, tuple)):
-                for item in obj.value:
-                    if isinstance(item, bytes) and len(item) == 28:
-                        pkh_hex = item.hex()
-                        break
-            if pkh_hex is None:
-                continue
-        except Exception:
-            continue
+            if amt.get("unit") == cmatra_unit:
+                cmatra_qty = int(amt.get("quantity", 0))
+            elif amt.get("unit") == "lovelace":
+                ada_qty = int(amt.get("quantity", 0))
+        if cmatra_qty <= 0:
+            continue  # not a cMATRA pool UTxO
 
         output_idx = u.get("output_index", u.get("tx_index", 0))
-        pkh_utxos.setdefault(pkh_hex, []).append(
-            [u["tx_hash"], output_idx, flux_qty],
-        )
+        pool_utxos.append({
+            "tx_hash": u["tx_hash"],
+            "output_index": output_idx,
+            "cmatra_amount": cmatra_qty,
+            "ada_amount": ada_qty,
+        })
 
-    return pkh_utxos
+    # Sort by cmatra_amount descending so we pick the largest first
+    pool_utxos.sort(key=lambda x: x["cmatra_amount"], reverse=True)
+    return pool_utxos
+
+
+def make_pool_utxo(
+    tx_hash_hex: str,
+    output_index: int,
+    cmatra_amount: int,
+    ada_amount: int,
+    script_address: str,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+) -> UTxO:
+    """Reconstruct a pool UTxO with Void datum for transaction building.
+
+    Pool UTxOs in the surrender model use Void datums (Constr(0, [])),
+    not per-claimant PKH datums like the old claim model.
+    """
+    asset_name = AssetName(bytes.fromhex(cmatra_asset_hex))
+    script_addr = Address.from_primitive(script_address)
+    multi = MultiAsset()
+    multi[cmatra_policy_id] = Asset({asset_name: cmatra_amount})
+    value = Value(ada_amount, multi)
+
+    # Void datum: Constr(0, [])
+    datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
+
+    tx_in = TransactionInput(
+        TransactionId(bytes.fromhex(tx_hash_hex)),
+        output_index,
+    )
+    return UTxO(tx_in, TransactionOutput(script_addr, value, datum=datum))
+
+
+def process_surrender_redeemer() -> Redeemer:
+    """Build ProcessSurrender redeemer (Constr(0, [])) with explicit execution units."""
+    return Redeemer(
+        RawPlutusData(cbor2.loads(PROCESS_SURRENDER_REDEEMER_CBOR)),
+        ExecutionUnits(500_000, 200_000_000),
+    )
+
+
+def admin_withdraw_redeemer() -> Redeemer:
+    """Build AdminWithdraw redeemer (Constr(1, [])) with explicit execution units."""
+    return Redeemer(
+        RawPlutusData(cbor2.loads(ADMIN_WITHDRAW_REDEEMER_CBOR)),
+        ExecutionUnits(500_000, 200_000_000),
+    )
 
 
 def extract_deadline_from_compiled(compiled_hex: str) -> int:
@@ -114,7 +182,6 @@ def extract_deadline_from_compiled(compiled_hex: str) -> int:
     The deadline is the last CBOR integer parameter in the compiled code,
     encoded as ``1b`` (8-byte unsigned int) near the end of the hex string.
     """
-    # Find the last occurrence of "1b" followed by exactly 16 hex chars (8 bytes)
     idx = compiled_hex.rfind("1b")
     while idx >= 0:
         candidate = compiled_hex[idx + 2 : idx + 18]
@@ -130,44 +197,10 @@ def extract_deadline_from_compiled(compiled_hex: str) -> int:
     raise ValueError("Cannot extract deadline from compiled code")
 
 
-def encode_claim_datum(pkh_hex: str) -> bytes:
-    from cbor2 import CBORTag
-    pkh_bytes = bytes.fromhex(pkh_hex)
-    return cbor2.dumps(CBORTag(121, [pkh_bytes]))
-
-
 def load_wallet(name: str, keys_dir: Path):
+    """Load a wallet by name from the keys directory."""
     from scripts.preprod_harness import Wallet
     return Wallet.load(name, keys_dir)
-
-
-def make_script_utxo(
-    tx_hash_hex: str,
-    output_index: int,
-    flux_qty: int,
-    pkh_hex: str,
-    script_address: str,
-    flux_policy_id: ScriptHash,
-) -> UTxO:
-    """Reconstruct a UTxO from index data."""
-    asset_name = AssetName(bytes.fromhex(FLUX_ASSET_NAME_HEX))
-    script_addr = Address.from_primitive(script_address)
-    multi = MultiAsset()
-    multi[flux_policy_id] = Asset({asset_name: flux_qty})
-    value = Value(2_000_000, multi)
-
-    datum_cbor = encode_claim_datum(pkh_hex)
-    datum = RawPlutusData(cbor2.loads(datum_cbor))
-
-    tx_in = TransactionInput(
-        TransactionId(bytes.fromhex(tx_hash_hex)),
-        output_index,
-    )
-    return UTxO(tx_in, TransactionOutput(script_addr, value, datum=datum))
-
-
-def unit_redeemer() -> Redeemer:
-    return Redeemer(RawPlutusData(cbor2.loads(b"\xd8\x79\x80")))
 
 
 # ---------------------------------------------------------------------------
@@ -175,25 +208,26 @@ def unit_redeemer() -> Redeemer:
 # ---------------------------------------------------------------------------
 
 
-def test_wrong_signer(
+def test_nonadmin_process_surrender(
     context: BlockFrostChainContext,
     attacker,
-    victim,
-    victim_refs: list,
+    pool_ref: dict,
     script_address: str,
     script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
 ) -> dict[str, Any]:
-    """Attack: sign with wrong key, try to spend victim's UTxO."""
+    """Test 1: Non-admin tries ProcessSurrender. Should FAIL (admin_signed check)."""
     try:
         builder = TransactionBuilder(context)
-        for ref in victim_refs:
-            utxo = make_script_utxo(
-                ref[0], ref[1], ref[2], victim.pkh_hex,
-                script_address, flux_policy_id,
-            )
-            builder.add_script_input(utxo, script=script, redeemer=unit_redeemer())
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+        builder.add_script_input(utxo, script=script, redeemer=process_surrender_redeemer())
 
+        # Attacker signs — NOT admin
         builder.required_signers = [attacker.vkey.hash()]
         builder.add_input_address(attacker.address)
 
@@ -202,209 +236,280 @@ def test_wrong_signer(
             change_address=attacker.address,
         )
         context.submit_tx(signed_tx)
-        return {"test": "wrong_signer", "passed": False, "error": "TX was accepted!"}
+        return {"test": "nonadmin_process_surrender", "passed": False,
+                "error": "Non-admin ProcessSurrender was accepted!"}
     except Exception as e:
-        return {"test": "wrong_signer", "passed": True, "rejection": str(e)[:300]}
+        return {"test": "nonadmin_process_surrender", "passed": True,
+                "rejection": str(e)[:300]}
 
 
-def test_wrong_redeemer(
-    context: BlockFrostChainContext,
-    wallet,
-    refs: list,
-    script_address: str,
-    script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
-) -> dict[str, Any]:
-    """Attack: use garbage redeemer data."""
-    try:
-        builder = TransactionBuilder(context)
-        for ref in refs:
-            utxo = make_script_utxo(
-                ref[0], ref[1], ref[2], wallet.pkh_hex,
-                script_address, flux_policy_id,
-            )
-            # Garbage redeemer: large bytestring
-            garbage = RawPlutusData(cbor2.loads(cbor2.dumps(b"\xff" * 500)))
-            redeemer = Redeemer(garbage)
-            builder.add_script_input(utxo, script=script, redeemer=redeemer)
-
-        builder.required_signers = [wallet.vkey.hash()]
-        builder.add_input_address(wallet.address)
-
-        signed_tx = builder.build_and_sign(
-            signing_keys=[wallet.skey],
-            change_address=wallet.address,
-        )
-        context.submit_tx(signed_tx)
-        # Redeemer is ignored by our validator, so this might actually succeed.
-        # That's OK — the validator explicitly ignores the redeemer.
-        return {"test": "wrong_redeemer", "passed": True,
-                "note": "Validator ignores redeemer (by design), TX accepted"}
-    except Exception as e:
-        return {"test": "wrong_redeemer", "passed": True, "rejection": str(e)[:300]}
-
-
-def test_datum_swap(
-    context: BlockFrostChainContext,
-    attacker,
-    victim,
-    victim_refs: list,
-    script_address: str,
-    script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
-) -> dict[str, Any]:
-    """Attack: attacker reconstructs victim's UTxO with attacker's pkh in datum, signs with attacker key.
-
-    With inline datums, the node uses the on-chain datum (victim's pkh),
-    so the validator should reject because the attacker isn't the authorized signer.
-    """
-    try:
-        builder = TransactionBuilder(context)
-        # Reconstruct victim's UTxO but with ATTACKER's pkh in datum
-        for ref in victim_refs:
-            utxo = make_script_utxo(
-                ref[0], ref[1], ref[2], attacker.pkh_hex,  # ATTACKER's pkh
-                script_address, flux_policy_id,
-            )
-            builder.add_script_input(utxo, script=script, redeemer=unit_redeemer())
-
-        # Attacker signs (not the victim)
-        builder.required_signers = [attacker.vkey.hash()]
-        builder.add_input_address(attacker.address)
-
-        signed_tx = builder.build_and_sign(
-            signing_keys=[attacker.skey],
-            change_address=attacker.address,
-        )
-        context.submit_tx(signed_tx)
-        return {"test": "datum_swap", "passed": False, "error": "TX with wrong datum accepted!"}
-    except Exception as e:
-        return {"test": "datum_swap", "passed": True, "rejection": str(e)[:300]}
-
-
-def test_index_poisoning(
-    context: BlockFrostChainContext,
-    wallet,
-    script_address: str,
-    script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
-) -> dict[str, Any]:
-    """Attack: feed the client a fabricated UTxO reference that doesn't exist."""
-    try:
-        fake_tx_hash = "0000000000000000000000000000000000000000000000000000000000000000"
-        fake_ref = [fake_tx_hash, 0, 1_000_000]
-
-        utxo = make_script_utxo(
-            fake_ref[0], fake_ref[1], fake_ref[2], wallet.pkh_hex,
-            script_address, flux_policy_id,
-        )
-
-        builder = TransactionBuilder(context)
-        builder.add_script_input(utxo, script=script, redeemer=unit_redeemer())
-        builder.required_signers = [wallet.vkey.hash()]
-        builder.add_input_address(wallet.address)
-
-        signed_tx = builder.build_and_sign(
-            signing_keys=[wallet.skey],
-            change_address=wallet.address,
-        )
-        context.submit_tx(signed_tx)
-        return {"test": "index_poisoning", "passed": False, "error": "Fake UTxO ref TX accepted!"}
-    except Exception as e:
-        return {"test": "index_poisoning", "passed": True, "rejection": str(e)[:300]}
-
-
-def test_admin_reclaim_before_deadline(
+def test_postdeadline_process_surrender(
     context: BlockFrostChainContext,
     admin,
-    victim,
-    victim_refs: list,
+    pool_ref: dict,
     script_address: str,
     script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
     deadline_posix_ms: int,
 ) -> dict[str, Any]:
-    """Attack: admin tries to reclaim BEFORE deadline. Should FAIL.
-
-    The validator requires is_entirely_after(validity_range, deadline).
-    Setting invalid_before to a slot before the deadline should fail.
-
-    Uses explicit execution units to ensure the validator is actually
-    evaluated (not short-circuited by evaluate_tx failure).
-    """
+    """Test 2: Admin ProcessSurrender AFTER deadline. Should FAIL (is_entirely_before check)."""
     try:
+        from tools.cardano_utils import posix_ms_to_slot
+
         builder = TransactionBuilder(context)
-        redeemer = Redeemer(
-            RawPlutusData(cbor2.loads(b"\xd8\x79\x80")),
-            ExecutionUnits(500_000, 200_000_000),
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
         )
-        for ref in victim_refs:
-            utxo = make_script_utxo(
-                ref[0], ref[1], ref[2], victim.pkh_hex,
-                script_address, flux_policy_id,
-            )
-            builder.add_script_input(utxo, script=script, redeemer=redeemer)
+        builder.add_script_input(utxo, script=script, redeemer=process_surrender_redeemer())
 
         builder.required_signers = [admin.vkey.hash()]
         builder.add_input_address(admin.address)
 
-        # Set validity_start to BEFORE deadline (genuinely before the on-chain deadline)
-        from tools.cardano_utils import posix_ms_to_slot
+        # Set validity_start AFTER deadline — violates is_entirely_before
         deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
-        builder.validity_start = max(0, deadline_slot - 100)
+        builder.validity_start = deadline_slot + 10
 
         signed_tx = builder.build_and_sign(
             signing_keys=[admin.skey],
             change_address=admin.address,
         )
         context.submit_tx(signed_tx)
-        return {"test": "admin_reclaim_before_deadline", "passed": False,
-                "error": "Admin reclaim before deadline was accepted!"}
+        return {"test": "postdeadline_process_surrender", "passed": False,
+                "error": "Post-deadline ProcessSurrender was accepted!"}
     except Exception as e:
-        return {"test": "admin_reclaim_before_deadline", "passed": True,
+        return {"test": "postdeadline_process_surrender", "passed": True,
                 "rejection": str(e)[:300]}
 
 
-def test_admin_reclaim_after_deadline(
+def test_predeadline_admin_withdraw(
     context: BlockFrostChainContext,
     admin,
-    claim_refs: list,
-    claimant_pkh: str,
+    pool_ref: dict,
     script_address: str,
     script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
     deadline_posix_ms: int,
 ) -> dict[str, Any]:
-    """Test: admin reclaims AFTER deadline. Should SUCCEED.
-
-    This is a positive test — admin should be able to sweep after the
-    claim window closes.
-
-    Uses explicit execution units to bypass pycardano's evaluate_tx
-    (which can fail with extraRedeemers when using synthetic UTxOs).
-    The node validates execution budgets on submission.
-    """
+    """Test 3: Admin AdminWithdraw BEFORE deadline. Should FAIL (is_entirely_after check)."""
     try:
+        from tools.cardano_utils import posix_ms_to_slot
+
         builder = TransactionBuilder(context)
-        # Provide explicit execution units so pycardano skips evaluate_tx.
-        # The claim validator is trivial (signature + time check), so these
-        # are generous but safe.  The node enforces actual usage on submit.
-        redeemer = Redeemer(
-            RawPlutusData(cbor2.loads(b"\xd8\x79\x80")),
-            ExecutionUnits(500_000, 200_000_000),
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
         )
-        for ref in claim_refs:
-            utxo = make_script_utxo(
-                ref[0], ref[1], ref[2], claimant_pkh,
-                script_address, flux_policy_id,
-            )
-            builder.add_script_input(utxo, script=script, redeemer=redeemer)
+        builder.add_script_input(utxo, script=script, redeemer=admin_withdraw_redeemer())
 
         builder.required_signers = [admin.vkey.hash()]
         builder.add_input_address(admin.address)
 
-        # Set validity_start to AFTER deadline
+        # Set TTL BEFORE deadline — violates is_entirely_after
+        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
+        builder.ttl = deadline_slot - 10
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        context.submit_tx(signed_tx)
+        return {"test": "predeadline_admin_withdraw", "passed": False,
+                "error": "Pre-deadline AdminWithdraw was accepted!"}
+    except Exception as e:
+        return {"test": "predeadline_admin_withdraw", "passed": True,
+                "rejection": str(e)[:300]}
+
+
+def test_nonadmin_admin_withdraw(
+    context: BlockFrostChainContext,
+    attacker,
+    pool_ref: dict,
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+    deadline_posix_ms: int,
+) -> dict[str, Any]:
+    """Test 4: Non-admin tries AdminWithdraw after deadline. Should FAIL (admin_signed check)."""
+    try:
         from tools.cardano_utils import posix_ms_to_slot
+
+        builder = TransactionBuilder(context)
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+        builder.add_script_input(utxo, script=script, redeemer=admin_withdraw_redeemer())
+
+        # Attacker signs — NOT admin
+        builder.required_signers = [attacker.vkey.hash()]
+        builder.add_input_address(attacker.address)
+
+        # Set validity_start AFTER deadline so timing is correct
+        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
+        builder.validity_start = deadline_slot + 1
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[attacker.skey],
+            change_address=attacker.address,
+        )
+        context.submit_tx(signed_tx)
+        return {"test": "nonadmin_admin_withdraw", "passed": False,
+                "error": "Non-admin AdminWithdraw was accepted!"}
+    except Exception as e:
+        return {"test": "nonadmin_admin_withdraw", "passed": True,
+                "rejection": str(e)[:300]}
+
+
+def test_wrong_redeemer(
+    context: BlockFrostChainContext,
+    admin,
+    pool_ref: dict,
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+) -> dict[str, Any]:
+    """Test 5: Garbage redeemer (Constr(99, [0xff * 100])). Should FAIL (pattern match)."""
+    try:
+        builder = TransactionBuilder(context)
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+        # Garbage redeemer: Constr(99, [b"\xff" * 100])
+        # CBORTag(99 + 121) = CBORTag(220, [...]) for constructor indices >= 7
+        # Actually, Constr(99, ...) doesn't map to CBORTag(220). Use raw CBOR.
+        garbage_data = CBORTag(121 + 99, [b"\xff" * 100])
+        garbage_redeemer = Redeemer(
+            RawPlutusData(cbor2.loads(cbor2.dumps(garbage_data))),
+            ExecutionUnits(500_000, 200_000_000),
+        )
+        builder.add_script_input(utxo, script=script, redeemer=garbage_redeemer)
+
+        builder.required_signers = [admin.vkey.hash()]
+        builder.add_input_address(admin.address)
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        context.submit_tx(signed_tx)
+        return {"test": "wrong_redeemer", "passed": False,
+                "error": "Garbage redeemer was accepted!"}
+    except Exception as e:
+        return {"test": "wrong_redeemer", "passed": True,
+                "rejection": str(e)[:300]}
+
+
+def test_fabricated_utxo(
+    context: BlockFrostChainContext,
+    admin,
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+) -> dict[str, Any]:
+    """Test 6: Reference a non-existent pool UTxO (all-zero tx hash). Should FAIL at submission."""
+    try:
+        fake_tx_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+        utxo = make_pool_utxo(
+            fake_tx_hash, 0, 1_000_000, 2_000_000,
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+
+        builder = TransactionBuilder(context)
+        builder.add_script_input(utxo, script=script, redeemer=process_surrender_redeemer())
+        builder.required_signers = [admin.vkey.hash()]
+        builder.add_input_address(admin.address)
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        context.submit_tx(signed_tx)
+        return {"test": "fabricated_utxo", "passed": False,
+                "error": "Fake UTxO ref TX accepted!"}
+    except Exception as e:
+        return {"test": "fabricated_utxo", "passed": True,
+                "rejection": str(e)[:300]}
+
+
+def test_admin_process_surrender_happy(
+    context: BlockFrostChainContext,
+    admin,
+    pool_ref: dict,
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+    deadline_posix_ms: int,
+) -> dict[str, Any]:
+    """Test 7 (positive): Admin ProcessSurrender before deadline. Should SUCCEED."""
+    try:
+        from tools.cardano_utils import posix_ms_to_slot
+
+        builder = TransactionBuilder(context)
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+        builder.add_script_input(utxo, script=script, redeemer=process_surrender_redeemer())
+
+        builder.required_signers = [admin.vkey.hash()]
+        builder.add_input_address(admin.address)
+
+        # Ensure validity range is entirely before deadline
+        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
+        builder.ttl = deadline_slot - 1
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        context.submit_tx(signed_tx)
+        tx_hash = signed_tx.id.payload.hex()
+        return {"test": "admin_process_surrender_happy", "passed": True,
+                "tx_hash": tx_hash, "note": "Admin successfully processed surrender"}
+    except Exception as e:
+        return {"test": "admin_process_surrender_happy", "passed": False,
+                "error": str(e)[:300]}
+
+
+def test_admin_withdraw_happy(
+    context: BlockFrostChainContext,
+    admin,
+    pool_ref: dict,
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+    deadline_posix_ms: int,
+) -> dict[str, Any]:
+    """Test 8 (positive): Admin AdminWithdraw after deadline. Should SUCCEED."""
+    try:
+        from tools.cardano_utils import posix_ms_to_slot
+
+        builder = TransactionBuilder(context)
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+        builder.add_script_input(utxo, script=script, redeemer=admin_withdraw_redeemer())
+
+        builder.required_signers = [admin.vkey.hash()]
+        builder.add_input_address(admin.address)
+
+        # Set validity_start AFTER deadline
         deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
         builder.validity_start = deadline_slot + 1
 
@@ -414,74 +519,28 @@ def test_admin_reclaim_after_deadline(
         )
         context.submit_tx(signed_tx)
         tx_hash = signed_tx.id.payload.hex()
-        return {"test": "admin_reclaim_after_deadline", "passed": True,
-                "tx_hash": tx_hash, "note": "Admin successfully reclaimed after deadline"}
+        return {"test": "admin_withdraw_happy", "passed": True,
+                "tx_hash": tx_hash, "note": "Admin successfully withdrew after deadline"}
     except Exception as e:
-        return {"test": "admin_reclaim_after_deadline", "passed": False,
+        return {"test": "admin_withdraw_happy", "passed": False,
                 "error": str(e)[:300]}
-
-
-def test_franken_address_claim(
-    context: BlockFrostChainContext,
-    attacker,
-    victim,
-    victim_refs: list,
-    script_address: str,
-    script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
-) -> dict[str, Any]:
-    """Attack: attacker creates a franken address (victim's payment key hash +
-    attacker's staking key) and tries to claim victim's UTxO.
-
-    The claim validator checks that the payment key hash from the inline datum
-    is present in tx.extra_signatories. The attacker does NOT have the victim's
-    payment signing key, so this must fail.
-    """
-    try:
-        from pycardano.hash import VerificationKeyHash
-
-        builder = TransactionBuilder(context)
-        for ref in victim_refs:
-            utxo = make_script_utxo(
-                ref[0], ref[1], ref[2], victim.pkh_hex,  # victim's real pkh
-                script_address, flux_policy_id,
-            )
-            builder.add_script_input(utxo, script=script, redeemer=unit_redeemer())
-
-        # Attacker signs — does NOT have victim's payment key
-        builder.required_signers = [attacker.vkey.hash()]
-        builder.add_input_address(attacker.address)
-
-        # Build a franken address: victim's payment pkh + attacker's staking key
-        victim_pkh = VerificationKeyHash(bytes.fromhex(victim.pkh_hex))
-        attacker_stk = attacker.vkey.hash()
-        franken_addr = Address(
-            payment_part=victim_pkh,
-            staking_part=attacker_stk,
-            network=Network.TESTNET,
-        )
-
-        signed_tx = builder.build_and_sign(
-            signing_keys=[attacker.skey],
-            change_address=franken_addr,  # send to franken address
-        )
-        context.submit_tx(signed_tx)
-        return {"test": "franken_address", "passed": False,
-                "error": "Franken address claim accepted!"}
-    except Exception as e:
-        return {"test": "franken_address", "passed": True, "rejection": str(e)[:300]}
 
 
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+
 def run_red_team(
     work_dir: Path,
     blockfrost_project_id: str,
     blueprint_path: Path,
 ) -> list[dict[str, Any]]:
-    """Run full red-team suite against preprod deployment."""
+    """Run full red-team suite against preprod surrender pool deployment.
+
+    Loads admin wallet + one random test wallet (for non-admin attacks),
+    queries live pool UTxOs, and runs all 8 tests sequentially.
+    """
     keys_dir = work_dir / "keys"
     state_file = work_dir / "rehearsal_state.json"
 
@@ -492,25 +551,39 @@ def run_red_team(
     with open(state_file) as f:
         state = json.load(f)
 
-    if not state.get("stage_7_complete"):
-        logger.error("Rehearsal must complete through stage 7. Current state is incomplete.")
+    if not state.get("stage_6_complete"):
+        logger.error("Rehearsal must complete through stage 6 (pool deployed). Current state is incomplete.")
         sys.exit(1)
 
     context = BlockFrostChainContext(
         project_id=blockfrost_project_id,
     )
 
-    # Load validator
+    # Load validator from blueprint
     with open(blueprint_path) as f:
         bp = json.load(f)
     compiled = bp["validators"][0]["compiledCode"]
     script = PlutusV3Script(bytes.fromhex(compiled))
-    script_address = state["claim_validator"]["script_address"]
-    flux_policy_id = ScriptHash(bytes.fromhex(state["flux_test"]["policy_id"]))
 
-    # Query live UTxOs directly from chain — guarantees no stale refs.
-    # Previous runs may have consumed UTxOs (e.g. admin reclaim); reading
-    # from the on-chain UTXO set instead of the index file avoids this.
+    # Read state for surrender model keys
+    script_address = state["surrender_validator"]["script_address"]
+    cmatra_policy_hex = state["cmatra_test"]["policy_id"]
+    cmatra_asset_hex = state["cmatra_test"]["asset_name_hex"]
+    cmatra_policy_id = ScriptHash(bytes.fromhex(cmatra_policy_hex))
+
+    # Extract deadline from compiled validator (most reliable source)
+    try:
+        deadline_ms = extract_deadline_from_compiled(compiled)
+        logger.info("On-chain deadline: %d ms (from blueprint)", deadline_ms)
+    except ValueError:
+        deadline_ms = state.get("deadline_posix_ms", 0)
+        logger.warning("Could not extract deadline from blueprint, using state: %d ms", deadline_ms)
+
+    if deadline_ms <= 0:
+        logger.error("No valid deadline found. Cannot run red-team tests.")
+        sys.exit(1)
+
+    # Query live pool UTxOs directly from chain
     from scripts.preprod_harness import Wallet
     from tools.api_clients import BlockfrostClient as BfClient
 
@@ -525,135 +598,186 @@ def run_red_team(
         base_url=_BF_BASE_URLS.get(bf_network, "https://cardano-mainnet.blockfrost.io/api/v0"),
     )
 
-    live_index = _query_live_claim_utxos(
-        bf_client, script_address, state["flux_test"]["policy_id"],
+    pool_utxos = _query_live_pool_utxos(
+        bf_client, script_address, cmatra_policy_hex, cmatra_asset_hex,
     )
-    total_live = sum(len(v) for v in live_index.values())
-    logger.info("Live claim UTxOs on-chain: %d PKHs, %d UTxOs", len(live_index), total_live)
+    logger.info("Live pool UTxOs on-chain: %d", len(pool_utxos))
 
-    # Match live UTxOs to test wallets
-    wallet_pkhs = {w["pkh"]: w["name"] for w in state["test_wallets"]}
-    available = []
-    for pkh, refs in live_index.items():
-        if pkh in wallet_pkhs:
-            w = Wallet.load(wallet_pkhs[pkh], keys_dir)
-            available.append((w, refs))
-
-    if len(available) < 2:
-        logger.error("Need at least 2 unclaimed test wallets for red-team tests.")
+    if len(pool_utxos) < 2:
+        logger.error(
+            "Need at least 2 pool UTxOs for red-team tests (found %d). "
+            "Deploy more pool UTxOs first.",
+            len(pool_utxos),
+        )
         sys.exit(1)
 
-    victim, victim_refs = available[0]
-    attacker, attacker_refs = available[1]
-    logger.info("Victim wallet: %s (%s)", victim.name, victim.pkh_hex[:16])
+    # Load admin wallet
+    admin = Wallet.load("admin", keys_dir)
+    logger.info("Admin wallet: %s (%s)", admin.name, admin.pkh_hex[:16])
+
+    # Load a random test wallet for non-admin attack tests
+    test_wallet_names = [w["name"] for w in state.get("test_wallets", [])]
+    if not test_wallet_names:
+        logger.error("No test wallets found in rehearsal state.")
+        sys.exit(1)
+    attacker = Wallet.load(test_wallet_names[0], keys_dir)
     logger.info("Attacker wallet: %s (%s)", attacker.name, attacker.pkh_hex[:16])
 
     results: list[dict[str, Any]] = []
 
-    # Test 1: Wrong signer
+    # Assign pool UTxOs to tests. Negative tests (1-6) don't consume UTxOs
+    # because they are rejected. Positive tests (7, 8) each consume one.
+    # We use pool_utxos[0] for negative tests and pool_utxos[0], pool_utxos[1]
+    # for positive tests (since test 7 will consume pool_utxos[0]).
+    neg_ref = pool_utxos[0]
+    pos_ref_1 = pool_utxos[0]  # for test 7 (will be consumed)
+    pos_ref_2 = pool_utxos[1]  # for test 8 (separate UTxO)
+
+    # --- Negative tests (1-6) ---
+
+    # Test 1: Non-admin ProcessSurrender
     logger.info("-" * 40)
-    logger.info("TEST 1: Wrong signer")
-    r = test_wrong_signer(context, attacker, victim, victim_refs, script_address, script, flux_policy_id)
+    logger.info("TEST 1: Non-admin ProcessSurrender")
+    r = test_nonadmin_process_surrender(
+        context, attacker, neg_ref,
+        script_address, script, cmatra_policy_id, cmatra_asset_hex,
+    )
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-    # Test 2: Wrong redeemer
+    # Test 2: Post-deadline ProcessSurrender
     logger.info("-" * 40)
-    logger.info("TEST 2: Wrong redeemer")
-    r = test_wrong_redeemer(context, attacker, attacker_refs, script_address, script, flux_policy_id)
-    results.append(r)
-    logger.info("Result: %s (%s)", "PASS" if r["passed"] else "FAIL", r.get("note", ""))
-
-    # Test 3: Datum swap (attacker tries to replace victim's datum with their own pkh)
-    logger.info("-" * 40)
-    logger.info("TEST 3: Datum swap")
-    r = test_datum_swap(context, attacker, victim, victim_refs, script_address, script, flux_policy_id)
+    logger.info("TEST 2: Post-deadline ProcessSurrender")
+    r = test_postdeadline_process_surrender(
+        context, admin, neg_ref,
+        script_address, script, cmatra_policy_id, cmatra_asset_hex,
+        deadline_ms,
+    )
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-    # Test 4: Index poisoning
+    # Test 3: Pre-deadline AdminWithdraw
     logger.info("-" * 40)
-    logger.info("TEST 4: Index poisoning")
-    r = test_index_poisoning(context, attacker, script_address, script, flux_policy_id)
+    logger.info("TEST 3: Pre-deadline AdminWithdraw")
+    r = test_predeadline_admin_withdraw(
+        context, admin, neg_ref,
+        script_address, script, cmatra_policy_id, cmatra_asset_hex,
+        deadline_ms,
+    )
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-    # Test 5: Franken address claim
+    # Test 4: Non-admin AdminWithdraw
     logger.info("-" * 40)
-    logger.info("TEST 5: Franken address claim")
-    r = test_franken_address_claim(context, attacker, victim, victim_refs, script_address, script, flux_policy_id)
+    logger.info("TEST 4: Non-admin AdminWithdraw")
+    r = test_nonadmin_admin_withdraw(
+        context, attacker, neg_ref,
+        script_address, script, cmatra_policy_id, cmatra_asset_hex,
+        deadline_ms,
+    )
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-    # Test 6: Admin reclaim before deadline (should fail)
-    # Use the actual on-chain deadline baked into the compiled validator,
-    # NOT the state file's approximate value (which drifts on re-runs).
-    try:
-        deadline_ms = extract_deadline_from_compiled(compiled)
-        logger.info("On-chain deadline: %d ms (from blueprint)", deadline_ms)
-    except ValueError:
-        deadline_ms = state.get("claim_deadline_posix_ms", 0)
-        logger.warning("Could not extract deadline from blueprint, using state: %d ms", deadline_ms)
-    if deadline_ms > 0:
-        # Load admin wallet for reclaim tests
-        admin = Wallet.load("admin", keys_dir)
+    # Test 5: Wrong redeemer data
+    logger.info("-" * 40)
+    logger.info("TEST 5: Wrong redeemer data")
+    r = test_wrong_redeemer(
+        context, admin, neg_ref,
+        script_address, script, cmatra_policy_id, cmatra_asset_hex,
+    )
+    results.append(r)
+    logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
+    # Test 6: Fabricated UTxO reference
+    logger.info("-" * 40)
+    logger.info("TEST 6: Fabricated UTxO reference")
+    r = test_fabricated_utxo(
+        context, admin,
+        script_address, script, cmatra_policy_id, cmatra_asset_hex,
+    )
+    results.append(r)
+    logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+
+    # --- Positive tests (7-8) ---
+    # These actually spend pool UTxOs, so we check timing constraints.
+
+    # Determine current time vs deadline for positive test eligibility
+    current_posix_ms = int(time.time() * 1000)
+    deadline_passed = current_posix_ms > deadline_ms
+
+    # Test 7: Admin ProcessSurrender before deadline (happy path)
+    if not deadline_passed:
         logger.info("-" * 40)
-        logger.info("TEST 6: Admin reclaim before deadline")
-        r = test_admin_reclaim_before_deadline(
-            context, admin, victim, victim_refs,
-            script_address, script, flux_policy_id, deadline_ms,
+        logger.info("TEST 7: Admin ProcessSurrender (happy path)")
+        # Use a fresh context to avoid any cached state
+        ctx7 = BlockFrostChainContext(project_id=blockfrost_project_id)
+        r = test_admin_process_surrender_happy(
+            ctx7, admin, pos_ref_1,
+            script_address, script, cmatra_policy_id, cmatra_asset_hex,
+            deadline_ms,
         )
         results.append(r)
         logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-        # Test 7: Admin reclaim after deadline (should succeed)
-        # Only run if there are UTxOs left to reclaim
-        remaining_unclaimed = [
-            (w, refs) for w, refs in available
-            if w.pkh_hex != victim.pkh_hex and w.pkh_hex != attacker.pkh_hex
-        ]
-        if remaining_unclaimed:
-            reclaim_w = remaining_unclaimed[0][0]
-            # Re-query chain for fresh refs — earlier negative tests don't
-            # consume UTxOs, but an external process might have.
-            fresh_index = _query_live_claim_utxos(
-                bf_client, script_address, state["flux_test"]["policy_id"],
-            )
-            fresh_refs = fresh_index.get(reclaim_w.pkh_hex, [])
-            if not fresh_refs:
-                logger.warning(
-                    "UTxOs for %s consumed since start — skipping test 7",
-                    reclaim_w.name,
-                )
-            else:
-                logger.info("-" * 40)
-                logger.info("TEST 7: Admin reclaim after deadline")
-                rt_ctx2 = BlockFrostChainContext(project_id=blockfrost_project_id)
-                r = test_admin_reclaim_after_deadline(
-                    rt_ctx2, admin, fresh_refs, reclaim_w.pkh_hex,
-                    script_address, script, flux_policy_id, deadline_ms,
-                )
-                results.append(r)
-                logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
-        else:
-            logger.warning("No remaining UTxOs for admin reclaim after deadline test")
+        if r["passed"]:
+            # Wait for chain confirmation before test 8
+            logger.info("Waiting 30s for chain confirmation before test 8...")
+            time.sleep(30)
     else:
-        logger.info("Skipping admin reclaim tests (no deadline in state)")
+        logger.warning(
+            "Deadline has passed (current: %d > deadline: %d). "
+            "Skipping test 7 (ProcessSurrender requires pre-deadline).",
+            current_posix_ms, deadline_ms,
+        )
 
-    # Summary
+    # Test 8: Admin AdminWithdraw after deadline (happy path)
+    if deadline_passed:
+        logger.info("-" * 40)
+        logger.info("TEST 8: Admin AdminWithdraw after deadline (happy path)")
+
+        # Re-query pool UTxOs in case test 7 consumed one
+        fresh_pool = _query_live_pool_utxos(
+            bf_client, script_address, cmatra_policy_hex, cmatra_asset_hex,
+        )
+        if not fresh_pool:
+            logger.warning("No pool UTxOs remaining for test 8.")
+        else:
+            ctx8 = BlockFrostChainContext(project_id=blockfrost_project_id)
+            r = test_admin_withdraw_happy(
+                ctx8, admin, fresh_pool[0],
+                script_address, script, cmatra_policy_id, cmatra_asset_hex,
+                deadline_ms,
+            )
+            results.append(r)
+            logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+    else:
+        logger.warning(
+            "Deadline has NOT passed (current: %d < deadline: %d). "
+            "Skipping test 8 (AdminWithdraw requires post-deadline).",
+            current_posix_ms, deadline_ms,
+        )
+
+    # --- Summary ---
     logger.info("=" * 60)
-    logger.info("RED-TEAM SUMMARY")
+    logger.info("RED-TEAM SUMMARY (Surrender Model v3.0)")
     logger.info("=" * 60)
     passed = sum(1 for r in results if r["passed"])
     total = len(results)
     logger.info("%d/%d tests PASSED", passed, total)
     for r in results:
         status = "PASS" if r["passed"] else "FAIL"
-        logger.info("  %s: %s", r["test"], status)
+        extra = ""
+        if r.get("note"):
+            extra = f" ({r['note']})"
+        if r.get("tx_hash"):
+            extra += f" [tx: {r['tx_hash'][:16]}...]"
+        logger.info("  %s: %s%s", r["test"], status, extra)
 
     if passed < total:
-        logger.error("SECURITY ISSUE: %d test(s) FAILED — validator has exploitable bugs!", total - passed)
+        logger.error(
+            "SECURITY ISSUE: %d test(s) FAILED — validator has exploitable bugs!",
+            total - passed,
+        )
 
     # Save results
     results_path = work_dir / "data" / "red_team_results.json"
@@ -669,9 +793,10 @@ def run_red_team(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        description="FLUX Merger — Red-Team Test Suite (Preprod)",
+        description="cMATRA Merger — Red-Team Test Suite for Surrender Pool (Preprod)",
     )
     parser.add_argument("--work-dir", type=str, default=None)
     parser.add_argument("--blueprint", type=str, default=None)
