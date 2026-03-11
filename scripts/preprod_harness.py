@@ -1,32 +1,38 @@
 #!/usr/bin/env python3
 """
-Preprod Rehearsal Harness
-=========================
+scripts/preprod_harness.py — Preprod Rehearsal Harness (Surrender Model v3.0)
+=============================================================================
 
-Full end-to-end preprod deployment for the FLUX merger pipeline.
+Full end-to-end preprod deployment for the cMATRA surrender-and-redeem pipeline.
+
+In the surrender model, pool UTxOs hold cMATRA at a script address with Void
+datums. The admin processes user surrender requests (trading legacy tokens for
+cMATRA) during a time window, and reclaims any unredeemed pool balance after
+the deadline.
 
 Stages:
   1. Generate admin + test wallets (or load existing)
   2. Mint AGENT_TEST (0 decimals) and SHARDS_TEST (6 decimals)
   3. Distribute tokens to test wallets with adversarial patterns
-  4. Generate synthetic allocation CSV
-  5. Mint FLUX_TEST with timelock native script
-  6. Deploy claim validator → derive script address
-  7. Build claim UTxOs (send FLUX to script with inline datums)
-  8. Build claim index
-  9. Claim from test wallets (happy path)
- 10. Red-team: adversarial claim attempts
+  4. Mint cMATRA_TEST with timelock native script + build rate table
+  5. Deploy surrender validator -> derive script address
+  6. Build surrender pool UTxOs (lock cMATRA at script with Void datums)
+  7. Happy-path surrenders (admin processes 3 test wallets)
+  8. Red-team: adversarial surrender attempts (3 attack vectors)
+  9. Admin withdraw remaining pool after deadline
 
 Requires:
   - NETWORK=preprod in env
-  - BLOCKFROST_PROJECT_ID_PREPROD set (or BLOCKFROST_PROJECT_ID with a preprod key)
-  - tADA in the admin wallet (get from faucet: https://docs.cardano.org/cardano-testnets/tools/faucet/)
+  - BLOCKFROST_PROJECT_ID_PREPROD set (or BLOCKFROST_PROJECT_ID with preprod key)
+  - tADA in the admin wallet (faucet: https://docs.cardano.org/cardano-testnets/tools/faucet/)
+
+Used by: manual operator invocation for preprod dress rehearsals.
+Depends on: pycardano 0.19.x, cbor2, blockfrost-python (auto-detect network).
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import logging
 import os
@@ -78,17 +84,28 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-FLUX_TEST_SUPPLY_BASE = 1_000_000_000_000_000  # 1e15 — same as mainnet
-FLUX_TEST_DECIMALS = 6
-FLUX_ASSET_NAME_HEX = "464c5558"  # "FLUX"
+CMATRA_TEST_SUPPLY_BASE = 1_000_000_000_000_000_000_000  # 1e21, 12 decimals
+CMATRA_TEST_DECIMALS = 12
+CMATRA_ASSET_NAME_HEX = "634d41545241"  # hex of "cMATRA"
+
+# CBOR encodings for Plutus Data constructors
+# Void datum: Constr(0, []) = CBORTag(121, [])
+VOID_DATUM_CBOR = cbor2.dumps(CBORTag(121, []))
+
+# ProcessSurrender redeemer: Constr(0, []) = CBORTag(121, [])
+PROCESS_SURRENDER_REDEEMER_CBOR = cbor2.dumps(CBORTag(121, []))
+
+# AdminWithdraw redeemer: Constr(1, []) = CBORTag(122, [])
+ADMIN_WITHDRAW_REDEEMER_CBOR = cbor2.dumps(CBORTag(122, []))
 
 
 # ---------------------------------------------------------------------------
-# Wallet management
+# Wallet management (identical to v2)
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Wallet:
+    """Represents a Cardano wallet with signing key, verification key, and address."""
     name: str
     skey: PaymentSigningKey
     vkey: PaymentVerificationKey
@@ -130,7 +147,16 @@ def ensure_wallets(
     num_test_wallets: int = 20,
     network: Network = Network.TESTNET,
 ) -> tuple[Wallet, list[Wallet]]:
-    """Generate or load admin wallet + test wallets."""
+    """Generate or load admin wallet + test wallets.
+
+    Args:
+        keys_dir: Directory to store/load key files.
+        num_test_wallets: Number of test wallets to create.
+        network: Cardano network (TESTNET for preprod).
+
+    Returns:
+        Tuple of (admin_wallet, list_of_test_wallets).
+    """
     keys_dir.mkdir(parents=True, exist_ok=True)
 
     # Admin wallet
@@ -160,7 +186,7 @@ def ensure_wallets(
 
 
 # ---------------------------------------------------------------------------
-# Native script token minting
+# Native script token minting (identical to v2)
 # ---------------------------------------------------------------------------
 
 def mint_test_token(
@@ -171,9 +197,15 @@ def mint_test_token(
 ) -> tuple[ScriptHash, str]:
     """Mint a test token using a simple native script (admin signature required).
 
-    Returns (policy_id_hash, tx_hash_hex).
+    Args:
+        context: Blockfrost chain context.
+        admin: Admin wallet that signs the mint.
+        token_name_hex: Hex-encoded asset name.
+        total_supply: Total number of base units to mint.
+
+    Returns:
+        Tuple of (policy_id ScriptHash, tx_hash hex string).
     """
-    # Build native script: RequireSignature(admin_pkh)
     pub_key_hash = admin.vkey.hash()
     native_script = ScriptPubkey(pub_key_hash)
 
@@ -212,14 +244,14 @@ def mint_test_token(
 
 
 # ---------------------------------------------------------------------------
-# Token distribution to test wallets
+# Token distribution to test wallets (identical to v2)
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Distribution:
-    """Describes how to distribute test tokens to wallets."""
+    """Describes how to distribute test tokens to a wallet."""
     wallet_index: int
-    agent_amount: int  # base units (0 decimals)
+    agent_amount: int   # base units (0 decimals)
     shards_amount: int  # base units (6 decimals)
     description: str
 
@@ -227,20 +259,21 @@ class Distribution:
 def build_adversarial_distributions(num_wallets: int) -> list[Distribution]:
     """Create adversarial distribution patterns for testing.
 
-    Patterns:
-      - Tiny dust amounts
-      - Huge whale amounts
-      - Both tokens
-      - Only one token
-      - Amounts that cause rounding edge cases
-      - Zero-eligible wallets (will get 0 FLUX)
+    Patterns include: dust amounts, whale amounts, both/single tokens,
+    rounding edge cases, and zero-eligible wallets.
+
+    Args:
+        num_wallets: Total number of test wallets available.
+
+    Returns:
+        List of Distribution specs.
     """
     dists: list[Distribution] = []
 
-    # Wallet 0: Whale — holds most AGENT
+    # Wallet 0: Whale -- holds most AGENT
     dists.append(Distribution(0, 500_000_000, 0, "agent_whale"))
 
-    # Wallet 1: Whale — holds most SHARDS (1.5M display = 1.5e12 base)
+    # Wallet 1: Whale -- holds most SHARDS (1.5M display = 1.5e12 base)
     dists.append(Distribution(1, 0, 1_500_000_000_000, "shards_whale"))
 
     # Wallet 2: Both tokens, moderate amounts
@@ -256,7 +289,6 @@ def build_adversarial_distributions(num_wallets: int) -> list[Distribution]:
     dists.append(Distribution(5, 0, 1, "shards_dust"))
 
     # Wallet 6: Amount that causes rounding stress
-    # AGENT 333_333_333 → divides unevenly into FLUX bucket
     dists.append(Distribution(6, 333_333_333, 0, "agent_rounding"))
 
     # Wallet 7: SHARDS amount that causes rounding stress
@@ -293,14 +325,28 @@ def distribute_test_tokens(
 ) -> list[str]:
     """Send test tokens from admin to test wallets per distribution spec.
 
-    Returns list of submitted tx hashes.
+    Batches into transactions of max 10 outputs. Waits 30s between batches
+    for on-chain confirmation.
+
+    Args:
+        blockfrost_project_id: Blockfrost preprod project ID.
+        admin: Admin wallet funding the distributions.
+        test_wallets: List of test wallets to receive tokens.
+        agent_policy_id: Policy ID ScriptHash for AGENT_TEST.
+        agent_name_hex: Hex-encoded asset name for AGENT_TEST.
+        shards_policy_id: Policy ID ScriptHash for SHARDS_TEST.
+        shards_name_hex: Hex-encoded asset name for SHARDS_TEST.
+        distributions: List of Distribution specs.
+
+    Returns:
+        List of submitted tx hash hex strings.
     """
     agent_name = AssetName(bytes.fromhex(agent_name_hex))
     shards_name = AssetName(bytes.fromhex(shards_name_hex))
 
     tx_hashes = []
 
-    # Batch distributions into transactions (max 10 outputs per tx for safety)
+    # Batch distributions into transactions (max 10 outputs per tx)
     batch_size = 10
     for batch_start in range(0, len(distributions), batch_size):
         batch = distributions[batch_start : batch_start + batch_size]
@@ -354,119 +400,28 @@ def distribute_test_tokens(
 
 
 # ---------------------------------------------------------------------------
-# Synthetic allocation CSV
+# cMATRA mint with timelock (replaces FLUX_TEST mint)
 # ---------------------------------------------------------------------------
 
-def generate_synthetic_allocation(
-    test_wallets: list[Wallet],
-    distributions: list[Distribution],
-    agent_bucket: int,
-    shards_bucket: int,
-    agent_supply: int,
-    shards_supply: int,
-    out_csv: Path,
-) -> dict[str, Any]:
-    """Generate a synthetic allocation CSV using the same math as Phase 4.
-
-    Returns summary stats.
-    """
-    # Build per-wallet balances
-    agent_balances: dict[str, int] = {}
-    shards_balances: dict[str, int] = {}
-
-    for dist in distributions:
-        pkh = test_wallets[dist.wallet_index].pkh_hex
-        agent_balances[pkh] = agent_balances.get(pkh, 0) + dist.agent_amount
-        shards_balances[pkh] = shards_balances.get(pkh, 0) + dist.shards_amount
-
-    # Compute allocations using integer floor division
-    allocations: dict[str, dict[str, int]] = {}  # pkh → {agent_flux, shards_flux, total}
-
-    total_agent_alloc = 0
-    total_shards_alloc = 0
-
-    for pkh in set(list(agent_balances.keys()) + list(shards_balances.keys())):
-        agent_bal = agent_balances.get(pkh, 0)
-        shards_bal = shards_balances.get(pkh, 0)
-
-        agent_flux = (agent_bal * agent_bucket) // agent_supply if agent_bal > 0 else 0
-        shards_flux = (shards_bal * shards_bucket) // shards_supply if shards_bal > 0 else 0
-        total_flux = agent_flux + shards_flux
-
-        allocations[pkh] = {
-            "agent_flux": agent_flux,
-            "shards_flux": shards_flux,
-            "flux_total_units": total_flux,
-            "agent_balance": agent_bal,
-            "shards_balance": shards_bal,
-        }
-        total_agent_alloc += agent_flux
-        total_shards_alloc += shards_flux
-
-    # Write CSV
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "payment_key_hash_hex", "flux_total_units",
-            "agent_flux_units", "shards_flux_units",
-            "agent_balance", "shards_balance", "addresses",
-        ])
-        for pkh, alloc in sorted(allocations.items()):
-            if alloc["flux_total_units"] <= 0:
-                continue
-            # Find wallet address
-            addr = ""
-            for w in test_wallets:
-                if w.pkh_hex == pkh:
-                    addr = str(w.address)
-                    break
-            writer.writerow([
-                pkh,
-                alloc["flux_total_units"],
-                alloc["agent_flux"],
-                alloc["shards_flux"],
-                alloc["agent_balance"],
-                alloc["shards_balance"],
-                addr,
-            ])
-
-    agent_dust = agent_bucket - total_agent_alloc
-    shards_dust = shards_bucket - total_shards_alloc
-    total_distributed = total_agent_alloc + total_shards_alloc
-
-    summary = {
-        "num_claimants": sum(1 for a in allocations.values() if a["flux_total_units"] > 0),
-        "total_distributed": total_distributed,
-        "agent_dust": agent_dust,
-        "shards_dust": shards_dust,
-        "total_dust": agent_dust + shards_dust,
-        "distributed_plus_dust": total_distributed + agent_dust + shards_dust,
-        "flux_supply": agent_bucket + shards_bucket,
-        "invariant_holds": (total_distributed + agent_dust + shards_dust) == (agent_bucket + shards_bucket),
-    }
-
-    logger.info("Synthetic allocation: %d claimants, %d FLUX distributed", summary["num_claimants"], total_distributed)
-    logger.info("Dust: AGENT %d + SHARDS %d = %d", agent_dust, shards_dust, summary["total_dust"])
-    logger.info("Invariant (dist+dust == supply): %s", summary["invariant_holds"])
-
-    return summary
-
-
-# ---------------------------------------------------------------------------
-# FLUX mint with timelock
-# ---------------------------------------------------------------------------
-
-def mint_flux_test(
+def mint_cmatra_test(
     context: BlockFrostChainContext,
     admin: Wallet,
     timelock_slot: int,
 ) -> tuple[ScriptHash, str]:
-    """Mint FLUX_TEST with a time-locked native script.
+    """Mint cMATRA_TEST with a time-locked native script.
 
     Policy: RequireAll [RequireSignature(admin), InvalidHereAfter(slot)]
 
-    Returns (policy_id_hash, tx_hash_hex).
+    The timelock ensures the minting policy is permanently closed after
+    the specified slot, preventing future minting.
+
+    Args:
+        context: Blockfrost chain context.
+        admin: Admin wallet that signs the mint.
+        timelock_slot: Slot after which minting is no longer possible.
+
+    Returns:
+        Tuple of (policy_id ScriptHash, tx_hash hex string).
     """
     pub_key_hash = admin.vkey.hash()
     sig_script = ScriptPubkey(pub_key_hash)
@@ -474,11 +429,11 @@ def mint_flux_test(
     policy_script = ScriptAll([sig_script, time_script])
 
     policy_id = policy_script.hash()
-    asset_name = AssetName(bytes.fromhex(FLUX_ASSET_NAME_HEX))
+    asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
 
     logger.info(
-        "Minting FLUX_TEST: supply=%d, policy=%s, timelock_slot=%d",
-        FLUX_TEST_SUPPLY_BASE, policy_id.payload.hex(), timelock_slot,
+        "Minting cMATRA_TEST: supply=%d, policy=%s, timelock_slot=%d",
+        CMATRA_TEST_SUPPLY_BASE, policy_id.payload.hex(), timelock_slot,
     )
 
     builder = TransactionBuilder(context)
@@ -490,12 +445,12 @@ def mint_flux_test(
 
     # Mint
     builder.mint = MultiAsset()
-    builder.mint[policy_id] = Asset({asset_name: FLUX_TEST_SUPPLY_BASE})
+    builder.mint[policy_id] = Asset({asset_name: CMATRA_TEST_SUPPLY_BASE})
     builder.native_scripts = [policy_script]
 
     # Send to admin
     multi = MultiAsset()
-    multi[policy_id] = Asset({asset_name: FLUX_TEST_SUPPLY_BASE})
+    multi[policy_id] = Asset({asset_name: CMATRA_TEST_SUPPLY_BASE})
     tx_out = TransactionOutput(admin.address, Value(5_000_000, multi))
     builder.add_output(tx_out)
 
@@ -506,21 +461,31 @@ def mint_flux_test(
 
     tx_hash = signed_tx.id.payload.hex()
     context.submit_tx(signed_tx)
-    logger.info("FLUX_TEST mint TX submitted: %s", tx_hash)
+    logger.info("cMATRA_TEST mint TX submitted: %s", tx_hash)
     return policy_id, tx_hash
 
 
 # ---------------------------------------------------------------------------
-# Claim validator deployment
+# Surrender validator loading (replaces load_claim_validator)
 # ---------------------------------------------------------------------------
 
-def load_claim_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHash, str]:
-    """Load compiled claim validator from Aiken blueprint.
+def load_surrender_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHash, str]:
+    """Load compiled surrender validator from Aiken blueprint.
+
+    Searches for a validator whose title contains 'surrender', falling back
+    to 'spend' or the first validator if no match is found.
 
     For parameterized validators (with parameters already applied via
-    `aiken blueprint apply`), reads the applied compiledCode and hash.
+    ``aiken blueprint apply``), reads the applied compiledCode and hash.
 
-    Returns (script, script_hash, script_address_bech32).
+    Args:
+        blueprint_path: Path to the Aiken plutus.json blueprint file.
+
+    Returns:
+        Tuple of (PlutusV3Script, ScriptHash, bech32_script_address).
+
+    Raises:
+        ValueError: If no compiled validator is found in the blueprint.
     """
     with open(blueprint_path) as f:
         blueprint = json.load(f)
@@ -528,10 +493,16 @@ def load_claim_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHa
     validators = blueprint.get("validators", [])
     compiled_code = None
     validator_hash = None
-    for v in validators:
-        if "spend" in v.get("title", "").lower():
-            compiled_code = v.get("compiledCode")
-            validator_hash = v.get("hash")
+
+    # Try to find surrender/pool validator by title keyword
+    for keyword in ("surrender", "spend"):
+        for v in validators:
+            title = v.get("title", "").lower()
+            if keyword in title:
+                compiled_code = v.get("compiledCode")
+                validator_hash = v.get("hash")
+                break
+        if compiled_code:
             break
 
     if compiled_code is None and validators:
@@ -546,7 +517,7 @@ def load_claim_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHa
     if validator_hash:
         script_hash = ScriptHash(bytes.fromhex(validator_hash))
     else:
-        # Compute hash from script bytes
+        # Compute hash from script bytes (PlutusV3 prefix = 0x03)
         import hashlib
         h = hashlib.blake2b(b"\x03" + script.to_primitive(), digest_size=28)
         script_hash = ScriptHash(h.digest())
@@ -554,53 +525,71 @@ def load_claim_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHa
     # Derive testnet script address
     script_address = Address(payment_part=script_hash, network=Network.TESTNET)
 
-    logger.info("Claim validator hash: %s", script_hash.payload.hex())
+    logger.info("Surrender validator hash: %s", script_hash.payload.hex())
     logger.info("Script address (preprod): %s", script_address)
 
     return script, script_hash, str(script_address)
 
 
 # ---------------------------------------------------------------------------
-# Build claim UTxOs (Phase 6)
+# Build surrender pool UTxOs (Stage 6)
 # ---------------------------------------------------------------------------
 
-def encode_claim_datum(pkh_hex: str) -> bytes:
-    """Encode ClaimDatum as CBOR: Constr(0, [pkh_bytes])."""
-    pkh_bytes = bytes.fromhex(pkh_hex)
-    assert len(pkh_bytes) == 28, f"Expected 28-byte keyhash, got {len(pkh_bytes)}"
-    return cbor2.dumps(CBORTag(121, [pkh_bytes]))
-
-
-def build_claim_utxos(
+def build_pool_utxos(
     blockfrost_project_id: str,
     admin: Wallet,
-    allocations_csv: Path,
     script_address: str,
-    flux_policy_id: ScriptHash,
-    batch_size: int = 20,
+    cmatra_policy_id: ScriptHash,
+    pool_base: int,
+    num_pool_utxos: int = 5,
+    batch_size: int = 5,
 ) -> list[dict[str, Any]]:
-    """Build and submit claim UTxO transactions.
+    """Lock cMATRA_TEST at the script address in pool UTxOs with Void datums.
 
-    Returns list of batch results with tx hashes and output details.
+    Splits pool_base evenly across num_pool_utxos, last UTxO gets remainder.
+    Groups outputs into batched transactions (max batch_size outputs per tx).
+
+    These are plain sends TO the script address -- no spending from script,
+    no redeemers needed. The admin simply sends cMATRA with inline Void datums.
+
+    Args:
+        blockfrost_project_id: Blockfrost preprod project ID.
+        admin: Admin wallet that holds cMATRA and funds the transaction.
+        script_address: Bech32 script address for the surrender pool.
+        cmatra_policy_id: Policy ID ScriptHash for cMATRA_TEST.
+        pool_base: Total cMATRA base units to lock in the pool.
+        num_pool_utxos: Number of pool UTxOs to create (default 5).
+        batch_size: Max outputs per transaction (default 5).
+
+    Returns:
+        List of batch result dicts with tx_hash and output details.
     """
-    asset_name = AssetName(bytes.fromhex(FLUX_ASSET_NAME_HEX))
-
-    # Load allocations
-    rows = []
-    with open(allocations_csv, newline="") as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            flux = int(r["flux_total_units"])
-            if flux > 0:
-                rows.append({"pkh": r["payment_key_hash_hex"], "flux": flux})
-
-    logger.info("Loaded %d allocations for claim UTxO building", len(rows))
-
+    asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
     script_addr = Address.from_primitive(script_address)
-    batches_result = []
 
-    for batch_start in range(0, len(rows), batch_size):
-        batch = rows[batch_start : batch_start + batch_size]
+    # Compute per-UTxO amounts
+    per_utxo = pool_base // num_pool_utxos
+    assert per_utxo > 0, f"pool_base ({pool_base}) too small for {num_pool_utxos} UTxOs"
+
+    outputs_spec: list[dict[str, Any]] = []
+    allocated = 0
+    for i in range(num_pool_utxos):
+        if i < num_pool_utxos - 1:
+            qty = per_utxo
+        else:
+            qty = pool_base - allocated  # last UTxO gets remainder
+        outputs_spec.append({"index": i, "cmatra_qty": qty})
+        allocated += qty
+
+    assert allocated == pool_base, f"Allocation mismatch: {allocated} != {pool_base}"
+
+    # Build Void datum
+    void_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
+
+    batches_result: list[dict[str, Any]] = []
+
+    for batch_start in range(0, len(outputs_spec), batch_size):
+        batch = outputs_spec[batch_start : batch_start + batch_size]
         batch_num = batch_start // batch_size
 
         # Fresh context each batch to avoid stale UTxO cache
@@ -610,21 +599,18 @@ def build_claim_utxos(
         builder.add_input_address(admin.address)
 
         output_details = []
-        for alloc in batch:
-            datum_cbor = encode_claim_datum(alloc["pkh"])
-            datum = RawPlutusData(cbor2.loads(datum_cbor))
-
+        for spec in batch:
             multi = MultiAsset()
-            multi[flux_policy_id] = Asset({asset_name: alloc["flux"]})
-            min_ada = 2_000_000
+            multi[cmatra_policy_id] = Asset({asset_name: spec["cmatra_qty"]})
+            min_ada = 2_000_000  # 2 ADA per pool UTxO
             value = Value(min_ada, multi)
 
-            tx_out = TransactionOutput(script_addr, value, datum=datum)
+            tx_out = TransactionOutput(script_addr, value, datum=void_datum)
             builder.add_output(tx_out)
 
             output_details.append({
-                "payment_key_hash_hex": alloc["pkh"],
-                "flux_units": alloc["flux"],
+                "pool_utxo_index": spec["index"],
+                "cmatra_base_units": spec["cmatra_qty"],
             })
 
         signed_tx = builder.build_and_sign(
@@ -639,10 +625,13 @@ def build_claim_utxos(
             "batch_index": batch_num,
             "tx_hash": tx_hash,
             "num_outputs": len(output_details),
-            "claimants": output_details,
+            "outputs": output_details,
         }
         batches_result.append(batch_result)
-        logger.info("Claim UTxO batch %d submitted: %s (%d outputs)", batch_num, tx_hash, len(output_details))
+        logger.info(
+            "Pool UTxO batch %d submitted: %s (%d outputs)",
+            batch_num, tx_hash, len(output_details),
+        )
 
         # Wait for on-chain confirmation before next batch
         logger.info("Waiting 30s for chain confirmation...")
@@ -652,193 +641,425 @@ def build_claim_utxos(
 
 
 # ---------------------------------------------------------------------------
-# Claim index (Phase 7) — simplified for preprod
+# Happy-path surrender processing (Stage 7)
 # ---------------------------------------------------------------------------
 
-def build_claim_index_from_batches(
-    batches: list[dict[str, Any]],
-    script_address: str,
-    flux_policy_hex: str,
-) -> dict[str, list]:
-    """Build claim index directly from batch submission results.
-
-    On preprod we know the output indices because we built them.
-    Output 0..N-1 correspond to batch outputs (change is last).
-    """
-    index: dict[str, list] = {}
-    for batch in batches:
-        tx_hash = batch["tx_hash"]
-        for i, claimant in enumerate(batch["claimants"]):
-            pkh = claimant["payment_key_hash_hex"]
-            flux = claimant["flux_units"]
-            if pkh not in index:
-                index[pkh] = []
-            index[pkh].append([tx_hash, i, flux])
-
-    logger.info("Built claim index: %d keyhashes", len(index))
-    return index
-
-
-# ---------------------------------------------------------------------------
-# Claim client (Phase 8)
-# ---------------------------------------------------------------------------
-
-def claim_flux(
-    context: BlockFrostChainContext,
-    wallet: Wallet,
-    claim_refs: list[list],
+def process_surrender(
+    blockfrost_project_id: str,
+    admin: Wallet,
+    user_address: str,
+    cmatra_amount: int,
+    pool_utxo_ref: dict[str, Any],
     script_address: str,
     script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
+    cmatra_policy_id: ScriptHash,
 ) -> str:
-    """Build and submit a claim transaction for a single wallet.
+    """Build and submit a surrender-processing transaction.
 
-    Returns tx hash.
+    The admin spends a pool UTxO using ProcessSurrender redeemer, sending
+    cMATRA to the user and returning the remainder to the script.
+
+    Transaction structure:
+      - Script input:  pool UTxO (with ProcessSurrender redeemer)
+      - Output 1:      cMATRA to user_address at the computed rate
+      - Output 2:      remaining pool balance back to script with Void datum
+      - Required signer: admin PKH
+      - Validity range: must be entirely before the deadline
+
+    Args:
+        blockfrost_project_id: Blockfrost preprod project ID.
+        admin: Admin wallet that signs the transaction.
+        user_address: Bech32 address to receive cMATRA.
+        cmatra_amount: cMATRA base units to send to the user.
+        pool_utxo_ref: Dict with tx_hash, output_index, cmatra_qty, ada_amount.
+        script_address: Bech32 script address of the surrender pool.
+        script: Compiled PlutusV3 script object.
+        cmatra_policy_id: Policy ID ScriptHash for cMATRA_TEST.
+
+    Returns:
+        Submitted transaction hash hex string.
+
+    Raises:
+        ValueError: If the pool UTxO does not hold enough cMATRA.
     """
-    asset_name = AssetName(bytes.fromhex(FLUX_ASSET_NAME_HEX))
+    if cmatra_amount > pool_utxo_ref["cmatra_qty"]:
+        raise ValueError(
+            f"Pool UTxO has {pool_utxo_ref['cmatra_qty']} cMATRA but "
+            f"{cmatra_amount} requested"
+        )
+
+    # Fresh context for this transaction
+    ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+
+    asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
     script_addr = Address.from_primitive(script_address)
 
-    builder = TransactionBuilder(context)
+    # Reconstruct the pool UTxO for pycardano
+    tx_in = TransactionInput(
+        TransactionId(bytes.fromhex(pool_utxo_ref["tx_hash"])),
+        pool_utxo_ref["output_index"],
+    )
 
-    for ref in claim_refs:
-        tx_hash_hex, output_index, flux_qty = ref[0], ref[1], ref[2]
+    pool_multi = MultiAsset()
+    pool_multi[cmatra_policy_id] = Asset({asset_name: pool_utxo_ref["cmatra_qty"]})
+    pool_ada = pool_utxo_ref.get("ada_amount", 2_000_000)
+    pool_value = Value(pool_ada, pool_multi)
+    pool_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
 
-        tx_in = TransactionInput(
-            TransactionId(bytes.fromhex(tx_hash_hex)),
-            output_index,
-        )
+    utxo = UTxO(tx_in, TransactionOutput(script_addr, pool_value, datum=pool_datum))
 
-        # Reconstruct UTxO
-        multi = MultiAsset()
-        multi[flux_policy_id] = Asset({asset_name: flux_qty})
-        value = Value(2_000_000, multi)
+    # ProcessSurrender redeemer: Constr(0, [])
+    redeemer = Redeemer(RawPlutusData(cbor2.loads(PROCESS_SURRENDER_REDEEMER_CBOR)))
 
-        datum_cbor = encode_claim_datum(wallet.pkh_hex)
-        datum = RawPlutusData(cbor2.loads(datum_cbor))
+    builder = TransactionBuilder(ctx)
 
-        utxo = UTxO(tx_in, TransactionOutput(script_addr, value, datum=datum))
+    # Add script input (the pool UTxO we are spending)
+    builder.add_script_input(utxo, script=script, redeemer=redeemer)
 
-        # Unit redeemer
-        redeemer = Redeemer(RawPlutusData(cbor2.loads(b"\xd8\x79\x80")))
+    # Admin address for collateral and change
+    builder.add_input_address(admin.address)
 
-        builder.add_script_input(
-            utxo,
-            script=script,
-            redeemer=redeemer,
-        )
+    # Output 1: cMATRA to user
+    user_multi = MultiAsset()
+    user_multi[cmatra_policy_id] = Asset({asset_name: cmatra_amount})
+    user_value = Value(2_000_000, user_multi)
+    user_addr = Address.from_primitive(user_address)
+    builder.add_output(TransactionOutput(user_addr, user_value))
 
-    # Required signer — the claimant
-    builder.required_signers = [wallet.vkey.hash()]
+    # Output 2: remaining pool balance back to script with Void datum
+    remaining = pool_utxo_ref["cmatra_qty"] - cmatra_amount
+    if remaining > 0:
+        return_multi = MultiAsset()
+        return_multi[cmatra_policy_id] = Asset({asset_name: remaining})
+        return_value = Value(2_000_000, return_multi)
+        return_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
+        builder.add_output(TransactionOutput(script_addr, return_value, datum=return_datum))
 
-    # Add collateral (wallet needs some ADA UTxOs)
-    builder.add_input_address(wallet.address)
+    # Required signer: admin PKH (on-chain validator checks this)
+    builder.required_signers = [admin.vkey.hash()]
 
     signed_tx = builder.build_and_sign(
-        signing_keys=[wallet.skey],
-        change_address=wallet.address,
+        signing_keys=[admin.skey],
+        change_address=admin.address,
     )
 
     tx_hash = signed_tx.id.payload.hex()
-    context.submit_tx(signed_tx)
+    ctx.submit_tx(signed_tx)
+    logger.info(
+        "Surrender tx submitted: %s (%d cMATRA -> %s, %d remaining)",
+        tx_hash, cmatra_amount, user_address[:24] + "...", remaining,
+    )
     return tx_hash
 
 
 # ---------------------------------------------------------------------------
-# Red-team tests (Phase 10)
+# Red-team tests (Stage 8)
 # ---------------------------------------------------------------------------
 
 def red_team_wrong_signer(
-    context: BlockFrostChainContext,
+    blockfrost_project_id: str,
     wrong_wallet: Wallet,
-    victim_wallet: Wallet,
-    claim_refs: list[list],
+    admin: Wallet,
+    pool_utxo_ref: dict[str, Any],
     script_address: str,
     script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
+    cmatra_policy_id: ScriptHash,
 ) -> bool:
-    """Attempt to claim someone else's UTxO. Should FAIL.
+    """Attack: non-admin tries to spend pool UTxO with ProcessSurrender.
 
-    Returns True if attack was correctly rejected.
+    The on-chain validator requires admin_pkh in extra_signatories. A
+    random wallet signing should fail validation.
+
+    Args:
+        blockfrost_project_id: Blockfrost preprod project ID.
+        wrong_wallet: Non-admin wallet attempting the attack.
+        admin: Admin wallet (for reference, not used to sign).
+        pool_utxo_ref: Pool UTxO to attempt spending.
+        script_address: Bech32 script address.
+        script: Compiled PlutusV3 script.
+        cmatra_policy_id: cMATRA policy ID.
+
+    Returns:
+        True if the attack was correctly rejected (expected behavior).
     """
-    asset_name = AssetName(bytes.fromhex(FLUX_ASSET_NAME_HEX))
-    script_addr = Address.from_primitive(script_address)
-
     try:
-        builder = TransactionBuilder(context)
+        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
 
-        for ref in claim_refs:
-            tx_hash_hex, output_index, flux_qty = ref[0], ref[1], ref[2]
-            tx_in = TransactionInput(
-                TransactionId(bytes.fromhex(tx_hash_hex)),
-                output_index,
-            )
-            multi = MultiAsset()
-            multi[flux_policy_id] = Asset({asset_name: flux_qty})
-            value = Value(2_000_000, multi)
+        asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
+        script_addr = Address.from_primitive(script_address)
 
-            # Datum has the VICTIM's pkh
-            datum_cbor = encode_claim_datum(victim_wallet.pkh_hex)
-            datum = RawPlutusData(cbor2.loads(datum_cbor))
-            utxo = UTxO(tx_in, TransactionOutput(script_addr, value, datum=datum))
+        # Reconstruct pool UTxO
+        tx_in = TransactionInput(
+            TransactionId(bytes.fromhex(pool_utxo_ref["tx_hash"])),
+            pool_utxo_ref["output_index"],
+        )
+        pool_multi = MultiAsset()
+        pool_multi[cmatra_policy_id] = Asset({asset_name: pool_utxo_ref["cmatra_qty"]})
+        pool_ada = pool_utxo_ref.get("ada_amount", 2_000_000)
+        pool_value = Value(pool_ada, pool_multi)
+        pool_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
+        utxo = UTxO(tx_in, TransactionOutput(script_addr, pool_value, datum=pool_datum))
 
-            redeemer = Redeemer(RawPlutusData(cbor2.loads(b"\xd8\x79\x80")))
-            builder.add_script_input(utxo, script=script, redeemer=redeemer)
+        redeemer = Redeemer(RawPlutusData(cbor2.loads(PROCESS_SURRENDER_REDEEMER_CBOR)))
 
-        # Sign with WRONG wallet
-        builder.required_signers = [wrong_wallet.vkey.hash()]
+        builder = TransactionBuilder(ctx)
+        builder.add_script_input(utxo, script=script, redeemer=redeemer)
         builder.add_input_address(wrong_wallet.address)
+
+        # Sign with WRONG wallet, set wrong signer as required
+        builder.required_signers = [wrong_wallet.vkey.hash()]
+
+        # Send pool cMATRA to the wrong wallet
+        steal_multi = MultiAsset()
+        steal_multi[cmatra_policy_id] = Asset({asset_name: pool_utxo_ref["cmatra_qty"]})
+        steal_value = Value(2_000_000, steal_multi)
+        builder.add_output(TransactionOutput(wrong_wallet.address, steal_value))
 
         signed_tx = builder.build_and_sign(
             signing_keys=[wrong_wallet.skey],
             change_address=wrong_wallet.address,
         )
-        context.submit_tx(signed_tx)
+        ctx.submit_tx(signed_tx)
 
-        # If we get here, the attack succeeded — BAD
-        logger.error("RED TEAM FAIL: wrong-signer claim was accepted!")
+        # If we get here, the attack succeeded -- BAD
+        logger.error("RED TEAM FAIL: wrong-signer surrender was accepted!")
         return False
 
     except Exception as e:
-        logger.info("RED TEAM PASS: wrong-signer claim rejected: %s", str(e)[:200])
+        logger.info("RED TEAM PASS: wrong-signer surrender rejected: %s", str(e)[:200])
         return True
 
 
-def red_team_double_claim(
-    context: BlockFrostChainContext,
-    wallet: Wallet,
-    claim_refs: list[list],
+def red_team_post_deadline(
+    blockfrost_project_id: str,
+    admin: Wallet,
+    pool_utxo_ref: dict[str, Any],
     script_address: str,
     script: PlutusV3Script,
-    flux_policy_id: ScriptHash,
+    cmatra_policy_id: ScriptHash,
+    deadline_posix_ms: int,
 ) -> bool:
-    """Attempt to claim the same UTxO twice. Second should FAIL.
+    """Attack: ProcessSurrender with validity range after the deadline.
 
-    Returns True if double-claim was correctly rejected.
+    The on-chain validator requires is_entirely_before(validity_range, deadline)
+    for ProcessSurrender. Setting the validity start well after the deadline
+    should fail.
+
+    Args:
+        blockfrost_project_id: Blockfrost preprod project ID.
+        admin: Admin wallet (correct signer, but wrong timing).
+        pool_utxo_ref: Pool UTxO to attempt spending.
+        script_address: Bech32 script address.
+        script: Compiled PlutusV3 script.
+        cmatra_policy_id: cMATRA policy ID.
+        deadline_posix_ms: Deadline in POSIX milliseconds.
+
+    Returns:
+        True if the attack was correctly rejected (expected behavior).
     """
     try:
-        # First claim should succeed
-        tx_hash = claim_flux(
-            context, wallet, claim_refs,
-            script_address, script, flux_policy_id,
-        )
-        logger.info("First claim succeeded: %s", tx_hash)
-        time.sleep(20)  # Wait for confirmation
+        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
 
-        # Second claim should fail (UTxO already spent)
-        try:
-            tx_hash2 = claim_flux(
-                context, wallet, claim_refs,
-                script_address, script, flux_policy_id,
-            )
-            logger.error("RED TEAM FAIL: double-claim was accepted! TX: %s", tx_hash2)
-            return False
-        except Exception as e:
-            logger.info("RED TEAM PASS: double-claim rejected: %s", str(e)[:200])
-            return True
+        asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
+        script_addr = Address.from_primitive(script_address)
+
+        # Reconstruct pool UTxO
+        tx_in = TransactionInput(
+            TransactionId(bytes.fromhex(pool_utxo_ref["tx_hash"])),
+            pool_utxo_ref["output_index"],
+        )
+        pool_multi = MultiAsset()
+        pool_multi[cmatra_policy_id] = Asset({asset_name: pool_utxo_ref["cmatra_qty"]})
+        pool_ada = pool_utxo_ref.get("ada_amount", 2_000_000)
+        pool_value = Value(pool_ada, pool_multi)
+        pool_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
+        utxo = UTxO(tx_in, TransactionOutput(script_addr, pool_value, datum=pool_datum))
+
+        # Use ProcessSurrender redeemer (correct redeemer, wrong timing)
+        redeemer = Redeemer(RawPlutusData(cbor2.loads(PROCESS_SURRENDER_REDEEMER_CBOR)))
+
+        builder = TransactionBuilder(ctx)
+        builder.add_script_input(utxo, script=script, redeemer=redeemer)
+        builder.add_input_address(admin.address)
+
+        # Set validity start to well after the deadline
+        # Convert deadline from POSIX ms to approximate slot
+        # Cardano preprod: slot ~= (posix_ms - 1654041600000) / 1000
+        # Add a generous offset to ensure we are past the deadline
+        post_deadline_slot = ctx.last_block_slot + 100_000
+        builder.validity_start = post_deadline_slot
+        builder.ttl = post_deadline_slot + 500
+
+        builder.required_signers = [admin.vkey.hash()]
+
+        # Output: send cMATRA to admin (legitimate amount, wrong timing)
+        out_multi = MultiAsset()
+        out_multi[cmatra_policy_id] = Asset({asset_name: pool_utxo_ref["cmatra_qty"]})
+        out_value = Value(2_000_000, out_multi)
+        builder.add_output(TransactionOutput(admin.address, out_value))
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
+        ctx.submit_tx(signed_tx)
+
+        logger.error("RED TEAM FAIL: post-deadline ProcessSurrender was accepted!")
+        return False
 
     except Exception as e:
-        logger.error("RED TEAM ERROR: first claim failed: %s", e)
+        logger.info("RED TEAM PASS: post-deadline ProcessSurrender rejected: %s", str(e)[:200])
+        return True
+
+
+def red_team_no_admin_sig(
+    blockfrost_project_id: str,
+    random_wallet: Wallet,
+    pool_utxo_ref: dict[str, Any],
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+) -> bool:
+    """Attack: build tx spending pool UTxO but without admin as required_signer.
+
+    Even if the random wallet signs, the on-chain validator checks for the
+    admin PKH in extra_signatories. Signing with a different key that is
+    not the admin should fail validation.
+
+    Args:
+        blockfrost_project_id: Blockfrost preprod project ID.
+        random_wallet: A non-admin wallet used to sign.
+        pool_utxo_ref: Pool UTxO to attempt spending.
+        script_address: Bech32 script address.
+        script: Compiled PlutusV3 script.
+        cmatra_policy_id: cMATRA policy ID.
+
+    Returns:
+        True if the attack was correctly rejected (expected behavior).
+    """
+    try:
+        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+
+        asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
+        script_addr = Address.from_primitive(script_address)
+
+        # Reconstruct pool UTxO
+        tx_in = TransactionInput(
+            TransactionId(bytes.fromhex(pool_utxo_ref["tx_hash"])),
+            pool_utxo_ref["output_index"],
+        )
+        pool_multi = MultiAsset()
+        pool_multi[cmatra_policy_id] = Asset({asset_name: pool_utxo_ref["cmatra_qty"]})
+        pool_ada = pool_utxo_ref.get("ada_amount", 2_000_000)
+        pool_value = Value(pool_ada, pool_multi)
+        pool_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
+        utxo = UTxO(tx_in, TransactionOutput(script_addr, pool_value, datum=pool_datum))
+
+        redeemer = Redeemer(RawPlutusData(cbor2.loads(PROCESS_SURRENDER_REDEEMER_CBOR)))
+
+        builder = TransactionBuilder(ctx)
+        builder.add_script_input(utxo, script=script, redeemer=redeemer)
+        builder.add_input_address(random_wallet.address)
+
+        # Set required_signers to the random wallet, NOT the admin
+        builder.required_signers = [random_wallet.vkey.hash()]
+
+        # Output: send cMATRA to random wallet
+        out_multi = MultiAsset()
+        out_multi[cmatra_policy_id] = Asset({asset_name: pool_utxo_ref["cmatra_qty"]})
+        out_value = Value(2_000_000, out_multi)
+        builder.add_output(TransactionOutput(random_wallet.address, out_value))
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[random_wallet.skey],
+            change_address=random_wallet.address,
+        )
+        ctx.submit_tx(signed_tx)
+
+        logger.error("RED TEAM FAIL: no-admin-sig surrender was accepted!")
         return False
+
+    except Exception as e:
+        logger.info("RED TEAM PASS: no-admin-sig surrender rejected: %s", str(e)[:200])
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Admin withdraw after deadline (Stage 9)
+# ---------------------------------------------------------------------------
+
+def admin_withdraw(
+    blockfrost_project_id: str,
+    admin: Wallet,
+    pool_utxo_refs: list[dict[str, Any]],
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+) -> str:
+    """Admin reclaims remaining pool UTxOs after the deadline using AdminWithdraw.
+
+    Uses AdminWithdraw redeemer (Constr(1, [])) to spend all remaining pool
+    UTxOs. The validity range must be entirely after the deadline.
+
+    Args:
+        blockfrost_project_id: Blockfrost preprod project ID.
+        admin: Admin wallet that signs the withdrawal.
+        pool_utxo_refs: List of remaining pool UTxO dicts.
+        script_address: Bech32 script address of the surrender pool.
+        script: Compiled PlutusV3 script.
+        cmatra_policy_id: cMATRA policy ID.
+
+    Returns:
+        Submitted transaction hash hex string.
+    """
+    ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+
+    asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
+    script_addr = Address.from_primitive(script_address)
+
+    builder = TransactionBuilder(ctx)
+
+    # AdminWithdraw redeemer: Constr(1, [])
+    redeemer = Redeemer(RawPlutusData(cbor2.loads(ADMIN_WITHDRAW_REDEEMER_CBOR)))
+
+    for ref in pool_utxo_refs:
+        tx_in = TransactionInput(
+            TransactionId(bytes.fromhex(ref["tx_hash"])),
+            ref["output_index"],
+        )
+        pool_multi = MultiAsset()
+        pool_multi[cmatra_policy_id] = Asset({asset_name: ref["cmatra_qty"]})
+        pool_ada = ref.get("ada_amount", 2_000_000)
+        pool_value = Value(pool_ada, pool_multi)
+        pool_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
+
+        utxo = UTxO(tx_in, TransactionOutput(script_addr, pool_value, datum=pool_datum))
+        builder.add_script_input(utxo, script=script, redeemer=redeemer)
+
+    # Admin address for collateral and change
+    builder.add_input_address(admin.address)
+
+    # Validity range: entirely after deadline (set validity_start to current slot)
+    # The validator requires is_entirely_after(validity_range, deadline)
+    builder.validity_start = ctx.last_block_slot
+
+    # Required signer: admin PKH
+    builder.required_signers = [admin.vkey.hash()]
+
+    signed_tx = builder.build_and_sign(
+        signing_keys=[admin.skey],
+        change_address=admin.address,
+    )
+
+    tx_hash = signed_tx.id.payload.hex()
+    ctx.submit_tx(signed_tx)
+
+    total_reclaimed = sum(r["cmatra_qty"] for r in pool_utxo_refs)
+    logger.info(
+        "Admin withdraw tx submitted: %s (reclaimed %d cMATRA from %d UTxOs)",
+        tx_hash, total_reclaimed, len(pool_utxo_refs),
+    )
+    return tx_hash
 
 
 # ---------------------------------------------------------------------------
@@ -850,10 +1071,25 @@ def run_preprod_rehearsal(
     blockfrost_project_id: str,
     blueprint_path: Path,
     num_test_wallets: int = 20,
-    timelock_offset_slots: int = 3600,  # ~1 hour after current slot
+    timelock_offset_slots: int = 600,  # ~10 minutes for quick AdminWithdraw test
+    num_pool_utxos: int = 5,
     skip_to_stage: int = 1,
 ) -> None:
-    """Run the full preprod rehearsal."""
+    """Run the full preprod rehearsal for the surrender-and-redeem model.
+
+    Stages 1-3: wallet setup, token minting, distribution (same as v2).
+    Stages 4-9: cMATRA mint, validator deploy, pool build, surrender,
+    red-team, and admin withdraw (new for v3).
+
+    Args:
+        work_dir: Working directory for keys, data, and state file.
+        blockfrost_project_id: Blockfrost preprod project ID.
+        blueprint_path: Path to Aiken plutus.json blueprint.
+        num_test_wallets: Number of test wallets to create.
+        timelock_offset_slots: Offset for minting policy timelock.
+        num_pool_utxos: Number of pool UTxOs to create.
+        skip_to_stage: Resume from a specific stage (1-9).
+    """
     keys_dir = work_dir / "keys"
     data_dir = work_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -900,16 +1136,25 @@ def run_preprod_rehearsal(
         # Check balance
         try:
             utxos = context.utxos(admin.address)
-            total_ada = sum(u.output.amount.coin if hasattr(u.output.amount, 'coin') else u.output.amount for u in utxos)
+            total_ada = sum(
+                u.output.amount.coin if hasattr(u.output.amount, 'coin')
+                else u.output.amount
+                for u in utxos
+            )
             logger.info("Admin balance: %d lovelace (%.2f ADA)", total_ada, total_ada / 1e6)
             if total_ada < 100_000_000:
-                logger.warning("Insufficient tADA! Need at least 100 ADA. Fund the admin wallet and re-run.")
+                logger.warning(
+                    "Insufficient tADA! Need at least 100 ADA. "
+                    "Fund the admin wallet and re-run."
+                )
                 state["stage_1_complete"] = True
                 state["needs_funding"] = True
                 save_state()
                 return
         except Exception as e:
-            logger.warning("Could not check balance (wallet may not be funded yet): %s", e)
+            logger.warning(
+                "Could not check balance (wallet may not be funded yet): %s", e
+            )
             state["stage_1_complete"] = True
             state["needs_funding"] = True
             save_state()
@@ -922,21 +1167,24 @@ def run_preprod_rehearsal(
 
     else:
         admin = Wallet.load("admin", keys_dir)
-        test_wallets = [Wallet.load(f"test_{i:03d}", keys_dir) for i in range(num_test_wallets)]
+        test_wallets = [
+            Wallet.load(f"test_{i:03d}", keys_dir)
+            for i in range(num_test_wallets)
+        ]
 
     # ---------------------------------------------------------------
-    # Stage 2: Mint test tokens
+    # Stage 2: Mint test tokens (AGENT_TEST + SHARDS_TEST)
     # ---------------------------------------------------------------
     if skip_to_stage <= 2:
         logger.info("=" * 60)
         logger.info("STAGE 2: Mint AGENT_TEST + SHARDS_TEST")
         logger.info("=" * 60)
 
-        agent_name_hex = "4167656e7454657374"  # "AgentTest"
+        agent_name_hex = "4167656e7454657374"    # "AgentTest"
         shards_name_hex = "53686172647354657374"  # "ShardsTest"
 
-        agent_supply = 1_000_000_000  # 1B, 0 decimals
-        shards_supply = 3_000_000_000_000  # 3M display × 10^6, 6 decimals
+        agent_supply = 1_000_000_000              # 1B, 0 decimals
+        shards_supply = 3_000_000_000_000         # 3M display x 10^6, 6 decimals
 
         # Both tokens use the same native script (admin signature)
         pub_key_hash = admin.vkey.hash()
@@ -1044,257 +1292,411 @@ def run_preprod_rehearsal(
         ]
 
     # ---------------------------------------------------------------
-    # Stage 4: Generate synthetic allocation CSV
+    # Stage 4: Mint cMATRA_TEST + build rate table
     # ---------------------------------------------------------------
     if skip_to_stage <= 4:
         logger.info("=" * 60)
-        logger.info("STAGE 4: Generate synthetic allocation")
-        logger.info("=" * 60)
-
-        # Use same 85.5/14.5 split as mainnet
-        agent_bucket = 855_271_753_084_314
-        shards_bucket = FLUX_TEST_SUPPLY_BASE - agent_bucket
-
-        alloc_csv = data_dir / "test_allocations.csv"
-        summary = generate_synthetic_allocation(
-            test_wallets, distributions,
-            agent_bucket, shards_bucket,
-            agent_supply, shards_supply,
-            alloc_csv,
-        )
-
-        state["allocation"] = {
-            "csv_path": str(alloc_csv),
-            "agent_bucket": agent_bucket,
-            "shards_bucket": shards_bucket,
-            **summary,
-        }
-        state["stage_4_complete"] = True
-        save_state()
-
-    # ---------------------------------------------------------------
-    # Stage 5: Mint FLUX_TEST
-    # ---------------------------------------------------------------
-    if skip_to_stage <= 5:
-        logger.info("=" * 60)
-        logger.info("STAGE 5: Mint FLUX_TEST with timelock")
+        logger.info("STAGE 4: Mint cMATRA_TEST with timelock + build rate table")
         logger.info("=" * 60)
 
         # Fresh context after previous stages
         context = BlockFrostChainContext(project_id=blockfrost_project_id)
         current_slot = context.last_block_slot
         timelock_slot = current_slot + timelock_offset_slots
-        logger.info("Current slot: %d, timelock: %d (offset +%d)", current_slot, timelock_slot, timelock_offset_slots)
+        logger.info(
+            "Current slot: %d, timelock: %d (offset +%d)",
+            current_slot, timelock_slot, timelock_offset_slots,
+        )
 
-        flux_policy_id, flux_tx = mint_flux_test(context, admin, timelock_slot)
-        logger.info("Waiting for FLUX_TEST mint confirmation...")
+        cmatra_policy_id, cmatra_tx = mint_cmatra_test(context, admin, timelock_slot)
+        logger.info("Waiting for cMATRA_TEST mint confirmation...")
         time.sleep(30)
 
-        state["flux_test"] = {
-            "policy_id": flux_policy_id.payload.hex(),
-            "asset_name_hex": FLUX_ASSET_NAME_HEX,
-            "supply": FLUX_TEST_SUPPLY_BASE,
-            "timelock_slot": timelock_slot,
-            "mint_tx": flux_tx,
+        # Build simple rate table: 85% pool split equally between AGENT and SHARDS
+        pool_base = int(CMATRA_TEST_SUPPLY_BASE * 0.85)
+        agent_bucket = pool_base // 2
+        shards_bucket = pool_base - agent_bucket
+        rate_table = {
+            "tokens": {
+                "AGENT_TEST": {
+                    "rate_base_per_unit": agent_bucket // agent_supply,
+                    "is_nft": False,
+                },
+                "SHARDS_TEST": {
+                    "rate_base_per_unit": shards_bucket // shards_supply,
+                    "is_nft": False,
+                },
+            },
+            "public_pool_base": pool_base,
         }
+
+        logger.info(
+            "Rate table built: AGENT rate=%d, SHARDS rate=%d, pool=%d",
+            rate_table["tokens"]["AGENT_TEST"]["rate_base_per_unit"],
+            rate_table["tokens"]["SHARDS_TEST"]["rate_base_per_unit"],
+            pool_base,
+        )
+
+        state["cmatra_test"] = {
+            "policy_id": cmatra_policy_id.payload.hex(),
+            "asset_name_hex": CMATRA_ASSET_NAME_HEX,
+            "supply": CMATRA_TEST_SUPPLY_BASE,
+            "decimals": CMATRA_TEST_DECIMALS,
+            "timelock_slot": timelock_slot,
+            "mint_tx": cmatra_tx,
+        }
+        state["rate_table"] = rate_table
+        state["pool_base"] = pool_base
+        state["stage_4_complete"] = True
+        save_state()
+
+    else:
+        cmatra_policy_id = ScriptHash(bytes.fromhex(state["cmatra_test"]["policy_id"]))
+        rate_table = state["rate_table"]
+        pool_base = state["pool_base"]
+
+    # ---------------------------------------------------------------
+    # Stage 5: Deploy surrender validator
+    # ---------------------------------------------------------------
+    if skip_to_stage <= 5:
+        logger.info("=" * 60)
+        logger.info("STAGE 5: Deploy surrender validator")
+        logger.info("=" * 60)
+
+        script, script_hash, script_address = load_surrender_validator(blueprint_path)
+
+        # Extract deadline from the applied validator blueprint if available
+        deadline_posix_ms = None
+        try:
+            with open(blueprint_path) as _bp_f:
+                _bp = json.load(_bp_f)
+            # Try to find deadline from validator parameters or compiled code
+            for _v in _bp.get("validators", []):
+                title = _v.get("title", "").lower()
+                if "surrender" in title or "spend" in title:
+                    # The deadline is baked into the applied validator
+                    # Try to parse it from parameters if available
+                    params = _v.get("parameters", [])
+                    if len(params) >= 2:
+                        # Second parameter is deadline
+                        deadline_param = params[1]
+                        if isinstance(deadline_param, dict):
+                            deadline_posix_ms = deadline_param.get("value")
+                    break
+        except Exception:
+            pass
+
+        if deadline_posix_ms is None:
+            # Fallback: use a deadline 10 minutes from now
+            deadline_posix_ms = int(time.time() * 1000) + (timelock_offset_slots * 1000)
+            logger.info(
+                "Could not extract deadline from blueprint; "
+                "using fallback: %d ms (~%d minutes from now)",
+                deadline_posix_ms, timelock_offset_slots // 60,
+            )
+
+        state["surrender_validator"] = {
+            "script_hash": script_hash.payload.hex(),
+            "script_address": script_address,
+            "compiled_code": script.to_primitive().hex(),
+        }
+        state["deadline_posix_ms"] = deadline_posix_ms
         state["stage_5_complete"] = True
         save_state()
 
+        logger.info("Deadline (POSIX ms): %d", deadline_posix_ms)
+
     else:
-        flux_policy_id = ScriptHash(bytes.fromhex(state["flux_test"]["policy_id"]))
+        script, script_hash, script_address = load_surrender_validator(blueprint_path)
+        deadline_posix_ms = state["deadline_posix_ms"]
 
     # ---------------------------------------------------------------
-    # Stage 6: Deploy claim validator + build claim UTxOs
+    # Stage 6: Build surrender pool UTxOs
     # ---------------------------------------------------------------
     if skip_to_stage <= 6:
         logger.info("=" * 60)
-        logger.info("STAGE 6: Deploy claim validator + build claim UTxOs")
+        logger.info("STAGE 6: Build surrender pool UTxOs")
         logger.info("=" * 60)
 
-        script, script_hash, script_address = load_claim_validator(blueprint_path)
-
-        alloc_csv = Path(state["allocation"]["csv_path"])
-        batches = build_claim_utxos(
-            blockfrost_project_id, admin, alloc_csv,
-            script_address, flux_policy_id,
-            batch_size=20,
+        pool_batches = build_pool_utxos(
+            blockfrost_project_id, admin, script_address,
+            cmatra_policy_id, pool_base,
+            num_pool_utxos=num_pool_utxos,
+            batch_size=5,
         )
-        logger.info("Waiting for claim UTxO confirmations...")
-        time.sleep(30)
 
-        # Store the actual on-chain deadline baked into the applied validator.
-        # Extract from the compiled code rather than computing a new value,
-        # so the state file matches what the validator actually enforces.
-        from scripts.red_team import extract_deadline_from_compiled
-        compiled_code = None
-        with open(blueprint_path) as _bp_f:
-            _bp = json.load(_bp_f)
-        for _v in _bp.get("validators", []):
-            if "spend" in _v.get("title", "").lower():
-                compiled_code = _v.get("compiledCode")
-                break
-        if compiled_code:
-            test_deadline_ms = extract_deadline_from_compiled(compiled_code)
-        else:
-            import time as _time
-            test_deadline_ms = int((_time.time() - 300) * 1000)
+        # Build a tracking list of all pool UTxO references
+        pool_utxo_refs: list[dict[str, Any]] = []
+        for batch in pool_batches:
+            tx_hash = batch["tx_hash"]
+            for out in batch["outputs"]:
+                pool_utxo_refs.append({
+                    "tx_hash": tx_hash,
+                    "output_index": out["pool_utxo_index"],
+                    "cmatra_qty": out["cmatra_base_units"],
+                    "ada_amount": 2_000_000,
+                })
 
-        state["claim_validator"] = {
-            "script_hash": script_hash.payload.hex(),
-            "script_address": script_address,
-        }
-        state["claim_deadline_posix_ms"] = test_deadline_ms
-        state["claim_batches"] = batches
+        state["pool_batches"] = pool_batches
+        state["pool_utxo_refs"] = pool_utxo_refs
         state["stage_6_complete"] = True
         save_state()
 
+        logger.info(
+            "Pool built: %d UTxOs, %d total cMATRA",
+            len(pool_utxo_refs),
+            sum(r["cmatra_qty"] for r in pool_utxo_refs),
+        )
+
     else:
-        script, script_hash, script_address = load_claim_validator(blueprint_path)
+        pool_utxo_refs = state["pool_utxo_refs"]
 
     # ---------------------------------------------------------------
-    # Stage 7: Build claim index
+    # Stage 7: Happy-path surrenders
     # ---------------------------------------------------------------
     if skip_to_stage <= 7:
         logger.info("=" * 60)
-        logger.info("STAGE 7: Build claim index")
+        logger.info("STAGE 7: Happy-path surrenders")
         logger.info("=" * 60)
 
-        index = build_claim_index_from_batches(
-            state["claim_batches"],
-            state["claim_validator"]["script_address"],
-            state.get("flux_test", {}).get("policy_id", ""),
-        )
+        surrender_results: list[dict[str, Any]] = []
 
-        index_path = data_dir / "claim_index.json"
-        with open(index_path, "w") as f:
-            json.dump(index, f, indent=2)
+        # Pick first 3 test wallets that have legacy tokens
+        wallets_with_tokens = [
+            (w, d) for w in test_wallets
+            for d in distributions
+            if d.wallet_index == test_wallets.index(w)
+            and (d.agent_amount > 0 or d.shards_amount > 0)
+        ][:3]
 
-        state["claim_index_path"] = str(index_path)
-        state["claim_index_size"] = len(index)
+        # Use a copy of pool_utxo_refs to track spending
+        available_pool_refs = list(pool_utxo_refs)
+
+        for w, dist in wallets_with_tokens:
+            if not available_pool_refs:
+                logger.warning("No more pool UTxOs available for surrenders")
+                break
+
+            # Compute cMATRA amount based on rate table
+            total_cmatra = 0
+            if dist.agent_amount > 0:
+                agent_rate = rate_table["tokens"]["AGENT_TEST"]["rate_base_per_unit"]
+                total_cmatra += dist.agent_amount * agent_rate
+            if dist.shards_amount > 0:
+                shards_rate = rate_table["tokens"]["SHARDS_TEST"]["rate_base_per_unit"]
+                total_cmatra += dist.shards_amount * shards_rate
+
+            if total_cmatra <= 0:
+                continue
+
+            # Find a pool UTxO with sufficient balance
+            selected_ref = None
+            for ref in available_pool_refs:
+                if ref["cmatra_qty"] >= total_cmatra:
+                    selected_ref = ref
+                    break
+
+            if selected_ref is None:
+                logger.warning(
+                    "No pool UTxO large enough for %s (need %d cMATRA)",
+                    w.name, total_cmatra,
+                )
+                continue
+
+            try:
+                tx_hash = process_surrender(
+                    blockfrost_project_id, admin, str(w.address),
+                    total_cmatra, selected_ref, script_address,
+                    script, cmatra_policy_id,
+                )
+
+                # Update tracking: the spent UTxO is gone, a new one is created
+                # with the remaining balance at a new tx_hash
+                remaining = selected_ref["cmatra_qty"] - total_cmatra
+                available_pool_refs.remove(selected_ref)
+
+                if remaining > 0:
+                    # The output 1 (index 1) is the return-to-script output
+                    # (output 0 is cMATRA to user)
+                    new_ref = {
+                        "tx_hash": tx_hash,
+                        "output_index": 1,
+                        "cmatra_qty": remaining,
+                        "ada_amount": 2_000_000,
+                    }
+                    available_pool_refs.append(new_ref)
+
+                surrender_results.append({
+                    "wallet": w.name,
+                    "address": str(w.address),
+                    "cmatra_amount": total_cmatra,
+                    "tx_hash": tx_hash,
+                    "status": "success",
+                })
+                logger.info("Surrender OK: %s -> %d cMATRA, tx %s", w.name, total_cmatra, tx_hash)
+
+                # Wait for chain confirmation
+                logger.info("Waiting 30s for chain confirmation...")
+                time.sleep(30)
+
+            except Exception as e:
+                surrender_results.append({
+                    "wallet": w.name,
+                    "address": str(w.address),
+                    "cmatra_amount": total_cmatra,
+                    "status": "error",
+                    "error": str(e)[:300],
+                })
+                logger.warning("Surrender FAILED for %s: %s", w.name, str(e)[:200])
+
+        state["surrender_results"] = surrender_results
+        state["pool_utxo_refs_remaining"] = available_pool_refs
         state["stage_7_complete"] = True
         save_state()
 
     else:
-        with open(state["claim_index_path"]) as f:
-            index = json.load(f)
+        available_pool_refs = state.get("pool_utxo_refs_remaining", pool_utxo_refs)
 
     # ---------------------------------------------------------------
-    # Stage 8: Happy-path claims
+    # Stage 8: Red-team tests
     # ---------------------------------------------------------------
     if skip_to_stage <= 8:
         logger.info("=" * 60)
-        logger.info("STAGE 8: Happy-path claims")
+        logger.info("STAGE 8: Red-team adversarial tests")
         logger.info("=" * 60)
 
-        claim_results = []
-        # Test with first 5 wallets that have claims
-        claimed_count = 0
-        for w in test_wallets:
-            if w.pkh_hex in index and claimed_count < 5:
-                refs = index[w.pkh_hex]
-                try:
-                    # Fresh context per claim to avoid stale UTxOs
-                    claim_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
-                    tx_hash = claim_flux(
-                        claim_ctx, w, refs,
-                        script_address, script, flux_policy_id,
-                    )
-                    claim_results.append({
-                        "wallet": w.name,
-                        "pkh": w.pkh_hex,
-                        "tx_hash": tx_hash,
-                        "status": "success",
-                    })
-                    logger.info("Claim OK: %s → %s", w.name, tx_hash)
-                    claimed_count += 1
-                    time.sleep(20)  # Wait between claims
-                except Exception as e:
-                    claim_results.append({
-                        "wallet": w.name,
-                        "pkh": w.pkh_hex,
-                        "status": "error",
-                        "error": str(e)[:300],
-                    })
-                    logger.warning("Claim FAILED for %s: %s", w.name, str(e)[:200])
+        red_team_results: list[dict[str, Any]] = []
 
-        state["claim_results"] = claim_results
+        if not available_pool_refs:
+            logger.warning("No pool UTxOs available for red-team tests")
+        else:
+            # Use the first available pool UTxO for all tests
+            # (none of them should succeed, so it stays unspent)
+            test_pool_ref = available_pool_refs[0]
+
+            # Find a test wallet with some ADA for signing
+            # Use a wallet that was NOT used in stage 7
+            surrendered_wallets = {
+                r["wallet"]
+                for r in state.get("surrender_results", [])
+                if r.get("status") == "success"
+            }
+            attacker_wallets = [
+                w for w in test_wallets
+                if w.name not in surrendered_wallets
+            ]
+
+            if len(attacker_wallets) < 1:
+                logger.warning("No attacker wallets available for red-team tests")
+            else:
+                attacker = attacker_wallets[0]
+
+                # Test 1: Wrong signer
+                logger.info("RED TEAM TEST 1: Wrong signer (non-admin)")
+                passed = red_team_wrong_signer(
+                    blockfrost_project_id, attacker, admin,
+                    test_pool_ref, script_address, script, cmatra_policy_id,
+                )
+                red_team_results.append({"test": "wrong_signer", "passed": passed})
+
+                # Test 2: Post-deadline surrender
+                logger.info("RED TEAM TEST 2: Post-deadline ProcessSurrender")
+                passed = red_team_post_deadline(
+                    blockfrost_project_id, admin,
+                    test_pool_ref, script_address, script, cmatra_policy_id,
+                    deadline_posix_ms,
+                )
+                red_team_results.append({"test": "post_deadline_surrender", "passed": passed})
+
+                # Test 3: No admin signature
+                logger.info("RED TEAM TEST 3: No admin signature")
+                passed = red_team_no_admin_sig(
+                    blockfrost_project_id, attacker,
+                    test_pool_ref, script_address, script, cmatra_policy_id,
+                )
+                red_team_results.append({"test": "no_admin_sig", "passed": passed})
+
+        state["red_team_results"] = red_team_results
         state["stage_8_complete"] = True
         save_state()
 
     # ---------------------------------------------------------------
-    # Stage 9: Red-team tests
+    # Stage 9: Admin withdraw after deadline
     # ---------------------------------------------------------------
     if skip_to_stage <= 9:
         logger.info("=" * 60)
-        logger.info("STAGE 9: Red-team adversarial tests")
+        logger.info("STAGE 9: Admin withdraw after deadline")
         logger.info("=" * 60)
 
-        red_team_results = []
-
-        # Find an unclaimed wallet for testing
-        unclaimed_wallets = [
-            w for w in test_wallets
-            if w.pkh_hex in index and w.name not in [
-                r.get("wallet") for r in state.get("claim_results", [])
-                if r.get("status") == "success"
-            ]
-        ]
-
-        if len(unclaimed_wallets) >= 2:
-            victim = unclaimed_wallets[0]
-            attacker = unclaimed_wallets[1]
-
-            # Fresh context for red-team tests
-            rt_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
-
-            # Test 1: Wrong signer
-            logger.info("RED TEAM TEST 1: Wrong signer claim")
-            victim_refs = index.get(victim.pkh_hex, [])
-            if victim_refs:
-                passed = red_team_wrong_signer(
-                    rt_ctx, attacker, victim,
-                    victim_refs, script_address, script, flux_policy_id,
+        # Check if deadline has passed
+        now_ms = int(time.time() * 1000)
+        if now_ms < deadline_posix_ms:
+            wait_seconds = (deadline_posix_ms - now_ms) / 1000
+            logger.info(
+                "Deadline not yet reached. Current: %d ms, deadline: %d ms",
+                now_ms, deadline_posix_ms,
+            )
+            if wait_seconds <= 900:  # Wait up to 15 minutes
+                logger.info(
+                    "Waiting %.0f seconds for deadline to pass...",
+                    wait_seconds + 10,
                 )
-                red_team_results.append({
-                    "test": "wrong_signer",
-                    "passed": passed,
-                })
-
-            # Test 2: Double claim (claim then try again)
-            logger.info("RED TEAM TEST 2: Double claim")
-            attacker_refs = index.get(attacker.pkh_hex, [])
-            if attacker_refs:
-                # Fresh context after test 1 may have changed state
-                rt_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
-                passed = red_team_double_claim(
-                    rt_ctx, attacker, attacker_refs,
-                    script_address, script, flux_policy_id,
+                time.sleep(wait_seconds + 10)
+            else:
+                logger.warning(
+                    "Deadline is %.1f minutes away -- too long to wait. "
+                    "Re-run with --skip-to-stage 9 after the deadline.",
+                    wait_seconds / 60,
                 )
-                red_team_results.append({
-                    "test": "double_claim",
-                    "passed": passed,
-                })
+                state["stage_9_complete"] = False
+                state["stage_9_skipped_reason"] = "deadline_not_reached"
+                save_state()
+                return
+
+        remaining_refs = state.get("pool_utxo_refs_remaining", available_pool_refs)
+
+        if not remaining_refs:
+            logger.info("No remaining pool UTxOs to withdraw (all used in surrenders)")
+            state["admin_withdraw_tx"] = None
+            state["stage_9_complete"] = True
+            save_state()
         else:
-            logger.warning("Not enough unclaimed wallets for red-team tests")
-
-        state["red_team_results"] = red_team_results
-        state["stage_9_complete"] = True
-        save_state()
+            try:
+                withdraw_tx = admin_withdraw(
+                    blockfrost_project_id, admin,
+                    remaining_refs, script_address,
+                    script, cmatra_policy_id,
+                )
+                state["admin_withdraw_tx"] = withdraw_tx
+                state["stage_9_complete"] = True
+                save_state()
+                logger.info("Admin withdraw complete: %s", withdraw_tx)
+            except Exception as e:
+                logger.error("Admin withdraw FAILED: %s", str(e)[:300])
+                state["admin_withdraw_error"] = str(e)[:500]
+                state["stage_9_complete"] = False
+                save_state()
 
     # ---------------------------------------------------------------
     # Summary
     # ---------------------------------------------------------------
     logger.info("=" * 60)
-    logger.info("PREPROD REHEARSAL COMPLETE")
+    logger.info("PREPROD REHEARSAL COMPLETE (Surrender Model v3.0)")
     logger.info("=" * 60)
     logger.info("State saved to: %s", state_file)
     logger.info("")
     logger.info("Results:")
-    for key in ["stage_1_complete", "stage_2_complete", "stage_3_complete",
-                 "stage_4_complete", "stage_5_complete", "stage_6_complete",
-                 "stage_7_complete", "stage_8_complete", "stage_9_complete"]:
-        status = "OK" if state.get(key) else "SKIP"
-        logger.info("  %s: %s", key, status)
+    for i in range(1, 10):
+        key = f"stage_{i}_complete"
+        status = "OK" if state.get(key) else "SKIP/PENDING"
+        logger.info("  Stage %d: %s", i, status)
+
+    if state.get("surrender_results"):
+        logger.info("")
+        logger.info("Surrender results:")
+        for r in state["surrender_results"]:
+            status = r.get("status", "unknown")
+            logger.info("  %s: %s", r["wallet"], status.upper())
 
     if state.get("red_team_results"):
         logger.info("")
@@ -1303,14 +1705,19 @@ def run_preprod_rehearsal(
             status = "PASS" if r["passed"] else "FAIL"
             logger.info("  %s: %s", r["test"], status)
 
+    if state.get("admin_withdraw_tx"):
+        logger.info("")
+        logger.info("Admin withdraw TX: %s", state["admin_withdraw_tx"])
+
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> None:
+    """CLI entry point for the preprod rehearsal harness."""
     parser = argparse.ArgumentParser(
-        description="FLUX Merger — Preprod Rehearsal Harness",
+        description="cMATRA Merger -- Preprod Rehearsal Harness (Surrender Model v3.0)",
     )
     parser.add_argument(
         "--work-dir", type=str, default=None,
@@ -1325,8 +1732,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Number of test wallets to generate",
     )
     parser.add_argument(
-        "--timelock-offset", type=int, default=7200,
-        help="Timelock offset in slots from current (~2 hours default)",
+        "--timelock-offset", type=int, default=600,
+        help="Timelock offset in slots from current (~10 minutes default)",
+    )
+    parser.add_argument(
+        "--num-pool-utxos", type=int, default=5,
+        help="Number of pool UTxOs to create (default 5)",
     )
     parser.add_argument(
         "--skip-to-stage", type=int, default=1,
@@ -1369,6 +1780,7 @@ def main(argv: list[str] | None = None) -> None:
         blueprint_path=blueprint_path,
         num_test_wallets=args.num_wallets,
         timelock_offset_slots=args.timelock_offset,
+        num_pool_utxos=args.num_pool_utxos,
         skip_to_stage=args.skip_to_stage,
     )
 
