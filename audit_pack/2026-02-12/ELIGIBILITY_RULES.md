@@ -129,6 +129,12 @@ The following categories are not intended to compete with the public redemption 
 
 The launch reconciliation package should publish the exact waived balances used for rate setting.
 
+#### Why treasury balances are waived
+
+Since the creation of both on-chain treasuries, there has been a complete lack of independent DAO proposals — the only proposals submitted were those proposed by the FPS Team itself. Given this, it makes the most sense for these funds to be returned to the team where they can be put to better use with more flexibility, rather than sitting idle in governance structures that have seen no community participation. The same rationale applies to the $TALOS treasury.
+
+All waived balances are published transparently so any holder can verify them on-chain.
+
 ### 5.4 LP farms, DEX positions, and other DeFi custody
 
 If AGENT or SHARDS are currently in:

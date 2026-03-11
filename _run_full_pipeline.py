@@ -54,7 +54,7 @@ valuation_main([
     "--twap-report", TWAP_REPORT,
     "--out-json", f"{AUDIT_DIR}/merge_valuation_cmatra.json",
     "--out-rate-table", f"{AUDIT_DIR}/rate_table_cmatra.json",
-    "--team-waiver", "AGENT:29644656", "SHARDS:88551450001",
+    "--team-waiver", "AGENT:29644656", "SHARDS:446969700000",
 ])
 
 print("\nWaiting 10s before snapshot (rate limit cooldown)...")

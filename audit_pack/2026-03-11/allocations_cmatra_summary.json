@@ -1,11 +1,11 @@
 {
   "snapshot_anchor": {
-    "block_hash": "6aa49878338a8aaa1ae532010596db63195019915fe8541cfcb2c7c99424da2c",
-    "block_height": 13145838,
-    "block_time": 1773246222,
-    "block_slot": 181679931
+    "block_hash": "06b2012040cd374a47a43703b438ff0bace807891baa81f26f8ccff4b7af198b",
+    "block_height": 13146557,
+    "block_time": 1773260339,
+    "block_slot": 181694048
   },
-  "generated_at": "2026-03-11T16:25:43.127035+00:00",
+  "generated_at": "2026-03-11T20:21:03.204422+00:00",
   "parameters": {
     "exclude_script_addresses": true,
     "denominator_mode": "eligible",
@@ -18,26 +18,26 @@
   },
   "per_token": {
     "AGENT": {
-      "raw_holders": 2369,
-      "eligible_holders": 2127,
+      "raw_holders": 2368,
+      "eligible_holders": 2126,
       "raw_supply_base": 1000000000,
-      "eligible_supply_base": 532878564,
+      "eligible_supply_base": 530938266,
       "bucket_base_units": 567181482969351520256,
       "team_reserve_base_units": 16813899952196284361,
       "eligible_bucket_base_units": 550367583017155235895,
-      "distributed_base_units": 550367583017155234847,
-      "dust_base_units": 1048
+      "distributed_base_units": 550367583017155234802,
+      "dust_base_units": 1093
     },
     "SHARDS": {
-      "raw_holders": 4832,
-      "eligible_holders": 4723,
+      "raw_holders": 4833,
+      "eligible_holders": 4724,
       "raw_supply_base": 3088534450001,
-      "eligible_supply_base": 1418047307871,
+      "eligible_supply_base": 1417528847432,
       "bucket_base_units": 101537021842105778176,
       "team_reserve_base_units": 14694338990340474492,
       "eligible_bucket_base_units": 86842682851765303684,
-      "distributed_base_units": 86842682851765301320,
-      "dust_base_units": 2364
+      "distributed_base_units": 86842682851765301136,
+      "dust_base_units": 2548
     },
     "FLUX_PASS": {
       "is_nft": true,
@@ -163,10 +163,10 @@
     "total_reserve_base": 32639281536228512359
   },
   "totals": {
-    "unique_claimants": 6625,
-    "total_flux_distributed": 817239322849159436139,
+    "unique_claimants": 6626,
+    "total_flux_distributed": 817239222257895413382,
     "total_reserve": 32639281536228512359,
-    "total_dust_remaining": 121395614612051502,
+    "total_dust_remaining": 121496205876074259,
     "total_bucket_sum": 850000000000000000000,
     "sum_equals_bucket_total": true
   }

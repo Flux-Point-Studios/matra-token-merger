@@ -1,12 +1,12 @@
 {
   "report_type": "redemption_rate_table",
-  "generated_at": "2026-03-11T16:23:45.290444+00:00",
+  "generated_at": "2026-03-11T20:19:07.445574+00:00",
   "public_pool_base": 850000000000000000000,
   "public_pool_display": 850000000.0,
   "validator_reserve_base": 150000000000000000000,
   "team_waiver_supplies": {
     "AGENT": 29644656,
-    "SHARDS": 88551450001
+    "SHARDS": 446969700000
   },
   "legacy_reward_adjustments": {},
   "tokens": {
@@ -26,12 +26,12 @@
       "bucket_base": 101537021842105778176,
       "bucket_display": 101537021.84210578,
       "on_chain_supply_base": 3088534450001,
-      "team_waiver_base": 88551450001,
+      "team_waiver_base": 446969700000,
       "legacy_reward_adjustment_base": 0,
-      "redeemable_supply_base": 2999983000000,
-      "redeemable_supply_display": 2999983.0,
-      "rate_base_per_unit": 33845865,
-      "rate_display": 3.3845865e-05,
+      "redeemable_supply_base": 2641564750001,
+      "redeemable_supply_display": 2641564.750001,
+      "rate_base_per_unit": 38438210,
+      "rate_display": 3.843821e-05,
       "is_nft": false
     },
     "FLUX_PASS": {
