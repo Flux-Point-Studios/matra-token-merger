@@ -38,7 +38,7 @@ The merger now uses a fixed supply model with a validator reserve carved out at 
 | Parameter | Value |
 |---|---:|
 | Output token | cMATRA / MATRA |
-| Decimals | 12 |
+| Decimals | 6 |
 | Max supply | 1,000,000,000 |
 | Validator reserve | 150,000,000 (15%) |
 | Public redemption pool | 850,000,000 (85%) |

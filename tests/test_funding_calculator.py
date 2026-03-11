@@ -103,7 +103,7 @@ class TestComputePoolFundingReport:
 
     def test_basic_report_structure(self):
         report = compute_pool_funding_report(
-            total_cmatra_base=850_000_000_000_000_000_000,
+            total_cmatra_base=850_000_000_000_000,
             num_pool_utxos=10,
         )
         assert report["report_type"] == "pool_funding_calculator"

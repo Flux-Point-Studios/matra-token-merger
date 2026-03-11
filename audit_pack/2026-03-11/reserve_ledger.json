@@ -2,31 +2,31 @@
   "team_treasury": {
     "AGENT": {
       "total_balance_base": 29644656,
-      "total_cmatra_base": 16813899952196284361,
+      "total_cmatra_base": 16813899952196,
       "addresses": [
         {
           "address": "addr1wx84ytuumke8gxex0l8par4852ey7l4eq6h325rnez0yluc56x0dj",
           "label": "$TALOS Treasury",
           "balance_base": 29634754,
-          "cmatra_base": 16808283721151921842
+          "cmatra_base": 16808283721151
         },
         {
           "address": "addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9",
           "label": "FPS DAO Treasury",
           "balance_base": 9902,
-          "cmatra_base": 5616231044362518
+          "cmatra_base": 5616231044
         }
       ]
     },
     "SHARDS": {
       "total_balance_base": 446969700000,
-      "total_cmatra_base": 14694338990340474492,
+      "total_cmatra_base": 14694338990340,
       "addresses": [
         {
           "address": "addr1w9u9mw864yszpqk7374wtwtwludpa0rc9dmante78c7c9sqqdlyy9",
           "label": "FPS DAO Treasury",
           "balance_base": 446969700000,
-          "cmatra_base": 14694338990340474492
+          "cmatra_base": 14694338990340
         }
       ]
     }
@@ -35,55 +35,55 @@
     "FLUX_PASS": {
       "total_supply": 401,
       "unresolvable_count": 8,
-      "total_cmatra_base": 518417447678523601,
-      "per_nft_cmatra_base": 64802180959815450,
+      "total_cmatra_base": 518417447678,
+      "per_nft_cmatra_base": 64802180959,
       "ledger": [
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f7220233137",
           "script_address": "addr1z9u9ekqssqkcrf93ay3q2lwsumxy26zyympdme5mrpyq0wfvzkj4h9umvxtnp8h4cprrgukvny5xm0p0wctm82s9925seg45jy",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         },
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f7220233138",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         },
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f7220233233",
           "script_address": "addr1z9u9ekqssqkcrf93ay3q2lwsumxy26zyympdme5mrpyq0wfvzkj4h9umvxtnp8h4cprrgukvny5xm0p0wctm82s9925seg45jy",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         },
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f7220233536",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         },
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f722023313030",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         },
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f722023323133",
           "script_address": "addr1zy2hhzxr8vxxfzcrma6zpyhdncylk70h5cunkxdh4pvnltflsquuw462pu7u52rnq6p8wzw376hen4lm2t5lwkx6nhtsvrehww",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         },
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f722023323435",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         },
         {
           "asset_unit": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a000de1405046505042202d204261646765206f6620486f6e6f72202331313432",
           "script_address": "addr1z9u9ekqssqkcrf93ay3q2lwsumxy26zyympdme5mrpyq0wfvzkj4h9umvxtnp8h4cprrgukvny5xm0p0wctm82s9925seg45jy",
-          "reserved_cmatra_base": 64802180959815450,
+          "reserved_cmatra_base": 64802180959,
           "status": "pending"
         }
       ]
@@ -91,91 +91,91 @@
     "SE_BRAWLERS": {
       "total_supply": 242,
       "unresolvable_count": 14,
-      "total_cmatra_base": 462244837855454368,
-      "per_nft_cmatra_base": 33017488418246740,
+      "total_cmatra_base": 462244837855,
+      "per_nft_cmatra_base": 33017488418,
       "ledger": [
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404e61656c6961204d617273687363616c65",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404a6165726973205377616d706a6177",
           "script_address": "addr1z9u9ekqssqkcrf93ay3q2lwsumxy26zyympdme5mrpyq0wfvzkj4h9umvxtnp8h4cprrgukvny5xm0p0wctm82s9925seg45jy",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404d61726961204d7564636c6177",
           "script_address": "addr1zxgx3far7qygq0k6epa0zcvcvrevmn0ypsnfsue94nsn3tvpw288a4x0xf8pxgcntelxmyclq83s0ykeehchz2wtspks905plm",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404a616572756d204d7564636c6177",
           "script_address": "addr1zxgx3far7qygq0k6epa0zcvcvrevmn0ypsnfsue94nsn3tvpw288a4x0xf8pxgcntelxmyclq83s0ykeehchz2wtspks905plm",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1405465726f6e204d7564636c6177",
           "script_address": "addr1zxgx3far7qygq0k6epa0zcvcvrevmn0ypsnfsue94nsn3tvpw288a4x0xf8pxgcntelxmyclq83s0ykeehchz2wtspks905plm",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404761726f6e204d7564636c6177",
           "script_address": "addr1zxgx3far7qygq0k6epa0zcvcvrevmn0ypsnfsue94nsn3tvpw288a4x0xf8pxgcntelxmyclq83s0ykeehchz2wtspks905plm",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1405361726961204d7564636c6177",
           "script_address": "addr1zxgx3far7qygq0k6epa0zcvcvrevmn0ypsnfsue94nsn3tvpw288a4x0xf8pxgcntelxmyclq83s0ykeehchz2wtspks905plm",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de14052616572756d204d7564636c6177",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de14049656c6961204761746f72626f756768",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404a65726f6e204761746f72626f756768",
           "script_address": "addr1z9u9ekqssqkcrf93ay3q2lwsumxy26zyympdme5mrpyq0wfvzkj4h9umvxtnp8h4cprrgukvny5xm0p0wctm82s9925seg45jy",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404d616c6f6e204d7564636c6177",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404165726f6e205377616d706a6177",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de1404761726961204761746f72626f756768",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         },
         {
           "asset_unit": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc000de14049726961204d617273687363616c65",
           "script_address": "addr1z9u9ekqssqkcrf93ay3q2lwsumxy26zyympdme5mrpyq0wfvzkj4h9umvxtnp8h4cprrgukvny5xm0p0wctm82s9925seg45jy",
-          "reserved_cmatra_base": 33017488418246740,
+          "reserved_cmatra_base": 33017488418,
           "status": "pending"
         }
       ]
@@ -183,13 +183,13 @@
     "T2_ADAM_PASS": {
       "total_supply": 95,
       "unresolvable_count": 1,
-      "total_cmatra_base": 150380308157775537,
-      "per_nft_cmatra_base": 150380308157775537,
+      "total_cmatra_base": 150380308157,
+      "per_nft_cmatra_base": 150380308157,
       "ledger": [
         {
           "asset_unit": "06a64965c0ac1144a72a6ddfcb23aa9d4d7742a5b20ddd5cfb1164b954324144414d313138",
           "script_address": "addr1x8rjw3pawl0kelu4mj3c8x20fsczf5pl744s9mxz9v8n7efvjel5h55fgjcxgchp830r7h2l5msrlpt8262r3nvr8ekstg4qrx",
-          "reserved_cmatra_base": 150380308157775537,
+          "reserved_cmatra_base": 150380308157,
           "status": "pending"
         }
       ]

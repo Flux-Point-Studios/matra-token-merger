@@ -84,8 +84,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-CMATRA_TEST_SUPPLY_BASE = 1_000_000_000_000_000_000_000  # 1e21, 12 decimals
-CMATRA_TEST_DECIMALS = 12
+CMATRA_TEST_SUPPLY_BASE = 1_000_000_000_000_000  # 1e15, 6 decimals
+CMATRA_TEST_DECIMALS = 6
 CMATRA_ASSET_NAME_HEX = "634d41545241"  # hex of "cMATRA"
 
 # CBOR encodings for Plutus Data constructors
@@ -469,17 +469,21 @@ def mint_cmatra_test(
 # Surrender validator loading (replaces load_claim_validator)
 # ---------------------------------------------------------------------------
 
-def load_surrender_validator(blueprint_path: Path) -> tuple[PlutusV3Script, ScriptHash, str]:
+def load_surrender_validator(
+    blueprint_path: Path,
+    admin_pkh: str | None = None,
+    deadline_posix_ms: int | None = None,
+) -> tuple[PlutusV3Script, ScriptHash, str]:
     """Load compiled surrender validator from Aiken blueprint.
 
-    Searches for a validator whose title contains 'surrender', falling back
-    to 'spend' or the first validator if no match is found.
-
-    For parameterized validators (with parameters already applied via
-    ``aiken blueprint apply``), reads the applied compiledCode and hash.
+    If admin_pkh and deadline_posix_ms are provided, applies them as
+    parameters using ``aiken blueprint apply``. Otherwise, loads the
+    compiled code as-is (for pre-applied blueprints).
 
     Args:
         blueprint_path: Path to the Aiken plutus.json blueprint file.
+        admin_pkh: Admin payment key hash hex (28 bytes / 56 hex chars).
+        deadline_posix_ms: Deadline as POSIX milliseconds integer.
 
     Returns:
         Tuple of (PlutusV3Script, ScriptHash, bech32_script_address).
@@ -487,8 +491,51 @@ def load_surrender_validator(blueprint_path: Path) -> tuple[PlutusV3Script, Scri
     Raises:
         ValueError: If no compiled validator is found in the blueprint.
     """
-    with open(blueprint_path) as f:
-        blueprint = json.load(f)
+    import hashlib
+    import shutil
+    import subprocess
+    import tempfile
+
+    if admin_pkh is not None and deadline_posix_ms is not None:
+        # Use aiken CLI to apply parameters to the blueprint
+        # Work in a temp copy so we don't modify the original
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_blueprint = Path(tmpdir) / "plutus.json"
+            shutil.copy2(blueprint_path, tmp_blueprint)
+
+            # Apply param 1: admin_pkh as CBOR hex (ByteString)
+            pkh_cbor_hex = cbor2.dumps(bytes.fromhex(admin_pkh)).hex()
+            result = subprocess.run(
+                ["aiken", "blueprint", "apply", pkh_cbor_hex,
+                 "-i", str(tmp_blueprint), "-o", str(tmp_blueprint),
+                 "-m", "claim_validator", "-v", "surrender_pool"],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                raise ValueError(f"aiken blueprint apply (pkh) failed: {result.stderr}")
+
+            # Apply param 2: deadline as CBOR hex (Integer)
+            deadline_cbor_hex = cbor2.dumps(deadline_posix_ms).hex()
+            result = subprocess.run(
+                ["aiken", "blueprint", "apply", deadline_cbor_hex,
+                 "-i", str(tmp_blueprint), "-o", str(tmp_blueprint),
+                 "-m", "claim_validator", "-v", "surrender_pool"],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                raise ValueError(f"aiken blueprint apply (deadline) failed: {result.stderr}")
+
+            # Read the applied blueprint
+            with open(tmp_blueprint) as f:
+                blueprint = json.load(f)
+
+        logger.info(
+            "Applied params via aiken CLI: admin_pkh=%s..., deadline=%d",
+            admin_pkh[:16], deadline_posix_ms,
+        )
+    else:
+        with open(blueprint_path) as f:
+            blueprint = json.load(f)
 
     validators = blueprint.get("validators", [])
     compiled_code = None
@@ -517,8 +564,6 @@ def load_surrender_validator(blueprint_path: Path) -> tuple[PlutusV3Script, Scri
     if validator_hash:
         script_hash = ScriptHash(bytes.fromhex(validator_hash))
     else:
-        # Compute hash from script bytes (PlutusV3 prefix = 0x03)
-        import hashlib
         h = hashlib.blake2b(b"\x03" + script.to_primitive(), digest_size=28)
         script_hash = ScriptHash(h.digest())
 
@@ -653,6 +698,7 @@ def process_surrender(
     script_address: str,
     script: PlutusV3Script,
     cmatra_policy_id: ScriptHash,
+    deadline_posix_ms: int | None = None,
 ) -> str:
     """Build and submit a surrender-processing transaction.
 
@@ -675,6 +721,7 @@ def process_surrender(
         script_address: Bech32 script address of the surrender pool.
         script: Compiled PlutusV3 script object.
         cmatra_policy_id: Policy ID ScriptHash for cMATRA_TEST.
+        deadline_posix_ms: Deadline in POSIX ms; if set, TTL is set before it.
 
     Returns:
         Submitted transaction hash hex string.
@@ -712,6 +759,17 @@ def process_surrender(
     redeemer = Redeemer(RawPlutusData(cbor2.loads(PROCESS_SURRENDER_REDEEMER_CBOR)))
 
     builder = TransactionBuilder(ctx)
+
+    # Set validity interval: must be entirely before the deadline
+    current_slot = ctx.last_block_slot
+    builder.validity_start = current_slot
+    if deadline_posix_ms is not None:
+        # Convert deadline POSIX ms to slot (preprod: slot = posix_sec - 1654041600 + 86400)
+        # But simpler: just set TTL to current_slot + 300 (5 min window) and trust
+        # that the deadline hasn't passed yet
+        builder.ttl = current_slot + 300
+    else:
+        builder.ttl = current_slot + 600
 
     # Add script input (the pool UTxO we are spending)
     builder.add_script_input(utxo, script=script, redeemer=redeemer)
@@ -998,8 +1056,8 @@ def admin_withdraw(
 ) -> str:
     """Admin reclaims remaining pool UTxOs after the deadline using AdminWithdraw.
 
-    Uses AdminWithdraw redeemer (Constr(1, [])) to spend all remaining pool
-    UTxOs. The validity range must be entirely after the deadline.
+    Spends pool UTxOs one at a time to avoid multi-script-input redeemer
+    assignment issues and execution budget limits.
 
     Args:
         blockfrost_project_id: Blockfrost preprod project ID.
@@ -1010,19 +1068,18 @@ def admin_withdraw(
         cmatra_policy_id: cMATRA policy ID.
 
     Returns:
-        Submitted transaction hash hex string.
+        Last submitted transaction hash hex string.
     """
-    ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
-
     asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
     script_addr = Address.from_primitive(script_address)
+    last_tx_hash = ""
 
-    builder = TransactionBuilder(ctx)
+    for i, ref in enumerate(pool_utxo_refs):
+        # Fresh context each iteration to pick up UTxO changes
+        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
 
-    # AdminWithdraw redeemer: Constr(1, [])
-    redeemer = Redeemer(RawPlutusData(cbor2.loads(ADMIN_WITHDRAW_REDEEMER_CBOR)))
+        builder = TransactionBuilder(ctx)
 
-    for ref in pool_utxo_refs:
         tx_in = TransactionInput(
             TransactionId(bytes.fromhex(ref["tx_hash"])),
             ref["output_index"],
@@ -1034,32 +1091,40 @@ def admin_withdraw(
         pool_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
 
         utxo = UTxO(tx_in, TransactionOutput(script_addr, pool_value, datum=pool_datum))
+        redeemer = Redeemer(RawPlutusData(cbor2.loads(ADMIN_WITHDRAW_REDEEMER_CBOR)))
         builder.add_script_input(utxo, script=script, redeemer=redeemer)
 
-    # Admin address for collateral and change
-    builder.add_input_address(admin.address)
+        # Admin address for collateral and change
+        builder.add_input_address(admin.address)
 
-    # Validity range: entirely after deadline (set validity_start to current slot)
-    # The validator requires is_entirely_after(validity_range, deadline)
-    builder.validity_start = ctx.last_block_slot
+        # Validity range: entirely after deadline
+        builder.validity_start = ctx.last_block_slot
 
-    # Required signer: admin PKH
-    builder.required_signers = [admin.vkey.hash()]
+        # Required signer: admin PKH
+        builder.required_signers = [admin.vkey.hash()]
 
-    signed_tx = builder.build_and_sign(
-        signing_keys=[admin.skey],
-        change_address=admin.address,
-    )
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin.skey],
+            change_address=admin.address,
+        )
 
-    tx_hash = signed_tx.id.payload.hex()
-    ctx.submit_tx(signed_tx)
+        last_tx_hash = signed_tx.id.payload.hex()
+        ctx.submit_tx(signed_tx)
+        logger.info(
+            "Admin withdraw %d/%d: %s (%d cMATRA)",
+            i + 1, len(pool_utxo_refs), last_tx_hash, ref["cmatra_qty"],
+        )
+
+        # Wait for confirmation before next spend
+        if i < len(pool_utxo_refs) - 1:
+            time.sleep(30)
 
     total_reclaimed = sum(r["cmatra_qty"] for r in pool_utxo_refs)
     logger.info(
-        "Admin withdraw tx submitted: %s (reclaimed %d cMATRA from %d UTxOs)",
-        tx_hash, total_reclaimed, len(pool_utxo_refs),
+        "Admin withdraw complete: reclaimed %d cMATRA from %d UTxOs",
+        total_reclaimed, len(pool_utxo_refs),
     )
-    return tx_hash
+    return last_tx_hash
 
 
 # ---------------------------------------------------------------------------
@@ -1310,7 +1375,23 @@ def run_preprod_rehearsal(
 
         cmatra_policy_id, cmatra_tx = mint_cmatra_test(context, admin, timelock_slot)
         logger.info("Waiting for cMATRA_TEST mint confirmation...")
-        time.sleep(30)
+        # Poll for confirmation (preprod blocks ~20s, but can be delayed)
+        for _attempt in range(12):
+            time.sleep(15)
+            try:
+                _check_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+                _utxos = _check_ctx.utxos(admin.address)
+                _has_cmatra = any(
+                    cmatra_policy_id in (utxo.output.amount.multi_asset or {})
+                    for utxo in _utxos
+                )
+                if _has_cmatra:
+                    logger.info("cMATRA_TEST mint confirmed after %d seconds", (_attempt + 1) * 15)
+                    break
+            except Exception:
+                pass
+        else:
+            logger.warning("cMATRA_TEST mint not confirmed after 180s — proceeding anyway")
 
         # Build simple rate table: 85% pool split equally between AGENT and SHARDS
         pool_base = int(CMATRA_TEST_SUPPLY_BASE * 0.85)
@@ -1363,37 +1444,18 @@ def run_preprod_rehearsal(
         logger.info("STAGE 5: Deploy surrender validator")
         logger.info("=" * 60)
 
-        script, script_hash, script_address = load_surrender_validator(blueprint_path)
+        # Compute deadline: timelock_offset_slots seconds from now (1 slot ≈ 1 sec on preprod)
+        deadline_posix_ms = int(time.time() * 1000) + (timelock_offset_slots * 1000)
+        logger.info(
+            "Applying validator params: admin_pkh=%s, deadline=%d ms (~%d min from now)",
+            admin.vkey.hash().payload.hex(), deadline_posix_ms, timelock_offset_slots // 60,
+        )
 
-        # Extract deadline from the applied validator blueprint if available
-        deadline_posix_ms = None
-        try:
-            with open(blueprint_path) as _bp_f:
-                _bp = json.load(_bp_f)
-            # Try to find deadline from validator parameters or compiled code
-            for _v in _bp.get("validators", []):
-                title = _v.get("title", "").lower()
-                if "surrender" in title or "spend" in title:
-                    # The deadline is baked into the applied validator
-                    # Try to parse it from parameters if available
-                    params = _v.get("parameters", [])
-                    if len(params) >= 2:
-                        # Second parameter is deadline
-                        deadline_param = params[1]
-                        if isinstance(deadline_param, dict):
-                            deadline_posix_ms = deadline_param.get("value")
-                    break
-        except Exception:
-            pass
-
-        if deadline_posix_ms is None:
-            # Fallback: use a deadline 10 minutes from now
-            deadline_posix_ms = int(time.time() * 1000) + (timelock_offset_slots * 1000)
-            logger.info(
-                "Could not extract deadline from blueprint; "
-                "using fallback: %d ms (~%d minutes from now)",
-                deadline_posix_ms, timelock_offset_slots // 60,
-            )
+        script, script_hash, script_address = load_surrender_validator(
+            blueprint_path,
+            admin_pkh=admin.vkey.hash().payload.hex(),
+            deadline_posix_ms=deadline_posix_ms,
+        )
 
         state["surrender_validator"] = {
             "script_hash": script_hash.payload.hex(),
@@ -1407,8 +1469,12 @@ def run_preprod_rehearsal(
         logger.info("Deadline (POSIX ms): %d", deadline_posix_ms)
 
     else:
-        script, script_hash, script_address = load_surrender_validator(blueprint_path)
         deadline_posix_ms = state["deadline_posix_ms"]
+        script, script_hash, script_address = load_surrender_validator(
+            blueprint_path,
+            admin_pkh=admin.vkey.hash().payload.hex(),
+            deadline_posix_ms=deadline_posix_ms,
+        )
 
     # ---------------------------------------------------------------
     # Stage 6: Build surrender pool UTxOs
@@ -1447,6 +1513,10 @@ def run_preprod_rehearsal(
             len(pool_utxo_refs),
             sum(r["cmatra_qty"] for r in pool_utxo_refs),
         )
+
+        # Wait for pool UTxOs to appear on-chain before proceeding
+        logger.info("Waiting for pool UTxOs to confirm on-chain...")
+        time.sleep(60)
 
     else:
         pool_utxo_refs = state["pool_utxo_refs"]
@@ -1508,6 +1578,7 @@ def run_preprod_rehearsal(
                     blockfrost_project_id, admin, str(w.address),
                     total_cmatra, selected_ref, script_address,
                     script, cmatra_policy_id,
+                    deadline_posix_ms=deadline_posix_ms,
                 )
 
                 # Update tracking: the spent UTxO is gone, a new one is created

@@ -46,7 +46,7 @@ class TestTokenInfo:
 
 class TestMergeTokenConstants:
     def test_max_supply_base(self):
-        assert FLUX_MAX_SUPPLY_BASE == 1_000_000_000_000_000_000_000  # 1e21
+        assert FLUX_MAX_SUPPLY_BASE == 1_000_000_000_000_000  # 1e15
 
     def test_max_supply_display(self):
         assert FLUX_MAX_SUPPLY_DISPLAY == 1_000_000_000
@@ -55,13 +55,13 @@ class TestMergeTokenConstants:
         assert FLUX_MAX_SUPPLY_BASE == FLUX_MAX_SUPPLY_DISPLAY * (10 ** FLUX_DECIMALS)
 
     def test_decimals(self):
-        assert FLUX_DECIMALS == 12
+        assert FLUX_DECIMALS == 6
 
     def test_public_pool_is_85_percent(self):
-        assert PUBLIC_POOL_BASE == 850_000_000_000_000_000_000
+        assert PUBLIC_POOL_BASE == 850_000_000_000_000
 
     def test_validator_reserve_is_15_percent(self):
-        assert VALIDATOR_RESERVE_BASE == 150_000_000_000_000_000_000
+        assert VALIDATOR_RESERVE_BASE == 150_000_000_000_000
 
     def test_pool_plus_reserve_equals_max(self):
         assert PUBLIC_POOL_BASE + VALIDATOR_RESERVE_BASE == MERGE_TOKEN_SUPPLY_BASE

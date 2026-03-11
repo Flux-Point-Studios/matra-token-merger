@@ -70,9 +70,9 @@ SHARDS_DECIMALS: int = 6
 # ---------------------------------------------------------------------------
 
 MERGE_TOKEN_TICKER: str = "cMATRA"
-MERGE_TOKEN_DECIMALS: int = 12
+MERGE_TOKEN_DECIMALS: int = 6
 MERGE_TOKEN_SUPPLY_DISPLAY: int = 1_000_000_000  # 1 billion
-MERGE_TOKEN_SUPPLY_BASE: int = MERGE_TOKEN_SUPPLY_DISPLAY * (10 ** MERGE_TOKEN_DECIMALS)  # 1e21
+MERGE_TOKEN_SUPPLY_BASE: int = MERGE_TOKEN_SUPPLY_DISPLAY * (10 ** MERGE_TOKEN_DECIMALS)  # 1e15
 
 # Redemption model: 85% public pool, 15% validator reserve
 VALIDATOR_RESERVE_FRACTION: float = 0.15

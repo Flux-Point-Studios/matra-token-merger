@@ -15,7 +15,7 @@ from tools.build_surrender_pool import build_pool_outputs, encode_pool_datum
 # Constants
 # ---------------------------------------------------------------------------
 
-PUBLIC_POOL_BASE = 850_000_000_000_000_000_000  # from tools.config
+PUBLIC_POOL_BASE = 850_000_000_000_000  # from tools.config
 SAMPLE_SCRIPT_ADDR = (
     "addr_test1wzyfdmvvs62kerr0s4rjfyqfahq5lup0jj0z7f9mn7mqr6c03dhut"
 )

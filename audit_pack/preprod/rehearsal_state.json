@@ -104,22 +104,23 @@
     }
   ],
   "stage_1_complete": true,
-  "needs_funding": true,
+  "needs_funding": false,
   "agent_test": {
     "policy_id": "74bf599811082e643948caa0bb23f03c73b97bd62fc09af2dfe627a3",
     "asset_name_hex": "4167656e7454657374",
     "supply": 1000000000,
     "decimals": 0,
-    "mint_tx": "744a657310d5640609c1fb846b36beebc659bb5032bd55ea776c5df9b7e8f1ac"
+    "mint_tx": "be541f8d29e06f75152fdcf7f0c01c1dd19d6753ee78d5cb5123eaf2a4ddbc7d"
   },
   "shards_test": {
     "policy_id": "74bf599811082e643948caa0bb23f03c73b97bd62fc09af2dfe627a3",
     "asset_name_hex": "53686172647354657374",
     "supply": 3000000000000,
     "decimals": 6,
-    "mint_tx": "744a657310d5640609c1fb846b36beebc659bb5032bd55ea776c5df9b7e8f1ac"
+    "mint_tx": "be541f8d29e06f75152fdcf7f0c01c1dd19d6753ee78d5cb5123eaf2a4ddbc7d"
   },
   "stage_2_complete": true,
+  "stage_3_complete": true,
   "distributions": [
     {
       "wallet": 0,
@@ -246,169 +247,157 @@
     "e832ae2bc5e9427ef5f0e8c5e91e80eddb5cb51ff6bdb2fb55c6f06b9e68f43a",
     "54c33f4bdda4b8f9cff3f27ce6035226124d1c8cf23302843cdde65343e9457e"
   ],
-  "stage_3_complete": true,
-  "allocation": {
-    "csv_path": "D:\\fluxPoint\\$flux\\audit_pack\\preprod\\data\\test_allocations.csv",
-    "agent_bucket": 855271753084314,
-    "shards_bucket": 144728246915686,
-    "num_claimants": 20,
-    "total_distributed": 988497791021562,
-    "agent_dust": 5605926600814,
-    "shards_dust": 5896282377624,
-    "total_dust": 11502208978438,
-    "distributed_plus_dust": 1000000000000000,
-    "flux_supply": 1000000000000000,
-    "invariant_holds": true
-  },
-  "stage_4_complete": true,
-  "flux_test": {
-    "policy_id": "b1f5e3a08604ef995c07404472eaab4aa8f616502830e2f9494c499b",
-    "asset_name_hex": "464c5558",
+  "cmatra_test": {
+    "policy_id": "f82e57137e36e1440471a38018de0ae8d96a7d039daf560435c1b085",
+    "asset_name_hex": "634d41545241",
     "supply": 1000000000000000,
-    "timelock_slot": 115175590,
-    "mint_tx": "c18b0d9ed189a5a241fc2d6ce5be0fac8589d4f2f459c9d76184c6065d9d1631"
+    "decimals": 6,
+    "timelock_slot": 117583093,
+    "mint_tx": "b79606fde183c26e63af453174552a9cf89da0e8828d9464c55d73fa52a5d09e"
   },
+  "rate_table": {
+    "tokens": {
+      "AGENT_TEST": {
+        "rate_base_per_unit": 425000,
+        "is_nft": false
+      },
+      "SHARDS_TEST": {
+        "rate_base_per_unit": 141,
+        "is_nft": false
+      }
+    },
+    "public_pool_base": 850000000000000
+  },
+  "pool_base": 850000000000000,
+  "stage_4_complete": true,
+  "surrender_validator": {
+    "script_hash": "a3ae53770467ef9cf905e57f9e341f34c88bd9de7b5b3695e9feabfd",
+    "script_address": "addr_test1wz36u5mhq3n7l88eqhjhl835ru6v3z7emea4kd54a8l2hlg3s5t9l",
+    "compiled_code": "590201010100332229800aba2aba1aab9faab9eaab9dab9a9bae0039bad0024888888896600264653001300900198049805000cdc3a400530090024888966002600460146ea800e26466453001159800980098069baa0028cc004c8cc004004dd618089809180918091809180918091809180918079baa0052259800800c528456600266e3cdd71809000806c528c4cc008008c04c00500e2022918089809180918091809180918091809000c8c044c04800522259800980218081baa00a8acc00400e26464b3001300a3012375400313259800980598099baa300430143754600860286ea800e266e20004042266e240040410121bad30153013375400314a08088c050c048dd5180118091baa00130023011375400f14a0807a2b3001003899192cc004c028c048dd5000c4c966002601660266ea8c010c050dd5180b180a1baa003899b88010001899b8901000140486eb4c054c04cdd5000c5282022301430123754602860246ea8004c008c044dd5003c528201e403c8b201898069baa0079808001a444b300130040028acc004c044dd5005400e2c80922b300130080028acc004c044dd5005400e2c80922c807900f0c038c03c004dc3a400060166ea800e2c80486012002600a6ea802629344d95900313011e581ce6176ea82e41f991d4d24d8a14bc1a48acc8c3d5941b2e10ed9c47d9004c01091b0000019cdee9042f0001"
+  },
+  "deadline_posix_ms": 1773266338863,
   "stage_5_complete": true,
-  "claim_validator": {
-    "script_hash": "8896ed8c86956c8c6f8547249009edc14ff02f949e2f24bb9fb601eb",
-    "script_address": "addr_test1wzyfdmvvs62kerr0s4rjfyqfahq5lup0jj0z7f9mn7mqr6c03dhut"
-  },
-  "claim_batches": [
+  "pool_batches": [
     {
       "batch_index": 0,
-      "tx_hash": "64989f17a6b824f83c178189163aea2cf104ac0c4f2c49e1d9fa531c24266566",
-      "num_outputs": 20,
-      "claimants": [
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "num_outputs": 5,
+      "outputs": [
         {
-          "payment_key_hash_hex": "0047029e84b0799d1bc2d8d15cf02ea7e1d9d2bfe28da88069a24b61",
-          "flux_units": 855271
+          "pool_utxo_index": 0,
+          "cmatra_base_units": 170000000000000
         },
         {
-          "payment_key_hash_hex": "0f4d794599a23ef022070807c5fff1f486bf258b2dd30f33d236725d",
-          "flux_units": 482427
+          "pool_utxo_index": 1,
+          "cmatra_base_units": 170000000000000
         },
         {
-          "payment_key_hash_hex": "1bed2c8a1fbaf488dc256d2aedd670c0171ac67dbdb06ed7051cc73a",
-          "flux_units": 48242
+          "pool_utxo_index": 2,
+          "cmatra_base_units": 170000000000000
         },
         {
-          "payment_key_hash_hex": "3217ad9f993f527ea8ad9aa6a6106f7464fbe85fa49e5cdd1bcf2a92",
-          "flux_units": 482
+          "pool_utxo_index": 3,
+          "cmatra_base_units": 170000000000000
         },
         {
-          "payment_key_hash_hex": "389f4ac36f1dcf2c45e8a345a3823322233799025c08c8a4a576bd48",
-          "flux_units": 85527175308
-        },
-        {
-          "payment_key_hash_hex": "5109684e07c181d108c09b1a898ecc626f40421aa9e4e94490427bab",
-          "flux_units": 85527175
-        },
-        {
-          "payment_key_hash_hex": "588fdc2576a2db51203a43dfe4116aa78a7b821f5730a44755c33601",
-          "flux_units": 4824274
-        },
-        {
-          "payment_key_hash_hex": "5c56bac53938d2ca5934d726ffecf720a8bcb0e5aa063367806b7e2b",
-          "flux_units": 37522138089214
-        },
-        {
-          "payment_key_hash_hex": "6056bf5e89962e222cd26c42e9b75862db36a39047a08250dd3fcd19",
-          "flux_units": 8552717
-        },
-        {
-          "payment_key_hash_hex": "716ee4e0bf250adc56b40d25c458358540cb131bb31a29b8c6276f7f",
-          "flux_units": 42763587659039
-        },
-        {
-          "payment_key_hash_hex": "77ce0552d75f7c17a77c184ac37779321cc4e94cd59aa53a53fc34c9",
-          "flux_units": 427635876542157
-        },
-        {
-          "payment_key_hash_hex": "7e8ffa506a91097d1712a7447191282ddc23032a5b2c7b58cc102f77",
-          "flux_units": 855271753
-        },
-        {
-          "payment_key_hash_hex": "915426253ddd8eb1c9c0a237d6f366843bda1b5794f9881c9e1224fb",
-          "flux_units": 72364123457843
-        },
-        {
-          "payment_key_hash_hex": "9437265280ad4f7c004b9d8a937e3cdac927c8ef54a1345216be1c33",
-          "flux_units": 8552717530
-        },
-        {
-          "payment_key_hash_hex": "ae63b070acd0319131b35465355e21309b144fb297b5508fcda8b50a",
-          "flux_units": 285090584076347
-        },
-        {
-          "payment_key_hash_hex": "b6adf6434efe80f4199bd008ef778128b197fa012f4e0106faba2d06",
-          "flux_units": 13376992428032
-        },
-        {
-          "payment_key_hash_hex": "beb754e8b85791c51087ec7880691a33bd072910106bd7889f7aab54",
-          "flux_units": 48
-        },
-        {
-          "payment_key_hash_hex": "e322e8196ee22b6d1e78f3f3bbc9798ae0d3a692b775c9cba56c2ef7",
-          "flux_units": 4824
-        },
-        {
-          "payment_key_hash_hex": "eadd98f389140ba742688662491371f42e08a63a265815886319ca44",
-          "flux_units": 109648549794378
-        },
-        {
-          "payment_key_hash_hex": "fc1d01373817b486d97935421a5b524748190b19b8f9a359efdf9b94",
-          "flux_units": 903514501
+          "pool_utxo_index": 4,
+          "cmatra_base_units": 170000000000000
         }
       ]
     }
   ],
+  "pool_utxo_refs": [
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 0,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 1,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 2,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 3,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 4,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    }
+  ],
   "stage_6_complete": true,
-  "claim_index_path": "D:\\fluxPoint\\$flux\\audit_pack\\preprod\\data\\claim_index.json",
-  "claim_index_size": 20,
-  "stage_7_complete": true,
-  "claim_results": [
-    {
-      "wallet": "test_000",
-      "pkh": "77ce0552d75f7c17a77c184ac37779321cc4e94cd59aa53a53fc34c9",
-      "tx_hash": "0c5e519bbffbc1efa33416470ff92b7999ba78df8ea3c6cebcc06524693b529a",
-      "status": "success"
-    },
-    {
-      "wallet": "test_001",
-      "pkh": "915426253ddd8eb1c9c0a237d6f366843bda1b5794f9881c9e1224fb",
-      "tx_hash": "083d10b34c32d28a451817b57a11bce6903a34e2a4dcca0cab64cf37e82f58bf",
-      "status": "success"
-    },
+  "surrender_results": [
     {
       "wallet": "test_002",
-      "pkh": "eadd98f389140ba742688662491371f42e08a63a265815886319ca44",
-      "tx_hash": "b5eebc76012d4185d258a0e9efc9a129e18cd6c5bbfaf9f0b47f4ddcd23ffb01",
-      "status": "success"
-    },
-    {
-      "wallet": "test_003",
-      "pkh": "fc1d01373817b486d97935421a5b524748190b19b8f9a359efdf9b94",
-      "tx_hash": "b8dbadb5a677c0449dda63ae82b1d1853835486aa8d69f1c48086141bcc882b9",
-      "status": "success"
-    },
-    {
-      "wallet": "test_004",
-      "pkh": "0047029e84b0799d1bc2d8d15cf02ea7e1d9d2bfe28da88069a24b61",
-      "tx_hash": "0c290c0107c447a7c5d2b8cc39e64cbd4caf10e53e66950f308f2db5b21b7769",
+      "address": "addr_test1vr4dmx8n3y2qhf6zdzrxyjgnw86zuz9x8gn9s9vgvvvu53q478spk",
+      "cmatra_amount": 113000000000000,
+      "tx_hash": "ce4e625e5c0ce4c84e6ebab169e6f99b908e6b8bc6362069f5206f631a6258d4",
       "status": "success"
     }
   ],
-  "stage_8_complete": true,
+  "pool_utxo_refs_remaining": [
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 1,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 2,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 3,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac",
+      "output_index": 4,
+      "cmatra_qty": 170000000000000,
+      "ada_amount": 2000000
+    },
+    {
+      "tx_hash": "ce4e625e5c0ce4c84e6ebab169e6f99b908e6b8bc6362069f5206f631a6258d4",
+      "output_index": 1,
+      "cmatra_qty": 57000000000000,
+      "ada_amount": 2000000
+    }
+  ],
+  "stage_7_complete": true,
   "red_team_results": [
     {
       "test": "wrong_signer",
       "passed": true
     },
     {
-      "test": "double_claim",
+      "test": "post_deadline_surrender",
+      "passed": true
+    },
+    {
+      "test": "no_admin_sig",
       "passed": true
     }
   ],
+  "stage_8_complete": true,
   "stage_9_complete": true,
-  "claim_deadline_posix_ms": 1770851449450
+  "stage_9_skipped_reason": "deadline_not_reached",
+  "admin_withdraw_error": "Failed to submit transaction. Error code: 400. Error message: {\"contents\":{\"contents\":{\"contents\":{\"era\":\"ShelleyBasedEraConway\",\"error\":[\"ConwayUtxowFailure (UtxoFailure (UtxosFailure (CollectErrors [NoRedeemer (ConwaySpending (AsItem {unAsItem = TxIn (TxId {unTxId = SafeHash \\\"7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a37f134f8ca1f8ac\\\"}) (TxIx {unTxIx = 4})})),NoRedeemer (ConwaySpending (AsItem {unAsItem = TxIn (TxId {unTxId = SafeHash \\\"7ef3c1d9bede024e7ad18bbda874fb147c6d4633d6297551a",
+  "admin_withdraw_tx": "6599839a2aa61222e28b59dabf8606e04ec51721f97fd39279ae6b806825e057"
 }
