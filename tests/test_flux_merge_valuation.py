@@ -211,7 +211,7 @@ class TestBuildRateTable:
             assert entry["redeemable_supply_base"] == report["tokens"][name]["supply_base_units"]
 
     def test_team_waiver_reduces_denominator(self):
-        bucket = 100_000_000_000_000_000_000  # 100B base
+        bucket = 500_000_000_000_000  # 500T base (realistic for 6-decimal cMATRA)
         supply = 1_000_000_000
         waiver = 100_000_000  # 10% waived
         report = {
@@ -251,6 +251,76 @@ class TestBuildRateTable:
         entry = rt["tokens"]["FLUX_PASS"]
         assert entry["is_nft"] is True
         assert entry["rate_base_per_unit"] == nft_bucket // nft_count
+
+
+class TestTeamCarve:
+    """Tests for team carve-out computation in rate table."""
+
+    def _make_report(self, agent_bucket=500_000_000_000_000, shards_bucket=100_000_000_000_000):
+        return {
+            "public_pool_base_units": PUBLIC_POOL_BASE,
+            "validator_reserve_base_units": FLUX_MAX_SUPPLY_BASE - PUBLIC_POOL_BASE,
+            "tokens": {
+                "AGENT": {
+                    "decimals": 0,
+                    "supply_base_units": 1_000_000_000,
+                    "flux_bucket_base_units": agent_bucket,
+                },
+                "SHARDS": {
+                    "decimals": 6,
+                    "supply_base_units": 3_000_000_000_000,
+                    "flux_bucket_base_units": shards_bucket,
+                },
+            },
+        }
+
+    def test_carve_present_when_waivers_given(self):
+        rt = build_rate_table(self._make_report(), team_waiver_supplies={"AGENT": 100})
+        assert "team_carve" in rt
+        assert "AGENT" in rt["team_carve"]["per_asset"]
+
+    def test_carve_absent_without_waivers(self):
+        rt = build_rate_table(self._make_report())
+        assert "team_carve" not in rt
+
+    def test_carve_math(self):
+        waiver = 10_000_000
+        rt = build_rate_table(self._make_report(), team_waiver_supplies={"AGENT": waiver})
+        rate = rt["tokens"]["AGENT"]["rate_base_per_unit"]
+        carve = rt["team_carve"]["per_asset"]["AGENT"]["carve_cmatra_base"]
+        assert carve == waiver * rate
+
+    def test_carve_total(self):
+        waivers = {"AGENT": 10_000_000, "SHARDS": 500_000_000_000}
+        rt = build_rate_table(self._make_report(), team_waiver_supplies=waivers)
+        per_asset = rt["team_carve"]["per_asset"]
+        expected_total = sum(v["carve_cmatra_base"] for v in per_asset.values())
+        assert rt["team_carve"]["total_carve_base"] == expected_total
+
+    def test_pool_after_carve(self):
+        waivers = {"AGENT": 10_000_000, "SHARDS": 500_000_000_000}
+        rt = build_rate_table(self._make_report(), team_waiver_supplies=waivers)
+        tc = rt["team_carve"]
+        assert tc["pool_after_carve_base"] == PUBLIC_POOL_BASE - tc["total_carve_base"]
+
+    def test_carve_does_not_exceed_pool(self):
+        """If carve would exceed pool, assertion fires."""
+        import pytest
+        # Supply=2 with waiver=1 gives rate=bucket/1=bucket; carve=1*bucket=bucket > pool
+        report = {
+            "public_pool_base_units": 100,
+            "validator_reserve_base_units": 50,
+            "tokens": {
+                "AGENT": {
+                    "decimals": 0,
+                    "supply_base_units": 2,
+                    "flux_bucket_base_units": 100,
+                },
+            },
+        }
+        # waiver=1, redeemable=1, rate=100, carve=100 == pool → not less than
+        with pytest.raises(AssertionError, match="exceeds public pool"):
+            build_rate_table(report, team_waiver_supplies={"AGENT": 1})
 
 
 class TestFetchNftSupply:

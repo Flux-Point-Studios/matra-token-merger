@@ -1,7 +1,7 @@
 {
   "report_type": "pool_funding_calculator",
   "model": "surrender_pool",
-  "total_cmatra_base": 850000000000000,
+  "total_cmatra_base": 818659262014144,
   "num_pool_utxos": 10,
   "per_utxo_min_ada_lovelace": 1000000,
   "locked_ada": {

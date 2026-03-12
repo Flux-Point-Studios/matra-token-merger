@@ -297,16 +297,48 @@ def build_rate_table(
             "is_nft": entry.get("is_nft", False),
         }
 
-    return {
+    # Compute team carve-out: cMATRA owed to team for waived treasury balances
+    team_carve: dict[str, Any] = {}
+    total_carve_base = 0
+    for asset_name, waiver_base in team_waivers.items():
+        if waiver_base > 0 and asset_name in tokens:
+            rate = tokens[asset_name]["rate_base_per_unit"]
+            carve = waiver_base * rate
+            team_carve[asset_name] = {
+                "waiver_base": waiver_base,
+                "rate_base_per_unit": rate,
+                "carve_cmatra_base": carve,
+                "carve_cmatra_display": carve / (10 ** FLUX_DECIMALS),
+            }
+            total_carve_base += carve
+
+    pool_base = merge_report["public_pool_base_units"]
+    assert total_carve_base < pool_base, (
+        f"Team carve ({total_carve_base}) exceeds public pool ({pool_base})"
+    )
+
+    result = {
         "report_type": "redemption_rate_table",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "public_pool_base": merge_report["public_pool_base_units"],
-        "public_pool_display": merge_report["public_pool_base_units"] / (10 ** FLUX_DECIMALS),
+        "public_pool_base": pool_base,
+        "public_pool_display": pool_base / (10 ** FLUX_DECIMALS),
         "validator_reserve_base": merge_report["validator_reserve_base_units"],
         "team_waiver_supplies": team_waivers,
         "legacy_reward_adjustments": reward_adj,
         "tokens": tokens,
     }
+
+    if team_carve:
+        pool_after_carve = pool_base - total_carve_base
+        result["team_carve"] = {
+            "per_asset": team_carve,
+            "total_carve_base": total_carve_base,
+            "total_carve_display": total_carve_base / (10 ** FLUX_DECIMALS),
+            "pool_after_carve_base": pool_after_carve,
+            "pool_after_carve_display": pool_after_carve / (10 ** FLUX_DECIMALS),
+        }
+
+    return result
 
 
 # ---------------------------------------------------------------------------

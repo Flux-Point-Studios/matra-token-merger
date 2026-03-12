@@ -57,6 +57,22 @@ valuation_main([
     "--team-waiver", "AGENT:29644656", "SHARDS:446969700000",
 ])
 
+# Load rate table and display team carve-out
+import json as _json
+with open(f"{AUDIT_DIR}/rate_table_cmatra.json") as _f:
+    _rt = _json.load(_f)
+if "team_carve" in _rt:
+    tc = _rt["team_carve"]
+    print(f"\n--- Team Carve-Out ---")
+    for asset, info in tc["per_asset"].items():
+        print(f"  {asset}: {info['waiver_base']:,} units × {info['rate_base_per_unit']} = "
+              f"{info['carve_cmatra_display']:,.6f} cMATRA")
+    print(f"  Total carve: {tc['total_carve_display']:,.6f} cMATRA")
+    print(f"  Pool after carve: {tc['pool_after_carve_display']:,.6f} cMATRA")
+    POOL_AFTER_CARVE = tc["pool_after_carve_base"]
+else:
+    POOL_AFTER_CARVE = None
+
 print("\nWaiting 10s before snapshot (rate limit cooldown)...")
 time.sleep(10)
 
@@ -89,10 +105,10 @@ print("PHASE 4: Surrender Pool Funding Calculator")
 print("=" * 60)
 
 from tools.funding_calculator import main as funding_main
-funding_main([
-    "pool",
-    "--out-json", f"{AUDIT_DIR}/funding_report_cmatra.json",
-])
+funding_args = ["pool", "--out-json", f"{AUDIT_DIR}/funding_report_cmatra.json"]
+if POOL_AFTER_CARVE is not None:
+    funding_args += ["--total-cmatra-base", str(POOL_AFTER_CARVE)]
+funding_main(funding_args)
 
 print("\n" + "=" * 60)
 print("DONE - All reports in", AUDIT_DIR)

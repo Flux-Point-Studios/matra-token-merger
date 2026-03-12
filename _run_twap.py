@@ -12,5 +12,10 @@ load_dotenv(os.path.join(project_root, "env.local"), override=True)
 
 os.environ["NETWORK"] = "mainnet"
 
+from datetime import date
 from tools.twap_snapshot_pools import main
-main(["--out", "audit_pack/2026-02-12/twap_report.json", "--include-nfts"])
+
+today = date.today().isoformat()
+out_dir = f"audit_pack/{today}"
+os.makedirs(out_dir, exist_ok=True)
+main(["--out", f"{out_dir}/twap_report.json", "--include-nfts"])
