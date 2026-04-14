@@ -18,16 +18,18 @@ Two-party co-signing flow:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 import cbor2
 from cbor2 import CBORTag
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -104,6 +106,10 @@ CORS_ORIGINS: list[str] = json.loads(
 
 API_PORT: int = int(os.environ.get("SURRENDER_API_PORT", "8420"))
 
+# Shared secret — the Next.js proxy must send this in X-API-Secret header.
+# Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+API_SECRET: str = os.environ.get("SURRENDER_API_SECRET", "")
+
 # ---------------------------------------------------------------------------
 # CBOR constants
 # ---------------------------------------------------------------------------
@@ -126,6 +132,11 @@ class AppState:
     admin_addr: Address | None = None
     bf: BlockfrostClient | None = None
 
+    # Tracks tx hashes built by this service.  submit-surrender only allows
+    # submitting txs whose hash is in this set.  Entries expire after 10 min.
+    pending_tx_hashes: dict[str, float] = {}  # tx_hash_hex -> created_at
+    TX_HASH_TTL: float = 600.0  # 10 minutes
+
 
 state = AppState()
 
@@ -145,8 +156,8 @@ class AssetToSurrender(BaseModel):
 
 class BuildSurrenderRequest(BaseModel):
     """Request to build a surrender transaction."""
-    user_address: str = Field(..., description="User's bech32 Cardano address")
-    assets: list[AssetToSurrender] = Field(..., min_length=1)
+    user_address: str = Field(..., description="User's bech32 Cardano address", min_length=40, max_length=120)
+    assets: list[AssetToSurrender] = Field(..., min_length=1, max_length=7)
 
 
 class BuildSurrenderResponse(BaseModel):
@@ -158,7 +169,10 @@ class BuildSurrenderResponse(BaseModel):
 
 
 class SubmitRequest(BaseModel):
-    tx_cbor_hex: str = Field(..., description="Fully-signed transaction CBOR hex")
+    tx_cbor_hex: str = Field(
+        ..., description="Fully-signed transaction CBOR hex",
+        min_length=64, max_length=32_768, pattern=r"^[0-9a-fA-F]+$",
+    )
 
 
 class SubmitResponse(BaseModel):
@@ -182,8 +196,36 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "X-API-Secret"],
 )
+
+
+@app.middleware("http")
+async def verify_api_secret(request: Request, call_next):
+    """Reject requests to mutating endpoints without valid API secret."""
+    # Health and pool-status are read-only — allow without secret
+    if request.url.path in ("/health", "/pool-status", "/docs", "/openapi.json"):
+        return await call_next(request)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    if not API_SECRET:
+        logger.error("SURRENDER_API_SECRET not set — refusing all mutating requests")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Service not configured"},
+        )
+
+    provided = request.headers.get("x-api-secret", "")
+    if not provided or provided != API_SECRET:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Forbidden"},
+        )
+
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -278,6 +320,10 @@ def build_surrender(req: BuildSurrenderRequest):
     The returned CBOR hex needs the user's wallet signature added before
     submission.
     """
+    # Validate user address format
+    if not req.user_address.startswith("addr1"):
+        raise HTTPException(400, "Invalid Cardano mainnet address")
+
     # Validate state
     if not state.rate_table:
         raise HTTPException(503, "Rate table not loaded")
@@ -348,8 +394,13 @@ def build_surrender(req: BuildSurrenderRequest):
             pool_utxo=selected_pool,
         )
     except Exception as e:
-        logger.exception("Failed to build surrender tx")
-        raise HTTPException(500, f"Transaction build failed: {e}")
+        # Log full details server-side, return generic message to client
+        logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
+        raise HTTPException(500, "Transaction build failed. Please try again.")
+
+    # Register this tx hash so submit-surrender will accept it
+    _prune_expired_tx_hashes()
+    state.pending_tx_hashes[tx_hash] = time.time()
 
     return BuildSurrenderResponse(
         tx_cbor_hex=tx_cbor_hex,
@@ -498,20 +549,52 @@ def _build_cosigned_surrender_tx(
 # ---------------------------------------------------------------------------
 
 
+def _prune_expired_tx_hashes() -> None:
+    """Remove expired pending tx hashes."""
+    now = time.time()
+    expired = [h for h, t in state.pending_tx_hashes.items()
+               if now - t > state.TX_HASH_TTL]
+    for h in expired:
+        del state.pending_tx_hashes[h]
+
+
 @app.post("/submit-surrender", response_model=SubmitResponse)
 def submit_surrender(req: SubmitRequest):
-    """Submit a fully-signed surrender transaction."""
+    """Submit a fully-signed surrender transaction.
+
+    Only accepts transactions that were previously built by this service
+    (tx hash must be in the pending registry).
+    """
     if not state.bf:
         raise HTTPException(503, "Blockfrost client not available")
 
+    # Validate hex format and size (max 16 KB for a Cardano tx)
+    if len(req.tx_cbor_hex) > 32_768:
+        raise HTTPException(400, "Transaction CBOR too large")
+
     try:
         tx_bytes = bytes.fromhex(req.tx_cbor_hex)
-        tx_hash = state.bf.submit_tx(tx_bytes)
-        logger.info("Submitted surrender tx: %s", tx_hash)
-        return SubmitResponse(tx_hash=tx_hash)
+    except ValueError:
+        raise HTTPException(400, "Invalid hex encoding")
+
+    # Compute the tx hash from the submitted CBOR and check the registry
+    tx = Transaction.from_cbor(req.tx_cbor_hex)
+    tx_hash_hex = tx.transaction_body.hash().payload.hex()
+
+    _prune_expired_tx_hashes()
+    if tx_hash_hex not in state.pending_tx_hashes:
+        logger.warning("Rejected submit for unknown tx hash: %s", tx_hash_hex[:16])
+        raise HTTPException(403, "Transaction was not built by this service")
+
+    try:
+        submitted_hash = state.bf.submit_tx(tx_bytes)
+        # Remove from pending after successful submission
+        state.pending_tx_hashes.pop(tx_hash_hex, None)
+        logger.info("Submitted surrender tx: %s", submitted_hash)
+        return SubmitResponse(tx_hash=submitted_hash)
     except Exception as e:
-        logger.error("Submit failed: %s", e)
-        raise HTTPException(400, f"Transaction submission failed: {e}")
+        logger.error("Submit failed for tx %s: %s", tx_hash_hex[:16], e)
+        raise HTTPException(400, "Transaction submission failed")
 
 
 # ---------------------------------------------------------------------------
@@ -553,7 +636,7 @@ def health():
         "rate_table_loaded": state.rate_table is not None,
         "script_loaded": state.script_cbor_hex is not None,
         "admin_key_loaded": state.admin_sk is not None,
-        "script_address": SCRIPT_ADDRESS[:24] + "..." if SCRIPT_ADDRESS else None,
+        "configured": bool(SCRIPT_ADDRESS and CMATRA_POLICY_HEX and QUARANTINE_ADDRESS),
     }
 
 
