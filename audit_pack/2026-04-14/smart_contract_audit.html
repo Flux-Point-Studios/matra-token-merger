@@ -31,12 +31,14 @@
   tr:nth-child(even) { background: #f8f8fa; }
 
   .secure { color: #0d9e6e; font-weight: 700; }
+  .medium { color: #e65100; font-weight: 600; }
   .low { color: #f9a825; font-weight: 600; }
   .info { color: #1976d2; font-weight: 600; }
   .design { color: #6a1b9a; font-weight: 600; }
 
   .infobox { border-left: 4px solid #6a1b9a; background: #f5f0fa; padding: 12px 16px; margin: 16px 0; border-radius: 0 4px 4px 0; }
   .infobox.green { border-left-color: #0d9e6e; background: #f0faf5; }
+  .infobox.blue { border-left-color: #1976d2; background: #eef5fc; }
   .infobox p { margin: 0; }
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 9pt; color: #999; text-align: center; }
 </style>
@@ -52,12 +54,12 @@
   <div class="cover-meta">
     <strong>Prepared for:</strong> Flux Point Studios<br>
     <strong>Date:</strong> April 14, 2026<br>
-    <strong>Version:</strong> 1.1<br>
+    <strong>Version:</strong> 2.0<br>
     <strong>Classification:</strong> Public<br>
     <strong>Language:</strong> Aiken 1.1.21 / Plutus V3 / stdlib 2.2.0<br>
-    <strong>Scope:</strong> On-chain spend validator + off-chain transaction building
+    <strong>Scope:</strong> On-chain spend validator + off-chain transaction building + co-signing flow
   </div>
-  <div class="cover-badge">NO CRITICAL OR HIGH FINDINGS</div>
+  <div class="cover-badge">ALL FINDINGS REMEDIATED</div>
 </div>
 </div>
 
@@ -65,25 +67,30 @@
 <div class="page">
 <h2>1. Executive Summary</h2>
 <p>
-  A line-by-line security audit was conducted on the cMATRA surrender pool validator — a
-  parameterized Plutus V3 spend script written in Aiken that governs a pool of cMATRA tokens
-  on the Cardano blockchain. The validator controls approximately 818 million cMATRA during a
-  6-month public redemption window.
+  A comprehensive security audit was conducted on the cMATRA surrender pool validator &mdash; a
+  parameterized Plutus V3 spend script written in Aiken that governs a pool of approximately
+  818 million cMATRA on the Cardano blockchain during a 6-month public redemption window.
 </p>
 <p>
-  The audit analyzed 15 distinct attack vectors covering the on-chain validator logic, the
-  Aiken standard library functions it depends on, the off-chain transaction-building code,
-  and Cardano-specific address manipulation attacks (frankenaddress). <strong>No critical or
-  high severity vulnerabilities were found.</strong> Two low-severity findings in off-chain
-  code were identified and remediated. The remaining findings are informational
-  (design-level observations) or confirmed secure.
+  The audit analyzed <strong>20 distinct attack vectors</strong> across the on-chain validator,
+  the Aiken standard library, the off-chain transaction-building service, the two-party
+  co-signing flow, and Cardano-specific address manipulation attacks. The analysis was
+  informed by published vulnerability research from Vacuumlabs, MLabs, Plutonomicon,
+  Anastasia Labs, and real-world audit findings from Cardano DeFi protocols.
+</p>
+<p>
+  <strong>Six off-chain findings were identified (4 medium, 2 low) &mdash; all remediated.</strong>
+  No critical or high severity vulnerabilities were found. The on-chain validator logic is
+  correct. One design-level observation (no on-chain value preservation) is documented as an
+  intentional architectural decision with appropriate mitigations.
 </p>
 
 <div class="infobox green">
-  <p><strong>Overall Assessment:</strong> The surrender pool validator is correctly implemented.
-  Authorization and time-lock controls are enforced without exploitable gaps. The Aiken
-  stdlib interval functions behave as expected with clean boundary semantics. The validator
-  is suitable for mainnet deployment.</p>
+  <p><strong>Overall Assessment:</strong> The surrender pool validator is correctly implemented
+  and suitable for mainnet deployment. Authorization and time-lock controls are enforced
+  without exploitable gaps. All off-chain findings have been remediated with defense-in-depth
+  measures including pool UTxO reservation, dedicated collateral, strict datum validation,
+  mandatory transaction preflight, and frankenaddress protections.</p>
 </div>
 
 <h2>2. Validator Overview</h2>
@@ -96,7 +103,7 @@
 </p>
 <ol>
   <li><strong>Authorization:</strong> The designated administrator's verification key hash must appear in the transaction's required signers.</li>
-  <li><strong>Time control:</strong> The transaction's validity range must fall entirely within the correct window — before the deadline for surrender processing, or after the deadline for pool withdrawal.</li>
+  <li><strong>Time control:</strong> The transaction's validity range must fall entirely within the correct window &mdash; before the deadline for surrender processing, or after the deadline for pool withdrawal.</li>
 </ol>
 
 <h3>2.2 Parameters</h3>
@@ -144,32 +151,56 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
 <table>
   <tr>
     <th style="width:5%">#</th>
-    <th style="width:12%">Severity</th>
+    <th style="width:10%">Severity</th>
     <th style="width:48%">Finding</th>
-    <th style="width:15%">Location</th>
-    <th style="width:20%">Status</th>
+    <th style="width:12%">Location</th>
+    <th style="width:12%">Status</th>
   </tr>
   <tr>
-    <td>1</td><td class="low">Low</td>
-    <td>Datum-less UTxO griefing in off-chain pool discovery</td>
+    <td>1</td><td class="medium">Medium</td>
+    <td>Pool UTxO contention &mdash; concurrent builds target same UTxO</td>
     <td>Off-chain</td>
     <td class="secure">Remediated</td>
   </tr>
   <tr>
-    <td>2</td><td class="low">Low</td>
-    <td>Frankenaddress: user address validation and configuration warnings</td>
+    <td>2</td><td class="medium">Medium</td>
+    <td>Collateral auto-selection from admin wallet</td>
     <td>Off-chain</td>
     <td class="secure">Remediated</td>
   </tr>
   <tr>
-    <td>3</td><td class="design">Design</td>
+    <td>3</td><td class="medium">Medium</td>
+    <td>UTxO datum spoofing &mdash; pool discovery accepted non-Void datums</td>
+    <td>Off-chain</td>
+    <td class="secure">Remediated</td>
+  </tr>
+  <tr>
+    <td>4</td><td class="medium">Medium</td>
+    <td>No mandatory preflight before transaction submission</td>
+    <td>Off-chain</td>
+    <td class="secure">Remediated</td>
+  </tr>
+  <tr>
+    <td>5</td><td class="low">Low</td>
+    <td>Datum-less UTxO griefing in pool discovery</td>
+    <td>Off-chain</td>
+    <td class="secure">Remediated</td>
+  </tr>
+  <tr>
+    <td>6</td><td class="low">Low</td>
+    <td>Frankenaddress: user address and configuration validation</td>
+    <td>Off-chain</td>
+    <td class="secure">Remediated</td>
+  </tr>
+  <tr>
+    <td>7</td><td class="design">Design</td>
     <td>No on-chain value preservation (admin discretion by design)</td>
     <td>On-chain</td>
     <td class="info">Accepted</td>
   </tr>
   <tr>
-    <td>4&ndash;15</td><td class="secure">Secure</td>
-    <td>Double satisfaction, deadline boundaries, unbounded ranges, authorization, datum robustness, multi-validator, reference scripts, parameters, PKH collision, concurrency, pool address frankenaddress, quarantine address frankenaddress</td>
+    <td>8&ndash;20</td><td class="secure">Secure</td>
+    <td>Double satisfaction, deadline boundaries, unbounded ranges, authorization, datum robustness, non-spend rejection, reference scripts, parameter immutability, PKH collision, bait-and-switch, reference input abuse, token dust, transaction metadata</td>
     <td>On-chain + Off-chain</td>
     <td class="secure">Verified</td>
   </tr>
@@ -180,69 +211,114 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
 <div class="page">
 <h2>4. Detailed Findings</h2>
 
-<h3>Finding 1 — Datum-less UTxO Griefing <span class="low">[Low]</span></h3>
+<h3>Finding 1 &mdash; Pool UTxO Contention <span class="medium">[Medium]</span></h3>
 <p>
-  The on-chain validator correctly requires a datum via <code>expect Some(_) = datum</code>,
-  making datum-less UTxOs unspendable. However, anyone can send cMATRA to the script address
-  without attaching a datum. The off-chain pool discovery code did not check for datum
-  presence, meaning it could select these poisoned UTxOs for transaction building, causing
-  avoidable failures.
+  In the eUTxO model, each pool UTxO can only be consumed by one transaction per block.
+  The transaction-building service selected the largest available pool UTxO for every request.
+  When multiple surrender requests arrived concurrently, all targeted the same UTxO, causing
+  all but one to fail at submission. An attacker could amplify this by sending rapid
+  requests to exhaust pool UTxO availability.
 </p>
 <p>
-  <strong>Remediation:</strong> Pool discovery now filters out UTxOs that lack both
-  <code>inline_datum</code> and <code>data_hash</code>. Datum-less UTxOs are logged and
-  skipped. The fix was applied to all three locations that query pool UTxOs:
-  the core tool, the red-team suite, and the API service.
+  <strong>Remediation:</strong> A pool UTxO reservation system was implemented. When a pool
+  UTxO is selected for a build, it is marked as reserved for 2 minutes (sufficient for the
+  user to review and sign). Concurrent builds automatically skip reserved UTxOs and select
+  the next available one. Reservations are released on build failure, successful submission,
+  or TTL expiry.
 </p>
 
-<h3>Finding 2 — No On-Chain Value Preservation <span class="design">[Design]</span></h3>
+<h3>Finding 2 &mdash; Collateral Auto-Selection <span class="medium">[Medium]</span></h3>
 <p>
-  The validator does not enforce output constraints: it does not check that cMATRA is sent to
-  the correct recipient, that legacy assets are routed to quarantine, or that the remaining
-  pool balance is returned to the script address. The administrator has full discretion over
-  how pool funds are routed in any transaction that passes the authorization and timing checks.
+  The transaction builder allowed pycardano to auto-select collateral from the administrator's
+  wallet UTxOs. In the event of a phase-2 validation failure, the collateral is consumed as a
+  penalty (150% of the transaction fee on mainnet). Auto-selection could choose a high-value
+  UTxO, resulting in disproportionate collateral loss.
 </p>
 <p>
-  This is a deliberate design decision. Redemption rate enforcement occurs off-chain in the
-  transaction-building service, which computes cMATRA amounts from a fixed rate table and
-  constructs outputs accordingly. The validator's role is restricted to authorization and
-  time-lock — it gates <em>who</em> can spend and <em>when</em>, while the off-chain service
-  determines <em>how</em>.
+  <strong>Remediation:</strong> The service now supports an explicit collateral UTxO
+  configuration. When set, the builder uses a dedicated small-value UTxO (5 ADA recommended)
+  as collateral, bounding maximum loss on any phase-2 failure.
 </p>
-<div class="infobox">
-  <p><strong>Risk profile:</strong> If the administrator signing key is compromised, the
-  attacker could drain the entire pool by building arbitrary transactions. This risk is
-  inherent to the architecture and is mitigated through operational security of the key
-  and the host environment, rate limiting, and the API authentication layer added during
-  the portal security audit.</p>
+
+<h3>Finding 3 &mdash; UTxO Datum Spoofing <span class="medium">[Medium]</span></h3>
+<p>
+  Pool discovery accepted any UTxO with any datum present, rather than verifying the datum
+  was specifically Void (<code>Constr(0, [])</code>). An attacker could send cMATRA to the
+  script address with a non-Void datum (e.g., <code>Constr(1, [0xdeadbeef])</code>), which
+  would pass the off-chain filter but fail the on-chain validator&rsquo;s type deserialization,
+  causing unnecessary transaction failures.
+</p>
+<p>
+  <strong>Remediation:</strong> Pool discovery now validates that each UTxO&rsquo;s inline datum
+  matches the exact Void structure (<code>constructor: 0, fields: []</code>). UTxOs with
+  datum hashes only (no inline datum), missing datums, or non-Void datums are rejected.
+  Applied to all three pool discovery locations.
+</p>
+
+<h3>Finding 4 &mdash; No Mandatory Preflight <span class="medium">[Medium]</span></h3>
+<p>
+  Transactions were built and returned to the user without first verifying they would pass
+  on-chain script evaluation. If the transaction contained an error (stale UTxO, misconfigured
+  script parameters, incorrect datum), the user would discover this only after signing and
+  submitting &mdash; at which point collateral is consumed on phase-2 failure.
+</p>
+<p>
+  <strong>Remediation:</strong> The build endpoint now runs <code>evaluate_tx</code> against
+  the live ledger as a mandatory step before returning the transaction CBOR. If the Plutus
+  script evaluation fails, the transaction is rejected and the pool UTxO reservation is
+  released. This catches errors before any collateral is at risk.
+</p>
+
+<h3>Finding 5 &mdash; Datum-less UTxO Griefing <span class="low">[Low]</span></h3>
+<p>
+  Anyone can send cMATRA to the script address without a datum. The on-chain validator
+  correctly rejects these UTxOs, but the off-chain code previously selected them, causing
+  avoidable build failures. Remediated by filtering for datum presence (now subsumed by
+  Finding 3&rsquo;s stricter Void CBOR validation).
+</p>
+
+<h3>Finding 6 &mdash; Frankenaddress Exposure <span class="low">[Low]</span></h3>
+<p>
+  Three address surfaces were analyzed for frankenaddress (mangled staking credential) risk.
+  The pool script address uses enterprise-type encoding (no staking credential) and is secure.
+  The user address endpoint now rejects script-payment credentials. The quarantine address
+  is validated at startup with a warning if a staking credential is present.
+</p>
+
+<h3>Finding 7 &mdash; No On-Chain Value Preservation <span class="design">[Design]</span></h3>
+<p>
+  The validator does not enforce output constraints. The administrator has full discretion
+  over fund routing. This is a deliberate design decision &mdash; rate enforcement occurs
+  off-chain. If the admin signing key were compromised, the attacker could drain the pool.
+  Mitigated through operational key security, API authentication, rate limiting, and
+  mandatory preflight evaluation.
+</p>
 </div>
 
+<!-- ATTACK VECTOR ANALYSIS -->
+<div class="page">
 <h2>5. Attack Vector Analysis</h2>
 
 <h3>5.1 Double Satisfaction</h3>
 <p class="secure">SECURE</p>
 <p>
   When multiple pool UTxOs are consumed in a single transaction, the validator executes once
-  per input. Each invocation checks the same transaction context (same admin signature, same
-  validity range). Since only the administrator can construct valid transactions, and
-  modifying any transaction output invalidates the administrator's signature, an attacker
-  cannot exploit multi-input transactions to extract additional value.
+  per input against the same transaction context. Since only the administrator can construct
+  valid transactions and modifying any output invalidates the signature, multi-input
+  exploitation is not feasible.
 </p>
 
 <h3>5.2 Deadline Boundary Semantics</h3>
 <p class="secure">SECURE</p>
 <p>
   The Aiken stdlib functions <code>is_entirely_before</code> and <code>is_entirely_after</code>
-  were traced through their source code. The analysis confirms that there is a clean dead zone
-  at the exact deadline boundary: a transaction whose validity range includes the deadline
-  moment is rejected by <em>both</em> paths. There is no overlap and no gap between the two
-  windows.
+  were traced through their source. A clean dead zone exists at the exact deadline: transactions
+  whose validity range includes the deadline moment are rejected by both paths.
 </p>
 <table>
   <tr><th>Validity Range</th><th>ProcessSurrender</th><th>AdminWithdraw</th></tr>
   <tr><td>Upper bound = deadline &minus; 1 (inclusive)</td><td class="secure">Allowed</td><td>Rejected</td></tr>
-  <tr><td>Upper bound = deadline (inclusive)</td><td>Rejected</td><td>Rejected</td></tr>
-  <tr><td>Lower bound = deadline (inclusive)</td><td>Rejected</td><td>Rejected</td></tr>
+  <tr><td>Includes deadline (inclusive either bound)</td><td>Rejected</td><td>Rejected</td></tr>
   <tr><td>Lower bound = deadline + 1 (inclusive)</td><td>Rejected</td><td class="secure">Allowed</td></tr>
   <tr><td>Unbounded (&minus;inf, +inf)</td><td>Rejected</td><td>Rejected</td></tr>
 </table>
@@ -250,129 +326,105 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
 <h3>5.3 Authorization Model</h3>
 <p class="secure">SECURE</p>
 <p>
-  The validator checks for <code>admin_pkh</code> in <code>tx.extra_signatories</code>. The
-  Cardano ledger enforces that every public key hash listed in <code>required_signers</code>
-  (which populates <code>extra_signatories</code>) has a corresponding verification key
-  witness in the transaction. There is no mechanism to spoof this without possession of the
-  administrator's private key.
+  The Cardano ledger enforces that every PKH in <code>required_signers</code> has a
+  corresponding VK witness. No mechanism exists to spoof <code>extra_signatories</code>
+  without the private key.
+</p>
+
+<h3>5.4 Datum Robustness &amp; Deserialization</h3>
+<p class="secure">SECURE</p>
+<p>
+  <code>expect Some(_) = datum</code> rejects <code>None</code> datums (Plutus V3 allows
+  spend without datum via CIP-69). Aiken fails safely on type deserialization mismatch &mdash;
+  non-Void datums cause a hard script abort, not unexpected behavior.
+</p>
+
+<h3>5.5 Non-Spend Purpose Rejection (Conway-Era)</h3>
+<p class="secure">SECURE</p>
+<p>
+  The <code>else(_) { fail }</code> catch-all rejects all six non-spend Plutus V3 script
+  purposes: Mint, Withdraw, Publish (certificates), Vote, and Propose. This includes
+  Conway-era governance actions (DRep voting, proposal guardrails). The wildcard pattern
+  is forward-compatible with future Plutus versions.
+</p>
+
+<h3>5.6 Bait-and-Switch / Transaction Modification</h3>
+<p class="secure">SECURE</p>
+<p>
+  The admin signs the transaction body hash. The user can only add their VK witness &mdash;
+  they cannot modify inputs, outputs, fees, or redeemers. Any modification invalidates the
+  admin signature. The submit endpoint verifies the transaction hash matches the one built
+  by the service, preventing substitution of a different transaction.
+</p>
+
+<h3>5.7 Reference Input Abuse (CIP-31)</h3>
+<p class="secure">SECURE</p>
+<p>
+  The validator does not read reference inputs. Pool UTxOs can be referenced without triggering
+  the spending validator, but this is benign &mdash; pool balances are public knowledge and
+  datums are Void.
+</p>
+
+<h3>5.8 Token Dust / Value Spam</h3>
+<p class="secure">SECURE</p>
+<p>
+  Anyone can send arbitrary native tokens to the script address. Pool discovery filters by
+  the specific cMATRA unit and Void datum, ignoring junk UTxOs. Token dust creates new UTxOs
+  at the address but cannot modify existing pool UTxOs.
+</p>
+
+<h3>5.9 Reference Script &amp; Parameter Security</h3>
+<p class="secure">SECURE</p>
+<p>
+  Parameters are baked into the CBOR bytecode via <code>aiken blueprint apply</code>.
+  The script address is derived from the compiled hash. Different parameters produce a
+  different address. Deterministic builds allow third-party verification of the deployed
+  script against the published source.
 </p>
 </div>
 
-<!-- REMAINING VECTORS + CONCLUSION -->
+<!-- FRANKENADDRESS + INDUSTRY + CONCLUSION -->
 <div class="page">
-<h3>5.4 Datum Robustness</h3>
-<p class="secure">SECURE</p>
-<p>
-  The <code>expect Some(_) = datum</code> pattern requires an inline datum to be present.
-  UTxOs sent to the script address without a datum are unspendable by the validator. This is
-  enforced at the Plutus level and cannot be bypassed.
-</p>
-
-<h3>5.5 Non-Spend Purpose Rejection</h3>
-<p class="secure">SECURE</p>
-<p>
-  The <code>else(_) { fail }</code> catch-all rejects any non-spend execution purpose
-  (minting, certifying, withdrawing, voting, proposing). The validator's script hash cannot
-  be leveraged to authorize operations outside of its intended scope.
-</p>
-
-<h3>5.6 Reference Script Substitution</h3>
-<p class="secure">SECURE</p>
-<p>
-  The script address is derived from the hash of the compiled bytecode, which includes the
-  baked-in <code>admin_pkh</code> and <code>deadline</code> parameters. Substituting a
-  different script or parameters would produce a different address. UTxOs at the correct
-  address can only be spent by the correct script.
-</p>
-
-<h3>5.7 Parameter Immutability</h3>
-<p class="secure">SECURE</p>
-<p>
-  Parameters are applied at compile time via <code>aiken blueprint apply</code> and embedded
-  in the CBOR bytecode. They cannot be altered post-deployment. Changing parameters generates
-  a new script with a new hash and address.
-</p>
-
-<h3>5.8 Concurrency</h3>
-<p class="info">ACCEPTABLE</p>
-<p>
-  The eUTxO model ensures that each pool UTxO can only be consumed by one transaction.
-  Concurrent users targeting the same UTxO will see one succeed and the other receive a
-  retryable error. For higher throughput, the pool can be distributed across multiple UTxOs
-  (the off-chain code already supports multi-UTxO selection).
-</p>
 
 <h2>6. Frankenaddress Analysis</h2>
 
 <p>
-  A <em>frankenaddress</em> (sometimes called a Frankenstein address) is a Cardano address
-  that combines one entity's payment credential with a different entity's staking credential.
-  On Cardano, addresses consist of two parts: a payment credential (who can spend) and an
-  optional staking credential (who earns delegation rewards). By constructing an address with
-  a script's payment hash but an attacker's staking key, the attacker could earn staking
-  rewards on ADA locked at that address without being able to spend it.
+  A <em>frankenaddress</em> combines one entity's payment credential with another's staking
+  credential, allowing the attacker to earn delegation rewards on ADA locked at that address.
+  Three surfaces were analyzed:
 </p>
-<p>
-  Three address surfaces were analyzed for frankenaddress exposure:
-</p>
+<ul>
+  <li><strong>Pool address:</strong> Enterprise-type (no staking credential). Canonical-only queries. <span class="secure">Secure.</span></li>
+  <li><strong>User address:</strong> Script-payment credentials now rejected. <span class="secure">Remediated.</span></li>
+  <li><strong>Quarantine address:</strong> Startup validation warns if staking credential present. <span class="secure">Remediated.</span></li>
+</ul>
 
-<h3>6.1 Pool / Script Address</h3>
-<p class="secure">SECURE</p>
-<p>
-  The surrender pool script address is constructed as an enterprise-type address with only a
-  payment credential (the script hash) and no staking credential. An attacker could construct
-  an alternative address using the same script hash combined with their staking key. However,
-  the off-chain pool discovery code queries only the canonical configured address. UTxOs at a
-  frankenaddress variant would never be discovered, selected, or spent. Additionally, when the
-  transaction builder returns remaining pool balance to the script, it always routes to the
-  canonical address — never to a frankenaddress variant.
-</p>
+<h2>7. Industry Research</h2>
 
-<h3>6.2 User Address</h3>
-<p class="secure">REMEDIATED</p>
-<p>
-  The transaction builder sends cMATRA to the user's provided address. An attacker could
-  theoretically provide a script-payment address (where the payment credential is a script
-  hash rather than a verification key), causing cMATRA to be sent to an address the user
-  cannot spend from.
-</p>
-<p>
-  <strong>Remediation:</strong> The transaction-building endpoint now validates that the
-  user's address has a verification key payment credential (not a script hash). Requests
-  with script-payment addresses are rejected. This ensures cMATRA is always delivered to a
-  key-controlled wallet that the user can spend from.
-</p>
-
-<h3>6.3 Quarantine Address</h3>
-<p class="secure">REMEDIATED</p>
-<p>
-  Legacy assets surrendered by users are routed to a quarantine address where they are
-  permanently removed from circulation. If this address were configured with a staking
-  credential, whoever controls that staking key would earn delegation rewards on the
-  minimum ADA locked alongside the quarantined assets.
-</p>
-<p>
-  <strong>Remediation:</strong> The service now validates the quarantine address at startup
-  and logs a warning if a staking credential is present. The operational recommendation is to
-  use an enterprise-type address (no staking component) for the quarantine, ensuring no party
-  can extract staking rewards from burned asset UTxOs.
-</p>
-
-<div class="infobox">
-  <p><strong>Deployment guidance:</strong> Both the script address and the quarantine address
-  should be enterprise-type addresses with no staking credential. This is the default when
-  generating addresses from a script hash alone. The service validates this at startup and
-  warns if a staking component is detected.</p>
+<div class="infobox blue">
+  <p>This audit was cross-referenced against published vulnerability research and real-world
+  audit findings from the Cardano ecosystem to ensure comprehensive coverage.</p>
 </div>
 
-<h2>7. Test Coverage</h2>
+<table>
+  <tr><th>Source</th><th>Vectors Checked</th></tr>
+  <tr><td>Vacuumlabs Vulnerability Series (#1&ndash;#6)</td><td>Double satisfaction, trust-no-UTxO, time handling, token security</td></tr>
+  <tr><td>MLabs Common Vulnerabilities Guide</td><td>11 named vulnerability classes including UTxO contention, unbounded datum, arbitrary datum injection, other-redeemer bypass</td></tr>
+  <tr><td>Plutonomicon Vulnerability Catalog</td><td>Infinite mint, unbounded value, parameterization verification, cheap spam</td></tr>
+  <tr><td>Anastasia Labs Audit Patterns</td><td>Hardcoded reference input index, stake validator pattern, design patterns</td></tr>
+  <tr><td>Tweag / Minswap Post-Mortem</td><td>Duplicated pool NFT via minting policy flaw (not applicable to this validator)</td></tr>
+  <tr><td>Adamant Security Research</td><td>Mangled addresses, staking credential hijacking, multi-sig concerns</td></tr>
+  <tr><td>June 2024 Cardano DDoS Analysis</td><td>REWARD-type script abuse, reference script fee asymmetry</td></tr>
+  <tr><td>CIP-69 (Plutus V3 Signature Unification)</td><td>Optional datum in V3 spend scripts, single ScriptContext argument</td></tr>
+</table>
 
+<h2>8. Test Coverage</h2>
 
 <table>
   <tr>
-    <th style="width:8%">Source</th>
+    <th style="width:12%">Source</th>
     <th style="width:8%">Tests</th>
-    <th style="width:84%">Coverage</th>
+    <th style="width:80%">Coverage</th>
   </tr>
   <tr>
     <td>On-chain</td>
@@ -391,28 +443,39 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
   </tr>
 </table>
 
-<h2>8. Conclusion</h2>
+<h2>9. Deployment Recommendations</h2>
+<ul>
+  <li><strong>Admin key protection:</strong> Consider native multi-signature (M-of-N) for the admin credential to eliminate the single-key risk. Use hardware key storage for mainnet.</li>
+  <li><strong>Compiler version pinning:</strong> Pin Aiken compiler version in CI/CD. A different compiler version may produce a different script hash.</li>
+  <li><strong>Deterministic build verification:</strong> Publish the exact script hash and build instructions so that third parties can independently verify the deployed validator matches the audited source.</li>
+  <li><strong>Enterprise-type addresses:</strong> Use addresses without staking credentials for both the script address and quarantine address.</li>
+  <li><strong>Dedicated collateral:</strong> Configure a dedicated small-value collateral UTxO to bound maximum loss.</li>
+</ul>
+
+<h2>10. Conclusion</h2>
 <p>
-  The cMATRA surrender pool validator is a minimal, well-scoped Plutus V3 script that
-  correctly enforces its two design invariants: administrator authorization and time-locked
-  spending windows. The Aiken stdlib interval functions provide clean boundary semantics with
-  no exploitable edge cases at the deadline.
+  The cMATRA surrender pool validator has undergone a comprehensive security review informed
+  by the Cardano ecosystem's published vulnerability research and real-world audit findings.
+  Twenty attack vectors were analyzed across the on-chain validator, the Aiken standard library,
+  the off-chain transaction service, the co-signing flow, and Cardano-specific address
+  manipulation patterns.
 </p>
 <p>
-  Two low-severity findings were identified and remediated: datum-less UTxO griefing in pool
-  discovery, and frankenaddress exposure across three address surfaces (pool, user,
-  quarantine). The validator's deliberate omission of on-chain value preservation is
-  documented as a design decision with appropriate operational mitigations.
+  Six findings were identified in off-chain code (4 medium, 2 low) &mdash; all have been
+  remediated. The on-chain validator logic is correct: authorization and time-lock invariants
+  are enforced without exploitable gaps, the Aiken stdlib interval functions exhibit clean
+  boundary semantics, and the <code>else(_) { fail }</code> pattern correctly rejects all
+  non-spend purposes including Conway-era governance actions.
 </p>
 
 <div class="infobox green">
-  <p><strong>Assessment:</strong> The surrender pool validator is correctly implemented and
-  suitable for mainnet deployment. No critical, high, or medium severity vulnerabilities
-  were identified.</p>
+  <p><strong>Assessment:</strong> All identified vulnerabilities have been resolved. The
+  cMATRA surrender pool validator is correctly implemented and suitable for mainnet
+  deployment.</p>
 </div>
 
 <div class="footer">
-  <p>cMATRA Surrender Pool — Smart Contract Audit &mdash; April 14, 2026 &mdash; Flux Point Studios &mdash; Public Release</p>
+  <p>cMATRA Surrender Pool &mdash; Smart Contract Audit v2.0 &mdash; April 14, 2026 &mdash; Flux Point Studios &mdash; Public Release</p>
 </div>
 </div>
 
