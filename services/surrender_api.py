@@ -598,6 +598,134 @@ def submit_surrender(req: SubmitRequest):
 
 
 # ---------------------------------------------------------------------------
+# Dry-run evaluate (mainnet test without submission)
+# ---------------------------------------------------------------------------
+
+
+class EvaluateResponse(BaseModel):
+    tx_hash: str
+    evaluation: str
+    total_cmatra_display: float
+    redemption_summary: dict[str, dict[str, Any]]
+    fee_lovelace: int
+    outputs_summary: list[dict[str, str]]
+
+
+@app.post("/evaluate-surrender", response_model=EvaluateResponse)
+def evaluate_surrender(req: BuildSurrenderRequest):
+    """Build a surrender tx and evaluate it against the live ledger — NO submission.
+
+    Identical to build-surrender but instead of returning CBOR for signing,
+    it runs Blockfrost evaluate_tx to verify the Plutus script executes
+    correctly with real mainnet UTxOs.  Returns execution units and fee.
+
+    Use this to validate the full pipeline before opening the window.
+    """
+    if not req.user_address.startswith("addr1"):
+        raise HTTPException(400, "Invalid Cardano mainnet address")
+    if not state.rate_table:
+        raise HTTPException(503, "Rate table not loaded")
+    if not state.script_cbor_hex:
+        raise HTTPException(503, "Surrender script not loaded")
+    if not state.admin_sk:
+        raise HTTPException(503, "Admin key not configured")
+    if not SCRIPT_ADDRESS or not CMATRA_POLICY_HEX or not CMATRA_ASSET_HEX or not QUARANTINE_ADDRESS:
+        raise HTTPException(503, "Service not fully configured")
+
+    asset_lookup = _build_asset_lookup()
+
+    total_cmatra = 0
+    redemption_summary: dict[str, dict[str, Any]] = {}
+    all_legacy_assets: list[dict[str, Any]] = []
+
+    for item in req.assets:
+        try:
+            cmatra_amount = compute_redemption(
+                state.rate_table, item.asset_key, item.quantity_base,
+            )
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e))
+        total_cmatra += cmatra_amount
+        redemption_summary[item.asset_key] = {
+            "quantity_base": item.quantity_base,
+            "cmatra_base": cmatra_amount,
+            "cmatra_display": cmatra_amount / (10 ** FLUX_DECIMALS),
+        }
+        legacy = _resolve_legacy_assets(
+            item.asset_key, item.quantity_base, item.nft_units, asset_lookup,
+        )
+        all_legacy_assets.extend(legacy)
+
+    pool_utxos = find_pool_utxos(
+        state.bf, SCRIPT_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
+    )
+    if not pool_utxos:
+        raise HTTPException(503, "No pool UTxOs available")
+    selected_pool = None
+    for pu in pool_utxos:
+        if pu["cmatra_amount"] >= total_cmatra:
+            selected_pool = pu
+            break
+    if selected_pool is None:
+        raise HTTPException(503, "No pool UTxO with sufficient balance")
+
+    # Build the tx (same as build-surrender)
+    try:
+        tx_cbor_hex, tx_hash_hex = _build_cosigned_surrender_tx(
+            user_address=req.user_address,
+            total_cmatra=total_cmatra,
+            legacy_assets=all_legacy_assets,
+            pool_utxo=selected_pool,
+        )
+    except Exception as e:
+        logger.exception("Evaluate: build failed for %s", req.user_address[:24])
+        raise HTTPException(500, "Transaction build failed during evaluation")
+
+    # Evaluate against live ledger (does NOT submit)
+    try:
+        context = BlockFrostChainContext(
+            project_id=state.bf.project_id,
+            base_url=state.bf.base_url,
+        )
+        tx_bytes = bytes.fromhex(tx_cbor_hex)
+        eval_result = context.evaluate_tx(tx_bytes)
+        eval_str = str(eval_result)
+        logger.info("evaluate_tx OK for %s: %s", tx_hash_hex[:16], eval_str)
+    except Exception as e:
+        logger.error("evaluate_tx FAILED for %s: %s", tx_hash_hex[:16], e)
+        raise HTTPException(
+            422,
+            f"Script evaluation failed: {e}",
+        )
+
+    # Parse fee from the built tx
+    tx = Transaction.from_cbor(tx_cbor_hex)
+    fee = tx.transaction_body.fee or 0
+
+    # Summarize outputs
+    outputs_summary = []
+    for out in tx.transaction_body.outputs:
+        addr_str = str(out.address) if out.address else "unknown"
+        ada = out.amount if isinstance(out.amount, int) else (out.amount.coin if out.amount else 0)
+        outputs_summary.append({
+            "address": addr_str[:24] + "...",
+            "lovelace": str(ada),
+            "has_tokens": str(bool(
+                not isinstance(out.amount, int) and out.amount.multi_asset
+            )),
+        })
+
+    return EvaluateResponse(
+        tx_hash=tx_hash_hex,
+        evaluation=eval_str,
+        total_cmatra_display=total_cmatra / (10 ** FLUX_DECIMALS),
+        redemption_summary=redemption_summary,
+        fee_lovelace=fee,
+        outputs_summary=outputs_summary,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Pool status
 # ---------------------------------------------------------------------------
 
