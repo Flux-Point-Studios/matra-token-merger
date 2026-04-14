@@ -52,7 +52,7 @@
   <div class="cover-meta">
     <strong>Prepared for:</strong> Flux Point Studios<br>
     <strong>Date:</strong> April 14, 2026<br>
-    <strong>Version:</strong> 1.0<br>
+    <strong>Version:</strong> 1.1<br>
     <strong>Classification:</strong> Public<br>
     <strong>Language:</strong> Aiken 1.1.21 / Plutus V3 / stdlib 2.2.0<br>
     <strong>Scope:</strong> On-chain spend validator + off-chain transaction building
@@ -71,11 +71,12 @@
   6-month public redemption window.
 </p>
 <p>
-  The audit analyzed 12 distinct attack vectors covering the on-chain validator logic, the
-  Aiken standard library functions it depends on, and the off-chain transaction-building code
-  that interacts with it. <strong>No critical or high severity vulnerabilities were found.</strong>
-  One low-severity griefing vector in off-chain pool discovery was identified and remediated.
-  The remaining findings are informational (design-level observations) or confirmed secure.
+  The audit analyzed 15 distinct attack vectors covering the on-chain validator logic, the
+  Aiken standard library functions it depends on, the off-chain transaction-building code,
+  and Cardano-specific address manipulation attacks (frankenaddress). <strong>No critical or
+  high severity vulnerabilities were found.</strong> Two low-severity findings in off-chain
+  code were identified and remediated. The remaining findings are informational
+  (design-level observations) or confirmed secure.
 </p>
 
 <div class="infobox green">
@@ -155,15 +156,21 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
     <td class="secure">Remediated</td>
   </tr>
   <tr>
-    <td>2</td><td class="design">Design</td>
+    <td>2</td><td class="low">Low</td>
+    <td>Frankenaddress: user address validation and configuration warnings</td>
+    <td>Off-chain</td>
+    <td class="secure">Remediated</td>
+  </tr>
+  <tr>
+    <td>3</td><td class="design">Design</td>
     <td>No on-chain value preservation (admin discretion by design)</td>
     <td>On-chain</td>
     <td class="info">Accepted</td>
   </tr>
   <tr>
-    <td>3–12</td><td class="secure">Secure</td>
-    <td>Double satisfaction, deadline boundaries, unbounded ranges, authorization, datum robustness, multi-validator, reference scripts, parameters, PKH collision, concurrency</td>
-    <td>On-chain</td>
+    <td>4&ndash;15</td><td class="secure">Secure</td>
+    <td>Double satisfaction, deadline boundaries, unbounded ranges, authorization, datum robustness, multi-validator, reference scripts, parameters, PKH collision, concurrency, pool address frankenaddress, quarantine address frankenaddress</td>
+    <td>On-chain + Off-chain</td>
     <td class="secure">Verified</td>
   </tr>
 </table>
@@ -295,7 +302,71 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
   (the off-chain code already supports multi-UTxO selection).
 </p>
 
-<h2>6. Test Coverage</h2>
+<h2>6. Frankenaddress Analysis</h2>
+
+<p>
+  A <em>frankenaddress</em> (sometimes called a Frankenstein address) is a Cardano address
+  that combines one entity's payment credential with a different entity's staking credential.
+  On Cardano, addresses consist of two parts: a payment credential (who can spend) and an
+  optional staking credential (who earns delegation rewards). By constructing an address with
+  a script's payment hash but an attacker's staking key, the attacker could earn staking
+  rewards on ADA locked at that address without being able to spend it.
+</p>
+<p>
+  Three address surfaces were analyzed for frankenaddress exposure:
+</p>
+
+<h3>6.1 Pool / Script Address</h3>
+<p class="secure">SECURE</p>
+<p>
+  The surrender pool script address is constructed as an enterprise-type address with only a
+  payment credential (the script hash) and no staking credential. An attacker could construct
+  an alternative address using the same script hash combined with their staking key. However,
+  the off-chain pool discovery code queries only the canonical configured address. UTxOs at a
+  frankenaddress variant would never be discovered, selected, or spent. Additionally, when the
+  transaction builder returns remaining pool balance to the script, it always routes to the
+  canonical address — never to a frankenaddress variant.
+</p>
+
+<h3>6.2 User Address</h3>
+<p class="secure">REMEDIATED</p>
+<p>
+  The transaction builder sends cMATRA to the user's provided address. An attacker could
+  theoretically provide a script-payment address (where the payment credential is a script
+  hash rather than a verification key), causing cMATRA to be sent to an address the user
+  cannot spend from.
+</p>
+<p>
+  <strong>Remediation:</strong> The transaction-building endpoint now validates that the
+  user's address has a verification key payment credential (not a script hash). Requests
+  with script-payment addresses are rejected. This ensures cMATRA is always delivered to a
+  key-controlled wallet that the user can spend from.
+</p>
+
+<h3>6.3 Quarantine Address</h3>
+<p class="secure">REMEDIATED</p>
+<p>
+  Legacy assets surrendered by users are routed to a quarantine address where they are
+  permanently removed from circulation. If this address were configured with a staking
+  credential, whoever controls that staking key would earn delegation rewards on the
+  minimum ADA locked alongside the quarantined assets.
+</p>
+<p>
+  <strong>Remediation:</strong> The service now validates the quarantine address at startup
+  and logs a warning if a staking credential is present. The operational recommendation is to
+  use an enterprise-type address (no staking component) for the quarantine, ensuring no party
+  can extract staking rewards from burned asset UTxOs.
+</p>
+
+<div class="infobox">
+  <p><strong>Deployment guidance:</strong> Both the script address and the quarantine address
+  should be enterprise-type addresses with no staking credential. This is the default when
+  generating addresses from a script hash alone. The service validates this at startup and
+  warns if a staking component is detected.</p>
+</div>
+
+<h2>7. Test Coverage</h2>
+
 
 <table>
   <tr>
@@ -320,7 +391,7 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
   </tr>
 </table>
 
-<h2>7. Conclusion</h2>
+<h2>8. Conclusion</h2>
 <p>
   The cMATRA surrender pool validator is a minimal, well-scoped Plutus V3 script that
   correctly enforces its two design invariants: administrator authorization and time-locked
@@ -328,8 +399,9 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
   no exploitable edge cases at the deadline.
 </p>
 <p>
-  One low-severity griefing vector was found in the off-chain pool discovery logic and has
-  been remediated. The validator's deliberate omission of on-chain value preservation is
+  Two low-severity findings were identified and remediated: datum-less UTxO griefing in pool
+  discovery, and frankenaddress exposure across three address surfaces (pool, user,
+  quarantine). The validator's deliberate omission of on-chain value preservation is
   documented as a design decision with appropriate operational mitigations.
 </p>
 
