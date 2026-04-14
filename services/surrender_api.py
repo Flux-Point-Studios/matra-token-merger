@@ -249,6 +249,26 @@ def startup():
     else:
         logger.warning("Blueprint not found: %s — build-surrender will fail", BLUEPRINT_PATH)
 
+    # Validate script address has no staking credential (frankenaddress protection)
+    if SCRIPT_ADDRESS:
+        sa = Address.from_primitive(SCRIPT_ADDRESS)
+        if sa.staking_part is not None:
+            logger.warning(
+                "SURRENDER_SCRIPT_ADDRESS has a staking credential — "
+                "this may be a frankenaddress. Use an enterprise-type "
+                "script address (no staking key) to prevent staking reward theft."
+            )
+
+    # Validate quarantine address has no staking credential
+    if QUARANTINE_ADDRESS:
+        qa = Address.from_primitive(QUARANTINE_ADDRESS)
+        if qa.staking_part is not None:
+            logger.warning(
+                "QUARANTINE_ADDRESS has a staking credential — "
+                "whoever controls that staking key earns rewards on burned ADA. "
+                "Use an enterprise-type address to prevent this."
+            )
+
     # Admin signing key
     if ADMIN_SKEY_PATH and Path(ADMIN_SKEY_PATH).exists():
         state.admin_sk = PaymentSigningKey.load(ADMIN_SKEY_PATH)
@@ -323,6 +343,18 @@ def build_surrender(req: BuildSurrenderRequest):
     # Validate user address format
     if not req.user_address.startswith("addr1"):
         raise HTTPException(400, "Invalid Cardano mainnet address")
+
+    # Reject script-payment addresses — cMATRA must go to a key-controlled
+    # wallet, not another script.  Prevents sending funds to an address the
+    # user can't spend from (e.g. a frankenaddress with a script payment part).
+    try:
+        user_addr_check = Address.from_primitive(req.user_address)
+        if isinstance(user_addr_check.payment_part, PycScriptHash):
+            raise HTTPException(400, "User address must be a wallet address, not a script address")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Invalid Cardano address encoding")
 
     # Validate state
     if not state.rate_table:
