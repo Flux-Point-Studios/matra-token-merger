@@ -106,6 +106,10 @@ CORS_ORIGINS: list[str] = json.loads(
 
 API_PORT: int = int(os.environ.get("SURRENDER_API_PORT", "8420"))
 
+# Dedicated collateral UTxO — bounds max collateral loss on phase-2 failure.
+# Format: "txhash#index" (e.g. "abc123...#0"). If unset, pycardano auto-selects.
+COLLATERAL_UTXO: str = os.environ.get("COLLATERAL_UTXO", "")
+
 # Shared secret — the Next.js proxy must send this in X-API-Secret header.
 # Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
 API_SECRET: str = os.environ.get("SURRENDER_API_SECRET", "")
@@ -136,6 +140,11 @@ class AppState:
     # submitting txs whose hash is in this set.  Entries expire after 10 min.
     pending_tx_hashes: dict[str, float] = {}  # tx_hash_hex -> created_at
     TX_HASH_TTL: float = 600.0  # 10 minutes
+
+    # Pool UTxO reservation: prevents concurrent builds from targeting the
+    # same pool UTxO.  Maps "txhash#idx" -> expiry timestamp.
+    reserved_pool_utxos: dict[str, float] = {}
+    POOL_RESERVE_TTL: float = 120.0  # 2 minutes (enough for user to sign)
 
 
 state = AppState()
@@ -397,15 +406,19 @@ def build_surrender(req: BuildSurrenderRequest):
         )
         all_legacy_assets.extend(legacy)
 
-    # Find pool UTxO with sufficient balance
+    # Find pool UTxO with sufficient balance (skip reserved ones)
     pool_utxos = find_pool_utxos(
         state.bf, SCRIPT_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
     )
     if not pool_utxos:
         raise HTTPException(503, "No pool UTxOs available")
 
+    _prune_expired_reservations()
     selected_pool = None
     for pu in pool_utxos:
+        utxo_key = f"{pu['tx_hash']}#{pu['output_index']}"
+        if utxo_key in state.reserved_pool_utxos:
+            continue  # skip — another build is in-flight for this UTxO
         if pu["cmatra_amount"] >= total_cmatra:
             selected_pool = pu
             break
@@ -413,9 +426,13 @@ def build_surrender(req: BuildSurrenderRequest):
     if selected_pool is None:
         raise HTTPException(
             503,
-            f"No pool UTxO with sufficient balance. "
-            f"Need {total_cmatra}, largest has {pool_utxos[0]['cmatra_amount']}",
+            "No available pool UTxO with sufficient balance. "
+            "Another surrender may be in progress — please retry shortly.",
         )
+
+    # Reserve this pool UTxO so concurrent builds don't target it
+    pool_utxo_key = f"{selected_pool['tx_hash']}#{selected_pool['output_index']}"
+    state.reserved_pool_utxos[pool_utxo_key] = time.time()
 
     # Build the transaction
     try:
@@ -426,9 +443,24 @@ def build_surrender(req: BuildSurrenderRequest):
             pool_utxo=selected_pool,
         )
     except Exception as e:
-        # Log full details server-side, return generic message to client
+        # Release reservation on build failure
+        state.reserved_pool_utxos.pop(pool_utxo_key, None)
         logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed. Please try again.")
+
+    # Mandatory preflight: evaluate_tx against live ledger before returning
+    # to user.  Catches script errors before any collateral is at risk.
+    try:
+        preflight_ctx = BlockFrostChainContext(
+            project_id=state.bf.project_id,
+            base_url=state.bf.base_url,
+        )
+        preflight_ctx.evaluate_tx(bytes.fromhex(tx_cbor_hex))
+        logger.info("Preflight OK for tx %s", tx_hash[:16])
+    except Exception as e:
+        state.reserved_pool_utxos.pop(pool_utxo_key, None)
+        logger.error("Preflight FAILED for tx %s: %s", tx_hash[:16], e)
+        raise HTTPException(422, "Transaction preflight failed. Please retry.")
 
     # Register this tx hash so submit-surrender will accept it
     _prune_expired_tx_hashes()
@@ -502,8 +534,20 @@ def _build_cosigned_surrender_tx(
     user_addr = Address.from_primitive(user_address)
     builder.add_input_address(user_addr)
 
-    # Admin's address for collateral
+    # Admin's address for collateral + fee contribution
     builder.add_input_address(state.admin_addr)
+
+    # Use dedicated collateral UTxO if configured (limits max collateral loss)
+    if COLLATERAL_UTXO and "#" in COLLATERAL_UTXO:
+        col_hash, col_idx = COLLATERAL_UTXO.rsplit("#", 1)
+        col_input = TransactionInput(
+            TransactionId(bytes.fromhex(col_hash)), int(col_idx),
+        )
+        col_utxo = UTxO(
+            col_input,
+            TransactionOutput(state.admin_addr, Value(5_000_000)),  # 5 ADA
+        )
+        builder.collateral = [col_utxo]
 
     # Output 1: cMATRA to user
     user_multi = MultiAsset()
@@ -590,6 +634,15 @@ def _prune_expired_tx_hashes() -> None:
         del state.pending_tx_hashes[h]
 
 
+def _prune_expired_reservations() -> None:
+    """Remove expired pool UTxO reservations."""
+    now = time.time()
+    expired = [k for k, t in state.reserved_pool_utxos.items()
+               if now - t > state.POOL_RESERVE_TTL]
+    for k in expired:
+        del state.reserved_pool_utxos[k]
+
+
 @app.post("/submit-surrender", response_model=SubmitResponse)
 def submit_surrender(req: SubmitRequest):
     """Submit a fully-signed surrender transaction.
@@ -620,8 +673,9 @@ def submit_surrender(req: SubmitRequest):
 
     try:
         submitted_hash = state.bf.submit_tx(tx_bytes)
-        # Remove from pending after successful submission
+        # Remove from pending + release UTxO reservation after success
         state.pending_tx_hashes.pop(tx_hash_hex, None)
+        _prune_expired_reservations()
         logger.info("Submitted surrender tx: %s", submitted_hash)
         return SubmitResponse(tx_hash=submitted_hash)
     except Exception as e:

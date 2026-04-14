@@ -107,8 +107,13 @@ def _query_live_pool_utxos(
     pool_utxos: list[dict[str, Any]] = []
 
     for u in utxos:
-        # Skip datum-less UTxOs (griefing protection)
-        if not u.get("inline_datum") and not u.get("data_hash"):
+        # Only accept UTxOs with Void inline datum (Constr(0, []))
+        inline = u.get("inline_datum")
+        if not inline:
+            continue
+        if not (isinstance(inline, dict)
+                and inline.get("constructor") == 0
+                and inline.get("fields") == []):
             continue
 
         cmatra_qty = 0

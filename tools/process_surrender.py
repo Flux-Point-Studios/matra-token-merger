@@ -221,17 +221,24 @@ def find_pool_utxos(
         tx_hash = utxo.get("tx_hash", "")
         output_index = utxo.get("output_index", utxo.get("tx_index", 0))
 
-        # Skip UTxOs without a datum — the validator requires Some(Void).
-        # An attacker can send cMATRA to the script address without a datum
-        # to grief pool discovery; these UTxOs are unspendable on-chain
-        # and must be excluded here to avoid tx build failures.
-        has_datum = bool(
-            utxo.get("inline_datum") or utxo.get("data_hash")
-        )
-        if not has_datum:
+        # Only accept UTxOs with the correct Void inline datum.
+        # Void = Constr(0, []) = CBOR d87980.  Blockfrost returns the
+        # inline_datum as a JSON object: {"constructor": 0, "fields": []}.
+        # Reject: no datum, datum hash only (no inline), or wrong datum.
+        inline = utxo.get("inline_datum")
+        if not inline:
             logger.debug(
-                "Skipping datum-less UTxO %s#%d at script address",
+                "Skipping UTxO %s#%d — no inline datum",
                 tx_hash[:16], output_index,
+            )
+            continue
+        # Verify Void: constructor 0, empty fields
+        if not (isinstance(inline, dict)
+                and inline.get("constructor") == 0
+                and inline.get("fields") == []):
+            logger.debug(
+                "Skipping UTxO %s#%d — non-Void datum: %s",
+                tx_hash[:16], output_index, str(inline)[:80],
             )
             continue
 
