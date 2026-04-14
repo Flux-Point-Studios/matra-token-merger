@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>cMATRA Merger — Mainnet Validation Runbook</title>
+<style>
+  @page { size: A4; margin: 25mm 20mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #1a1a2e; line-height: 1.6; font-size: 11pt; }
+  .page { page-break-after: always; padding: 0; }
+  .page:last-child { page-break-after: avoid; }
+
+  .cover { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 90vh; text-align: center; }
+  .cover h1 { font-size: 28pt; font-weight: 700; color: #0a0a23; margin-bottom: 8px; letter-spacing: -0.5px; }
+  .cover h2 { font-size: 16pt; font-weight: 400; color: #555; margin-bottom: 40px; }
+  .cover-meta { font-size: 10pt; color: #777; line-height: 2; }
+  .cover-meta strong { color: #333; }
+  .cover-badge { display: inline-block; margin-top: 32px; padding: 10px 28px; background: #1976d2; color: #fff; font-weight: 700; font-size: 12pt; border-radius: 6px; letter-spacing: 0.5px; }
+
+  h2 { font-size: 16pt; color: #0a0a23; border-bottom: 2px solid #1976d2; padding-bottom: 6px; margin: 32px 0 16px; }
+  h3 { font-size: 12pt; color: #0a0a23; margin: 20px 0 10px; }
+  p { margin-bottom: 12px; text-align: justify; }
+  ul, ol { margin: 8px 0 16px 24px; }
+  li { margin-bottom: 6px; }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 10pt; }
+  th { background: #0a0a23; color: #fff; text-align: left; padding: 8px 12px; font-weight: 600; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+  tr:nth-child(even) { background: #f8f8fa; }
+
+  code { font-family: 'Consolas', 'Courier New', monospace; font-size: 10pt; background: #f0f0f5; padding: 1px 5px; border-radius: 3px; }
+  pre { font-family: 'Consolas', 'Courier New', monospace; font-size: 9.5pt; background: #1a1a2e; color: #e0e0e0; padding: 14px 18px; border-radius: 6px; margin: 12px 0 20px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; }
+  pre .comment { color: #6a9955; }
+  pre .flag { color: #9cdcfe; }
+
+  .infobox { border-left: 4px solid #1976d2; background: #eef5fc; padding: 12px 16px; margin: 16px 0; border-radius: 0 4px 4px 0; }
+  .infobox.green { border-left-color: #0d9e6e; background: #f0faf5; }
+  .infobox.orange { border-left-color: #e65100; background: #fff8f0; }
+  .infobox p { margin: 0; }
+
+  .level-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 9pt; color: #fff; margin-right: 8px; vertical-align: middle; }
+  .level-1 { background: #0d9e6e; }
+  .level-2 { background: #e65100; }
+  .level-3 { background: #d32f2f; }
+
+  .check { color: #0d9e6e; font-weight: 700; }
+  .pending { color: #e65100; font-weight: 700; }
+
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 9pt; color: #999; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!-- COVER PAGE                                                       -->
+<!-- ================================================================ -->
+<div class="page">
+<div class="cover">
+  <div style="font-size: 48pt; margin-bottom: 16px; font-weight: 700; color: #0a0a23;">&#9881;</div>
+  <h1>Mainnet Validation Runbook</h1>
+  <h2>cMATRA Token Merger Portal</h2>
+  <div class="cover-meta">
+    <strong>Prepared for:</strong> Flux Point Studios<br>
+    <strong>Date:</strong> April 14, 2026<br>
+    <strong>Version:</strong> 1.0<br>
+    <strong>Classification:</strong> Internal Operations<br>
+    <strong>Related:</strong> Security Audit Report (April 14, 2026)
+  </div>
+  <div class="cover-badge">PRE-LAUNCH VALIDATION</div>
+</div>
+</div>
+
+<!-- ================================================================ -->
+<!-- OVERVIEW                                                         -->
+<!-- ================================================================ -->
+<div class="page">
+<h2>1. Overview</h2>
+
+<p>
+  This document describes the three-level mainnet validation procedure for the cMATRA
+  Token Merger Portal. Each level increases in risk and realism, allowing the team to
+  build confidence that the full surrender pipeline works correctly on mainnet before
+  opening the redemption window to the public.
+</p>
+
+<table>
+  <tr>
+    <th style="width: 10%">Level</th>
+    <th style="width: 25%">Test</th>
+    <th style="width: 15%">Risk</th>
+    <th style="width: 50%">What It Proves</th>
+  </tr>
+  <tr>
+    <td><span class="level-badge level-1">1</span></td>
+    <td>Dry-run <code>evaluate_tx</code></td>
+    <td><strong style="color:#0d9e6e">Zero</strong></td>
+    <td>Plutus script executes against live mainnet UTxOs. Correct script hash, valid parameters, fees, UTxO references.</td>
+  </tr>
+  <tr>
+    <td><span class="level-badge level-2">2</span></td>
+    <td>Admin canary surrender</td>
+    <td><strong style="color:#e65100">Minimal</strong></td>
+    <td>Full end-to-end pipeline on mainnet: build, co-sign, submit, on-chain confirmation. Verifies cMATRA delivery, legacy quarantine, pool remainder.</td>
+  </tr>
+  <tr>
+    <td><span class="level-badge level-3">3</span></td>
+    <td>Portal wallet flow</td>
+    <td><strong style="color:#e65100">Minimal</strong></td>
+    <td>Full user experience: browser portal, CIP-30 wallet connect, scan, confirmation dialog, wallet signature, on-chain submission.</td>
+  </tr>
+</table>
+
+<div class="infobox">
+  <p><strong>Principle:</strong> Each level must pass before advancing to the next.
+  Level 1 failure means "do not touch mainnet." Level 2 failure means "do not open
+  the portal." Level 3 success means "ready for public launch."</p>
+</div>
+
+<h2>2. Prerequisites</h2>
+
+<p>The following must be completed before any mainnet validation can begin:</p>
+
+<table>
+  <tr>
+    <th style="width: 5%">#</th>
+    <th style="width: 45%">Prerequisite</th>
+    <th style="width: 30%">Verification</th>
+    <th style="width: 20%">Status</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td>Mint cMATRA on mainnet (1B supply, 6 decimals)</td>
+    <td>Verify token on Cardanoscan by policy ID</td>
+    <td class="pending">Pending</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Deploy surrender validator to mainnet<br><small>(compile with real admin PKH + deadline via <code>aiken blueprint apply</code>)</small></td>
+    <td>Verify script address on Cardanoscan</td>
+    <td class="pending">Pending</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>Fund pool UTxOs with cMATRA at script address (Void datums)</td>
+    <td>Query script address UTxOs via Blockfrost</td>
+    <td class="pending">Pending</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>Configure environment variables on service host</td>
+    <td>Service <code>/health</code> returns all-green</td>
+    <td class="pending">Pending</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>Security audit completed, all findings remediated</td>
+    <td>Security Audit Report v1.0</td>
+    <td class="check">Done</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td>Preprod rehearsal passed (9/9 stages)</td>
+    <td>Preprod rehearsal log</td>
+    <td class="check">Done</td>
+  </tr>
+</table>
+
+<h3>2.1 Required Environment Variables</h3>
+<pre>
+<span class="comment"># Python surrender service</span>
+ADMIN_SKEY_PATH=/secure/path/to/admin.skey
+SURRENDER_API_SECRET=&lt;generate: python -c "import secrets; print(secrets.token_urlsafe(32))"&gt;
+SURRENDER_SCRIPT_ADDRESS=addr1...
+CMATRA_POLICY_HEX=&lt;cMATRA minting policy hash&gt;
+CMATRA_ASSET_HEX=&lt;cMATRA asset name hex&gt;
+QUARANTINE_ADDRESS=addr1...
+
+<span class="comment"># Next.js (Vercel)</span>
+SURRENDER_API_URL=https://&lt;service-host&gt;:8420
+SURRENDER_API_SECRET=&lt;same value as above&gt;
+BLOCKFROST_PROJECT_ID=&lt;mainnet project ID&gt;
+</pre>
+
+</div>
+
+<!-- ================================================================ -->
+<!-- LEVEL 1                                                          -->
+<!-- ================================================================ -->
+<div class="page">
+<h2>3. Level 1 — Dry-Run Evaluation</h2>
+<p><span class="level-badge level-1">ZERO RISK</span> No transaction is submitted to the network.</p>
+
+<h3>3.1 What It Does</h3>
+<p>
+  Builds a complete surrender transaction using real mainnet UTxOs (the funded pool, the
+  user's address), then submits the serialized transaction to Blockfrost's
+  <code>evaluate_tx</code> endpoint. This endpoint runs the Plutus V3 script against the
+  live ledger state and returns execution units (CPU + memory) or a detailed error if the
+  script fails. The transaction is never broadcast to the network.
+</p>
+
+<h3>3.2 Procedure</h3>
+<pre>
+<span class="comment"># 1. Start the surrender API service</span>
+py -3.12 -m services.surrender_api
+
+<span class="comment"># 2. In a second terminal, run the canary script (evaluate only)</span>
+py -3.12 scripts/mainnet_canary.py \
+  <span class="flag">--address</span> addr1&lt;your_admin_wallet_address&gt; \
+  <span class="flag">--asset</span> AGENT \
+  <span class="flag">--qty</span> 1
+</pre>
+
+<h3>3.3 Expected Output</h3>
+<pre>
+HEALTH CHECK
+  All systems GO
+
+POOL STATUS
+  Pool has 3 UTxO(s), 818,659,262.01 cMATRA remaining
+
+LEVEL 1: EVALUATE (dry-run, zero risk)
+  Address:  addr1qx...
+  Asset:    AGENT
+  Quantity: 1
+  TX Hash:    a1b2c3d4...
+  cMATRA:     0.544576
+  Fee:        350000 lovelace (0.3500 ADA)
+  Evaluation: {spend:0: ExUnits(mem=..., steps=...)}
+
+  LEVEL 1 PASSED — Script evaluation succeeded on mainnet ledger
+</pre>
+
+<h3>3.4 Pass / Fail Criteria</h3>
+<table>
+  <tr><th>Outcome</th><th>Meaning</th><th>Action</th></tr>
+  <tr>
+    <td class="check">PASSED</td>
+    <td>Script evaluation returned execution units</td>
+    <td>Proceed to Level 2</td>
+  </tr>
+  <tr>
+    <td style="color:#d32f2f; font-weight:700">FAILED</td>
+    <td>Script evaluation returned an error</td>
+    <td>Do NOT proceed. Diagnose: wrong script params? Missing datum? Incorrect pool UTxO format? Fix and re-run.</td>
+  </tr>
+</table>
+
+<h2>4. Level 2 — Admin Canary Surrender</h2>
+<p><span class="level-badge level-2">MINIMAL RISK</span> A real transaction is submitted. Uses a trivially small amount.</p>
+
+<h3>4.1 What It Does</h3>
+<p>
+  Performs a real surrender of a tiny amount of legacy assets from the admin's own wallet.
+  The admin key acts as both the service signer and the user signer (self-test). The
+  transaction is submitted to the Cardano mainnet. After on-chain confirmation, the result
+  is verified: cMATRA received, legacy asset quarantined, pool remainder returned.
+</p>
+
+<div class="infobox orange">
+  <p><strong>Cost:</strong> Surrendering 1 AGENT costs approximately 0.35 ADA in fees and
+  permanently burns 1 AGENT token (worth fractions of a cent). The admin receives ~0.54
+  cMATRA in return. This is a real, irreversible transaction.</p>
+</div>
+
+<h3>4.2 Procedure</h3>
+<pre>
+<span class="comment"># Run with --submit flag (prompts for confirmation)</span>
+py -3.12 scripts/mainnet_canary.py \
+  <span class="flag">--address</span> addr1&lt;your_admin_wallet_address&gt; \
+  <span class="flag">--asset</span> AGENT \
+  <span class="flag">--qty</span> 1 \
+  <span class="flag">--submit</span>
+</pre>
+
+<h3>4.3 Post-Submission Verification</h3>
+<p>After the script reports success, verify on Cardanoscan:</p>
+<ol>
+  <li><strong>cMATRA output</strong> — The admin address received the correct cMATRA amount</li>
+  <li><strong>Quarantine output</strong> — 1 AGENT was sent to the quarantine address</li>
+  <li><strong>Pool remainder</strong> — The remaining pool balance was returned to the script address with a Void datum</li>
+  <li><strong>Fee</strong> — Transaction fee is reasonable (typically 0.3-0.5 ADA for a Plutus tx)</li>
+</ol>
+
+<h3>4.4 Pass / Fail Criteria</h3>
+<table>
+  <tr><th>Outcome</th><th>Meaning</th><th>Action</th></tr>
+  <tr>
+    <td class="check">PASSED</td>
+    <td>All four verification points confirmed on-chain</td>
+    <td>Proceed to Level 3</td>
+  </tr>
+  <tr>
+    <td style="color:#d32f2f; font-weight:700">FAILED</td>
+    <td>Submission rejected or outputs incorrect</td>
+    <td>Do NOT proceed. Investigate the on-chain result or error. The pool UTxO may need to be re-evaluated.</td>
+  </tr>
+</table>
+
+</div>
+
+<!-- ================================================================ -->
+<!-- LEVEL 3 + LAUNCH                                                 -->
+<!-- ================================================================ -->
+<div class="page">
+<h2>5. Level 3 — Portal Wallet Flow</h2>
+<p><span class="level-badge level-3">MINIMAL RISK</span> Full user-facing flow through the web portal with a real CIP-30 wallet.</p>
+
+<h3>5.1 What It Does</h3>
+<p>
+  A team member (admin or trusted tester) opens the merger portal in a browser, connects a
+  Cardano wallet (Eternl, Lace, Nami, etc.), and completes a surrender through the full
+  user interface. This validates the entire stack end-to-end: frontend rendering, wallet
+  integration, server-side scanning, co-signing flow, wallet signature prompt, and
+  on-chain submission.
+</p>
+
+<h3>5.2 Procedure</h3>
+<ol>
+  <li>Navigate to <code>fluxpointstudios.com/matra-merger</code></li>
+  <li>Enter the portal access password</li>
+  <li>Click "Connect Wallet" and select your Cardano wallet</li>
+  <li>Verify the scan results: correct assets and cMATRA amounts displayed</li>
+  <li>Click "Surrender All &amp; Receive cMATRA"</li>
+  <li>Review the confirmation dialog — verify it shows the correct total and irreversibility warning</li>
+  <li>Click "Confirm Surrender"</li>
+  <li>Approve the transaction in your wallet (review inputs/outputs in the wallet's tx preview)</li>
+  <li>Wait for on-chain confirmation</li>
+  <li>Verify the success state: tx hash link displayed, cMATRA in wallet</li>
+</ol>
+
+<h3>5.3 Verification Checklist</h3>
+<table>
+  <tr><th style="width:5%">#</th><th style="width:55%">Check</th><th style="width:20%">Expected</th><th style="width:20%">Result</th></tr>
+  <tr><td>1</td><td>Portal loads behind password gate</td><td>Yes</td><td></td></tr>
+  <tr><td>2</td><td>Wallet connects successfully</td><td>Yes</td><td></td></tr>
+  <tr><td>3</td><td>Asset scan shows correct balances</td><td>Matches wallet</td><td></td></tr>
+  <tr><td>4</td><td>Rate table matches published rates</td><td>Matches docs</td><td></td></tr>
+  <tr><td>5</td><td>Confirmation dialog shows amount + warning</td><td>Yes</td><td></td></tr>
+  <tr><td>6</td><td>Wallet signature prompt shows correct tx</td><td>Review outputs</td><td></td></tr>
+  <tr><td>7</td><td>Transaction submitted successfully</td><td>Tx hash shown</td><td></td></tr>
+  <tr><td>8</td><td>cMATRA arrived in wallet</td><td>Correct amount</td><td></td></tr>
+  <tr><td>9</td><td>Legacy assets at quarantine address</td><td>Cardanoscan</td><td></td></tr>
+  <tr><td>10</td><td>Pool remainder at script address</td><td>Cardanoscan</td><td></td></tr>
+</table>
+
+<h2>6. Launch Readiness Gate</h2>
+
+<p>The redemption window may be opened to the public when all of the following are true:</p>
+
+<div class="infobox green">
+<p>
+  <strong>Launch gate criteria:</strong><br>
+  &square; Level 1 passed (evaluate_tx dry-run)<br>
+  &square; Level 2 passed (admin canary surrender verified on-chain)<br>
+  &square; Level 3 passed (full portal flow with wallet co-sign)<br>
+  &square; Security audit — all findings remediated (April 14, 2026)<br>
+  &square; Preprod rehearsal — 9/9 stages passed<br>
+  &square; Rate table published and verified<br>
+  &square; Legacy reward materialization confirmed (or denominator adjusted)<br>
+  &square; Post-deadline policy documented<br>
+  &square; <code>WINDOW_OPEN = true</code> set in portal code and deployed
+</p>
+</div>
+
+<p>
+  Once all criteria are met, set <code>WINDOW_OPEN = true</code> in
+  <code>pages/matra-merger.tsx</code>, deploy, and announce the redemption window opening.
+</p>
+
+<div class="footer">
+  <p>cMATRA Token Merger — Mainnet Validation Runbook — April 14, 2026 — Flux Point Studios</p>
+</div>
+</div>
+
+</body>
+</html>

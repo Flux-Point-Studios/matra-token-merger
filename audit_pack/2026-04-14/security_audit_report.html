@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>cMATRA Token Merger — Security Audit Report</title>
+<style>
+  @page { size: A4; margin: 25mm 20mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #1a1a2e; line-height: 1.6; font-size: 11pt; }
+  .page { page-break-after: always; padding: 0; }
+  .page:last-child { page-break-after: avoid; }
+
+  /* Cover */
+  .cover { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 90vh; text-align: center; }
+  .cover-logo { width: 80px; height: 80px; border-radius: 50%; margin-bottom: 24px; }
+  .cover h1 { font-size: 28pt; font-weight: 700; color: #0a0a23; margin-bottom: 8px; letter-spacing: -0.5px; }
+  .cover h2 { font-size: 16pt; font-weight: 400; color: #555; margin-bottom: 40px; }
+  .cover-meta { font-size: 10pt; color: #777; line-height: 2; }
+  .cover-meta strong { color: #333; }
+  .cover-badge { display: inline-block; margin-top: 32px; padding: 10px 28px; background: #0d9e6e; color: #fff; font-weight: 700; font-size: 12pt; border-radius: 6px; letter-spacing: 0.5px; }
+
+  /* Section headers */
+  h2 { font-size: 16pt; color: #0a0a23; border-bottom: 2px solid #0d9e6e; padding-bottom: 6px; margin: 32px 0 16px; }
+  h3 { font-size: 12pt; color: #0a0a23; margin: 20px 0 10px; }
+
+  /* Body text */
+  p { margin-bottom: 12px; text-align: justify; }
+  ul, ol { margin: 8px 0 16px 24px; }
+  li { margin-bottom: 6px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 10pt; }
+  th { background: #0a0a23; color: #fff; text-align: left; padding: 8px 12px; font-weight: 600; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+  tr:nth-child(even) { background: #f8f8fa; }
+  .severity-critical { color: #d32f2f; font-weight: 700; }
+  .severity-high { color: #e65100; font-weight: 700; }
+  .severity-medium { color: #f9a825; font-weight: 600; }
+  .status-remediated { color: #0d9e6e; font-weight: 700; }
+
+  /* Info boxes */
+  .infobox { border-left: 4px solid #0d9e6e; background: #f0faf5; padding: 12px 16px; margin: 16px 0; border-radius: 0 4px 4px 0; }
+  .infobox.blue { border-left-color: #1976d2; background: #eef5fc; }
+  .infobox p { margin: 0; }
+
+  /* Footer */
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 9pt; color: #999; text-align: center; }
+
+  /* Print adjustments */
+  @media print {
+    body { font-size: 10pt; }
+    .page { page-break-after: always; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!-- COVER PAGE                                                       -->
+<!-- ================================================================ -->
+<div class="page">
+<div class="cover">
+  <div style="font-size: 48pt; margin-bottom: 16px; font-weight: 700; color: #0a0a23;">&#9878;</div>
+  <h1>Security Audit Report</h1>
+  <h2>cMATRA Token Merger Portal</h2>
+  <div class="cover-meta">
+    <strong>Prepared for:</strong> Flux Point Studios<br>
+    <strong>Date:</strong> April 14, 2026<br>
+    <strong>Version:</strong> 1.0<br>
+    <strong>Classification:</strong> Public<br>
+    <strong>Scope:</strong> Merger portal web application, backend services, on-chain validator
+  </div>
+  <div class="cover-badge">ALL FINDINGS REMEDIATED</div>
+</div>
+</div>
+
+<!-- ================================================================ -->
+<!-- EXECUTIVE SUMMARY                                                -->
+<!-- ================================================================ -->
+<div class="page">
+<h2>1. Executive Summary</h2>
+
+<p>
+  A comprehensive security audit was conducted on the cMATRA Token Merger Portal — the web
+  application through which holders of eligible legacy Cardano assets (AGENT, SHARDS, and five
+  NFT collections) surrender those assets in exchange for cMATRA at fixed, published redemption
+  rates. The audit covered the full technology stack: the user-facing frontend, server-side API
+  layer, backend transaction-building service, and the on-chain Plutus V3 smart contract (Aiken).
+</p>
+
+<p>
+  <strong>Six findings were identified</strong> across critical, high, and medium severity levels.
+  All six have been fully remediated and verified prior to the publication of this report. No
+  outstanding vulnerabilities remain at the time of writing.
+</p>
+
+<div class="infobox">
+  <p><strong>Overall Assessment:</strong> The cMATRA Merger Portal is ready for public launch.
+  The on-chain validator enforces authorization and time-based access control. The backend
+  service implements defense-in-depth with authenticated endpoints, transaction tracking,
+  strict input validation, and rate limiting. The frontend provides clear, irreversible-action
+  safeguards for users.</p>
+</div>
+
+<h2>2. Scope &amp; Methodology</h2>
+
+<h3>2.1 Components Audited</h3>
+<table>
+  <tr><th>Component</th><th>Technology</th><th>Description</th></tr>
+  <tr><td>Frontend Portal</td><td>Next.js / React / TypeScript</td><td>Password-gated single-page application with CIP-30 wallet integration</td></tr>
+  <tr><td>API Proxy Layer</td><td>Next.js API Routes</td><td>Server-side routes that mediate between frontend and backend service</td></tr>
+  <tr><td>Transaction Service</td><td>Python / FastAPI / pycardano</td><td>Builds and co-signs surrender transactions; manages pool UTxO selection</td></tr>
+  <tr><td>On-Chain Validator</td><td>Aiken (Plutus V3)</td><td>Parameterized spend validator enforcing authorization and time-lock</td></tr>
+  <tr><td>Rate &amp; Config Layer</td><td>TypeScript / Python</td><td>Fixed rate table, asset registry, and redemption computation</td></tr>
+</table>
+
+<h3>2.2 Methodology</h3>
+<p>The audit followed a threat-model-driven approach:</p>
+<ol>
+  <li><strong>Attack surface mapping</strong> — identified all entry points, data flows, trust boundaries, and privileged operations across the full stack.</li>
+  <li><strong>Cardano-specific analysis</strong> — reviewed the Aiken validator for common Plutus vulnerabilities (double satisfaction, datum hijacking, redeemer confusion, value preservation, time-lock bypass).</li>
+  <li><strong>Web application analysis</strong> — evaluated API routes for injection, authentication bypass, information disclosure, rate-limit evasion, and CORS misconfiguration.</li>
+  <li><strong>Co-signing flow analysis</strong> — traced the two-party transaction lifecycle for CBOR manipulation, replay attacks, and signature scope issues.</li>
+  <li><strong>Remediation and verification</strong> — all findings were fixed in code, type-checked, and retested before this report was finalized.</li>
+</ol>
+
+<h2>3. Findings Summary</h2>
+
+<table>
+  <tr>
+    <th style="width:5%">#</th>
+    <th style="width:12%">Severity</th>
+    <th style="width:53%">Finding</th>
+    <th style="width:15%">Category</th>
+    <th style="width:15%">Status</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td class="severity-critical">Critical</td>
+    <td>Internal service authentication</td>
+    <td>Auth / Access</td>
+    <td class="status-remediated">Remediated</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td class="severity-critical">Critical</td>
+    <td>Transaction submission controls</td>
+    <td>Auth / Integrity</td>
+    <td class="status-remediated">Remediated</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td class="severity-high">High</td>
+    <td>User confirmation for irreversible actions</td>
+    <td>UX Safety</td>
+    <td class="status-remediated">Remediated</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td class="severity-high">High</td>
+    <td>Input validation and size controls</td>
+    <td>Validation / DoS</td>
+    <td class="status-remediated">Remediated</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td class="severity-medium">Medium</td>
+    <td>Information disclosure in error responses</td>
+    <td>Info Leak</td>
+    <td class="status-remediated">Remediated</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td class="severity-medium">Medium</td>
+    <td>API credential isolation</td>
+    <td>Secrets Mgmt</td>
+    <td class="status-remediated">Remediated</td>
+  </tr>
+</table>
+
+</div>
+
+<!-- ================================================================ -->
+<!-- DETAILED FINDINGS                                                -->
+<!-- ================================================================ -->
+<div class="page">
+<h2>4. Finding Details</h2>
+
+<h3>Finding 1 — Internal Service Authentication <span class="severity-critical">[Critical]</span></h3>
+<p>
+  The backend transaction-building service lacked authentication. Any process able to
+  reach the service could invoke privileged endpoints. A shared-secret authentication
+  mechanism was implemented: all mutating requests now require a cryptographically random
+  API secret transmitted via a dedicated header. Requests without a valid secret are
+  rejected before reaching any business logic. Read-only health and status endpoints
+  remain accessible for monitoring.
+</p>
+
+<h3>Finding 2 — Transaction Submission Controls <span class="severity-critical">[Critical]</span></h3>
+<p>
+  The transaction submission endpoint accepted arbitrary serialized transaction data for
+  on-chain submission. While the on-chain validator prevents unauthorized fund movement,
+  the endpoint could be used to relay unrelated transactions through the project's
+  infrastructure. A server-side transaction registry was implemented: only transactions
+  previously built by the service (identified by hash, with a time-limited validity
+  window) are accepted for submission. Unrecognized transactions are rejected.
+</p>
+
+<h3>Finding 3 — User Confirmation for Irreversible Actions <span class="severity-high">[High]</span></h3>
+<p>
+  The surrender action — which permanently and irreversibly removes legacy assets from
+  the user's wallet — was initiated with a single button click and no confirmation step.
+  A two-phase confirmation flow was implemented: users first see the action button, then
+  a clearly marked warning panel stating the action is irreversible, displaying the exact
+  amount of cMATRA to be received, and requiring an explicit "Confirm Surrender" click
+  (with a "Cancel" option) before the transaction is initiated.
+</p>
+
+<h3>Finding 4 — Input Validation and Size Controls <span class="severity-high">[High]</span></h3>
+<p>
+  Several API endpoints accepted inputs without sufficient validation of format, length,
+  or size. Oversized payloads or malformed inputs could cause unnecessary resource
+  consumption. Comprehensive validation was added at every layer:
+</p>
+<ul>
+  <li>Cardano address validation: prefix, character set (bech32), and length bounds</li>
+  <li>Transaction CBOR: maximum size limit, hexadecimal format enforcement</li>
+  <li>Asset lists: capped at the maximum number of eligible merger assets</li>
+  <li>Pydantic model constraints on the backend service enforce all of the above server-side</li>
+</ul>
+
+<h3>Finding 5 — Information Disclosure in Error Responses <span class="severity-medium">[Medium]</span></h3>
+<p>
+  Error responses from the transaction-building service included raw exception messages
+  that could reveal internal file paths, library versions, or configuration details.
+  Error handling was updated to log full diagnostic information server-side while
+  returning only generic, user-safe error messages to API callers.
+</p>
+
+<h3>Finding 6 — API Credential Isolation <span class="severity-medium">[Medium]</span></h3>
+<p>
+  A blockchain data provider API key had a fallback configuration path that could
+  result in the key being bundled into client-side JavaScript. The fallback was
+  removed; the key is now exclusively resolved from server-only environment
+  variables, ensuring it is never exposed to the browser.
+</p>
+
+<h2>5. On-Chain Validator Security</h2>
+
+<p>The surrender pool validator is a parameterized Plutus V3 spend script written in Aiken. It enforces two invariants:</p>
+
+<ol>
+  <li><strong>Authorization</strong> — Every pool UTxO spend requires a cryptographic signature from the designated administrator key (verified via <code>extra_signatories</code>).</li>
+  <li><strong>Time-lock</strong> — During the redemption window, only <em>ProcessSurrender</em> operations are permitted (transaction validity must fall entirely before the deadline). After the window closes, the administrator may reclaim remaining funds via <em>AdminWithdraw</em> (validity must fall entirely after the deadline).</li>
+</ol>
+
+<div class="infobox blue">
+  <p><strong>Validator test coverage:</strong> The validator includes on-chain unit tests
+  for all six combinations of signer (admin / non-admin) &times; timing (before / after deadline)
+  &times; redeemer (ProcessSurrender / AdminWithdraw), plus a datum-robustness test. All pass.
+  A separate red-team test suite exercises these scenarios against a deployed preprod instance.</p>
+</div>
+
+<p>
+  Cardano's extended UTxO model provides inherent protection against several classes of attack:
+  each UTxO can only be spent once per transaction, preventing double-spend and replay attacks.
+  Transaction outputs are deterministic — any modification to amounts, addresses, or metadata
+  invalidates all existing signatures, making transaction tampering infeasible.
+</p>
+
+</div>
+
+<!-- ================================================================ -->
+<!-- CO-SIGNING FLOW + CONCLUSION                                     -->
+<!-- ================================================================ -->
+<div class="page">
+<h2>6. Two-Party Co-Signing Flow</h2>
+
+<p>The merger portal uses a two-party co-signing architecture for surrender transactions:</p>
+
+<ol>
+  <li>The user connects a CIP-30 compatible Cardano wallet and the portal scans for eligible legacy assets via server-side blockchain queries.</li>
+  <li>The user initiates a surrender. The server builds the full transaction (pool input, user outputs, quarantine routing) and signs it with the administrator key.</li>
+  <li>The partially-signed transaction is returned to the frontend. The user's wallet displays the transaction details for review and adds the user's signature.</li>
+  <li>The fully-signed transaction is submitted to the Cardano network.</li>
+</ol>
+
+<p>This design ensures that:</p>
+<ul>
+  <li><strong>The user retains custody at all times.</strong> Legacy assets are spent directly from the user's wallet in a single atomic transaction — they are never transferred to an intermediary.</li>
+  <li><strong>The user can review before signing.</strong> The wallet displays the full transaction (what leaves, what arrives) before requesting approval.</li>
+  <li><strong>Neither party can act alone.</strong> The server cannot move user funds (lacks user signature). The user cannot drain the pool (lacks admin signature and on-chain authorization).</li>
+  <li><strong>Transactions are tamper-proof.</strong> Modifying any field (amounts, recipients, assets) after the server signs invalidates the server's signature and the on-chain validator rejects the transaction.</li>
+</ul>
+
+<h2>7. Additional Security Controls</h2>
+
+<table>
+  <tr><th>Control</th><th>Description</th></tr>
+  <tr><td>Rate Limiting</td><td>All API endpoints enforce per-IP request rate limits to prevent abuse and resource exhaustion.</td></tr>
+  <tr><td>CORS Policy</td><td>Cross-origin requests are restricted to the official Flux Point Studios domain.</td></tr>
+  <tr><td>Access Gating</td><td>The portal is gated behind an access credential during the pre-launch phase, limiting exposure during testing.</td></tr>
+  <tr><td>Search Engine Exclusion</td><td>The portal page includes <code>noindex, nofollow</code> directives to prevent premature indexing.</td></tr>
+  <tr><td>Server-Side Scanning</td><td>Wallet asset scanning is performed server-side to keep blockchain API credentials out of client code.</td></tr>
+  <tr><td>Fixed Rate Table</td><td>Redemption rates are fixed at publication and cannot be altered during the 6-month window, preventing rate manipulation.</td></tr>
+  <tr><td>Preprod Rehearsal</td><td>The full surrender flow was rehearsed on Cardano preprod testnet (9/9 stages passed) including red-team scenarios.</td></tr>
+</table>
+
+<h2>8. Conclusion</h2>
+
+<p>
+  The cMATRA Token Merger Portal has undergone a thorough security review covering the full
+  technology stack — from the on-chain Plutus V3 validator through the backend transaction
+  service to the user-facing web application. Six findings were identified and all six have
+  been remediated.
+</p>
+
+<p>
+  The system implements defense-in-depth: the on-chain validator enforces cryptographic
+  authorization and time-lock controls; the backend service authenticates callers, tracks
+  transaction integrity, validates all inputs, and limits request rates; and the frontend
+  provides clear warnings and requires explicit confirmation before irreversible actions.
+</p>
+
+<div class="infobox">
+  <p><strong>Assessment:</strong> All identified vulnerabilities have been resolved. The cMATRA
+  Merger Portal meets the security requirements for public launch.</p>
+</div>
+
+<div class="footer">
+  <p>cMATRA Token Merger Security Audit &mdash; April 14, 2026 &mdash; Flux Point Studios &mdash; Public Release</p>
+</div>
+</div>
+
+</body>
+</html>

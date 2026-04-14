@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>cMATRA Surrender Pool — Smart Contract Audit</title>
+<style>
+  @page { size: A4; margin: 25mm 20mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #1a1a2e; line-height: 1.6; font-size: 11pt; }
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: avoid; }
+
+  .cover { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 90vh; text-align: center; }
+  .cover h1 { font-size: 28pt; font-weight: 700; color: #0a0a23; margin-bottom: 8px; }
+  .cover h2 { font-size: 16pt; font-weight: 400; color: #555; margin-bottom: 40px; }
+  .cover-meta { font-size: 10pt; color: #777; line-height: 2; }
+  .cover-meta strong { color: #333; }
+  .cover-badge { display: inline-block; margin-top: 32px; padding: 10px 28px; background: #0d9e6e; color: #fff; font-weight: 700; font-size: 12pt; border-radius: 6px; }
+
+  h2 { font-size: 16pt; color: #0a0a23; border-bottom: 2px solid #6a1b9a; padding-bottom: 6px; margin: 32px 0 16px; }
+  h3 { font-size: 12pt; color: #0a0a23; margin: 20px 0 10px; }
+  p { margin-bottom: 12px; text-align: justify; }
+  ul, ol { margin: 8px 0 16px 24px; }
+  li { margin-bottom: 6px; }
+  code { font-family: 'Consolas', 'Courier New', monospace; font-size: 10pt; background: #f0f0f5; padding: 1px 5px; border-radius: 3px; }
+  pre { font-family: 'Consolas', 'Courier New', monospace; font-size: 9.5pt; background: #1a1a2e; color: #e0e0e0; padding: 14px 18px; border-radius: 6px; margin: 12px 0 20px; white-space: pre-wrap; word-wrap: break-word; line-height: 1.5; }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 10pt; }
+  th { background: #0a0a23; color: #fff; text-align: left; padding: 8px 12px; font-weight: 600; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+  tr:nth-child(even) { background: #f8f8fa; }
+
+  .secure { color: #0d9e6e; font-weight: 700; }
+  .low { color: #f9a825; font-weight: 600; }
+  .info { color: #1976d2; font-weight: 600; }
+  .design { color: #6a1b9a; font-weight: 600; }
+
+  .infobox { border-left: 4px solid #6a1b9a; background: #f5f0fa; padding: 12px 16px; margin: 16px 0; border-radius: 0 4px 4px 0; }
+  .infobox.green { border-left-color: #0d9e6e; background: #f0faf5; }
+  .infobox p { margin: 0; }
+  .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #ddd; font-size: 9pt; color: #999; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="page">
+<div class="cover">
+  <div style="font-size: 48pt; margin-bottom: 16px; font-weight: 700; color: #0a0a23;">&#128737;</div>
+  <h1>Smart Contract Audit</h1>
+  <h2>cMATRA Surrender Pool Validator</h2>
+  <div class="cover-meta">
+    <strong>Prepared for:</strong> Flux Point Studios<br>
+    <strong>Date:</strong> April 14, 2026<br>
+    <strong>Version:</strong> 1.0<br>
+    <strong>Classification:</strong> Public<br>
+    <strong>Language:</strong> Aiken 1.1.21 / Plutus V3 / stdlib 2.2.0<br>
+    <strong>Scope:</strong> On-chain spend validator + off-chain transaction building
+  </div>
+  <div class="cover-badge">NO CRITICAL OR HIGH FINDINGS</div>
+</div>
+</div>
+
+<!-- EXECUTIVE SUMMARY -->
+<div class="page">
+<h2>1. Executive Summary</h2>
+<p>
+  A line-by-line security audit was conducted on the cMATRA surrender pool validator — a
+  parameterized Plutus V3 spend script written in Aiken that governs a pool of cMATRA tokens
+  on the Cardano blockchain. The validator controls approximately 818 million cMATRA during a
+  6-month public redemption window.
+</p>
+<p>
+  The audit analyzed 12 distinct attack vectors covering the on-chain validator logic, the
+  Aiken standard library functions it depends on, and the off-chain transaction-building code
+  that interacts with it. <strong>No critical or high severity vulnerabilities were found.</strong>
+  One low-severity griefing vector in off-chain pool discovery was identified and remediated.
+  The remaining findings are informational (design-level observations) or confirmed secure.
+</p>
+
+<div class="infobox green">
+  <p><strong>Overall Assessment:</strong> The surrender pool validator is correctly implemented.
+  Authorization and time-lock controls are enforced without exploitable gaps. The Aiken
+  stdlib interval functions behave as expected with clean boundary semantics. The validator
+  is suitable for mainnet deployment.</p>
+</div>
+
+<h2>2. Validator Overview</h2>
+
+<h3>2.1 Architecture</h3>
+<p>
+  The surrender pool validator is a parameterized spend validator. Pool UTxOs at the script
+  address hold cMATRA tokens with Void (unit) inline datums. The validator enforces two
+  invariants for every pool UTxO spend:
+</p>
+<ol>
+  <li><strong>Authorization:</strong> The designated administrator's verification key hash must appear in the transaction's required signers.</li>
+  <li><strong>Time control:</strong> The transaction's validity range must fall entirely within the correct window — before the deadline for surrender processing, or after the deadline for pool withdrawal.</li>
+</ol>
+
+<h3>2.2 Parameters</h3>
+<table>
+  <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+  <tr><td><code>admin_pkh</code></td><td>Blake2b-224 hash (28 bytes)</td><td>Administrator verification key hash, baked in at compile time</td></tr>
+  <tr><td><code>deadline</code></td><td>POSIX milliseconds (Int)</td><td>End of the surrender window, baked in at compile time</td></tr>
+</table>
+
+<h3>2.3 Spending Paths</h3>
+<table>
+  <tr><th>Redeemer</th><th>Conditions</th><th>Purpose</th></tr>
+  <tr>
+    <td><code>ProcessSurrender</code></td>
+    <td>Admin signed AND validity range entirely before deadline</td>
+    <td>Process a user's asset surrender during the open window</td>
+  </tr>
+  <tr>
+    <td><code>AdminWithdraw</code></td>
+    <td>Admin signed AND validity range entirely after deadline</td>
+    <td>Reclaim remaining pool balance after the window closes</td>
+  </tr>
+</table>
+
+<h3>2.4 Validator Source</h3>
+<pre>
+validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
+  spend(datum: Option&lt;Void&gt;, redeemer: SurrenderAction, _own_ref: OutputReference, tx: Transaction) {
+    expect Some(_) = datum
+    let admin_signed = list.has(tx.extra_signatories, admin_pkh)
+
+    when redeemer is {
+      ProcessSurrender -&gt;
+        admin_signed &amp;&amp; is_entirely_before(tx.validity_range, deadline)
+      AdminWithdraw -&gt;
+        admin_signed &amp;&amp; is_entirely_after(tx.validity_range, deadline)
+    }
+  }
+
+  else(_) { fail }
+}
+</pre>
+
+<h2>3. Findings Summary</h2>
+<table>
+  <tr>
+    <th style="width:5%">#</th>
+    <th style="width:12%">Severity</th>
+    <th style="width:48%">Finding</th>
+    <th style="width:15%">Location</th>
+    <th style="width:20%">Status</th>
+  </tr>
+  <tr>
+    <td>1</td><td class="low">Low</td>
+    <td>Datum-less UTxO griefing in off-chain pool discovery</td>
+    <td>Off-chain</td>
+    <td class="secure">Remediated</td>
+  </tr>
+  <tr>
+    <td>2</td><td class="design">Design</td>
+    <td>No on-chain value preservation (admin discretion by design)</td>
+    <td>On-chain</td>
+    <td class="info">Accepted</td>
+  </tr>
+  <tr>
+    <td>3–12</td><td class="secure">Secure</td>
+    <td>Double satisfaction, deadline boundaries, unbounded ranges, authorization, datum robustness, multi-validator, reference scripts, parameters, PKH collision, concurrency</td>
+    <td>On-chain</td>
+    <td class="secure">Verified</td>
+  </tr>
+</table>
+</div>
+
+<!-- DETAILED FINDINGS -->
+<div class="page">
+<h2>4. Detailed Findings</h2>
+
+<h3>Finding 1 — Datum-less UTxO Griefing <span class="low">[Low]</span></h3>
+<p>
+  The on-chain validator correctly requires a datum via <code>expect Some(_) = datum</code>,
+  making datum-less UTxOs unspendable. However, anyone can send cMATRA to the script address
+  without attaching a datum. The off-chain pool discovery code did not check for datum
+  presence, meaning it could select these poisoned UTxOs for transaction building, causing
+  avoidable failures.
+</p>
+<p>
+  <strong>Remediation:</strong> Pool discovery now filters out UTxOs that lack both
+  <code>inline_datum</code> and <code>data_hash</code>. Datum-less UTxOs are logged and
+  skipped. The fix was applied to all three locations that query pool UTxOs:
+  the core tool, the red-team suite, and the API service.
+</p>
+
+<h3>Finding 2 — No On-Chain Value Preservation <span class="design">[Design]</span></h3>
+<p>
+  The validator does not enforce output constraints: it does not check that cMATRA is sent to
+  the correct recipient, that legacy assets are routed to quarantine, or that the remaining
+  pool balance is returned to the script address. The administrator has full discretion over
+  how pool funds are routed in any transaction that passes the authorization and timing checks.
+</p>
+<p>
+  This is a deliberate design decision. Redemption rate enforcement occurs off-chain in the
+  transaction-building service, which computes cMATRA amounts from a fixed rate table and
+  constructs outputs accordingly. The validator's role is restricted to authorization and
+  time-lock — it gates <em>who</em> can spend and <em>when</em>, while the off-chain service
+  determines <em>how</em>.
+</p>
+<div class="infobox">
+  <p><strong>Risk profile:</strong> If the administrator signing key is compromised, the
+  attacker could drain the entire pool by building arbitrary transactions. This risk is
+  inherent to the architecture and is mitigated through operational security of the key
+  and the host environment, rate limiting, and the API authentication layer added during
+  the portal security audit.</p>
+</div>
+
+<h2>5. Attack Vector Analysis</h2>
+
+<h3>5.1 Double Satisfaction</h3>
+<p class="secure">SECURE</p>
+<p>
+  When multiple pool UTxOs are consumed in a single transaction, the validator executes once
+  per input. Each invocation checks the same transaction context (same admin signature, same
+  validity range). Since only the administrator can construct valid transactions, and
+  modifying any transaction output invalidates the administrator's signature, an attacker
+  cannot exploit multi-input transactions to extract additional value.
+</p>
+
+<h3>5.2 Deadline Boundary Semantics</h3>
+<p class="secure">SECURE</p>
+<p>
+  The Aiken stdlib functions <code>is_entirely_before</code> and <code>is_entirely_after</code>
+  were traced through their source code. The analysis confirms that there is a clean dead zone
+  at the exact deadline boundary: a transaction whose validity range includes the deadline
+  moment is rejected by <em>both</em> paths. There is no overlap and no gap between the two
+  windows.
+</p>
+<table>
+  <tr><th>Validity Range</th><th>ProcessSurrender</th><th>AdminWithdraw</th></tr>
+  <tr><td>Upper bound = deadline &minus; 1 (inclusive)</td><td class="secure">Allowed</td><td>Rejected</td></tr>
+  <tr><td>Upper bound = deadline (inclusive)</td><td>Rejected</td><td>Rejected</td></tr>
+  <tr><td>Lower bound = deadline (inclusive)</td><td>Rejected</td><td>Rejected</td></tr>
+  <tr><td>Lower bound = deadline + 1 (inclusive)</td><td>Rejected</td><td class="secure">Allowed</td></tr>
+  <tr><td>Unbounded (&minus;inf, +inf)</td><td>Rejected</td><td>Rejected</td></tr>
+</table>
+
+<h3>5.3 Authorization Model</h3>
+<p class="secure">SECURE</p>
+<p>
+  The validator checks for <code>admin_pkh</code> in <code>tx.extra_signatories</code>. The
+  Cardano ledger enforces that every public key hash listed in <code>required_signers</code>
+  (which populates <code>extra_signatories</code>) has a corresponding verification key
+  witness in the transaction. There is no mechanism to spoof this without possession of the
+  administrator's private key.
+</p>
+</div>
+
+<!-- REMAINING VECTORS + CONCLUSION -->
+<div class="page">
+<h3>5.4 Datum Robustness</h3>
+<p class="secure">SECURE</p>
+<p>
+  The <code>expect Some(_) = datum</code> pattern requires an inline datum to be present.
+  UTxOs sent to the script address without a datum are unspendable by the validator. This is
+  enforced at the Plutus level and cannot be bypassed.
+</p>
+
+<h3>5.5 Non-Spend Purpose Rejection</h3>
+<p class="secure">SECURE</p>
+<p>
+  The <code>else(_) { fail }</code> catch-all rejects any non-spend execution purpose
+  (minting, certifying, withdrawing, voting, proposing). The validator's script hash cannot
+  be leveraged to authorize operations outside of its intended scope.
+</p>
+
+<h3>5.6 Reference Script Substitution</h3>
+<p class="secure">SECURE</p>
+<p>
+  The script address is derived from the hash of the compiled bytecode, which includes the
+  baked-in <code>admin_pkh</code> and <code>deadline</code> parameters. Substituting a
+  different script or parameters would produce a different address. UTxOs at the correct
+  address can only be spent by the correct script.
+</p>
+
+<h3>5.7 Parameter Immutability</h3>
+<p class="secure">SECURE</p>
+<p>
+  Parameters are applied at compile time via <code>aiken blueprint apply</code> and embedded
+  in the CBOR bytecode. They cannot be altered post-deployment. Changing parameters generates
+  a new script with a new hash and address.
+</p>
+
+<h3>5.8 Concurrency</h3>
+<p class="info">ACCEPTABLE</p>
+<p>
+  The eUTxO model ensures that each pool UTxO can only be consumed by one transaction.
+  Concurrent users targeting the same UTxO will see one succeed and the other receive a
+  retryable error. For higher throughput, the pool can be distributed across multiple UTxOs
+  (the off-chain code already supports multi-UTxO selection).
+</p>
+
+<h2>6. Test Coverage</h2>
+
+<table>
+  <tr>
+    <th style="width:8%">Source</th>
+    <th style="width:8%">Tests</th>
+    <th style="width:84%">Coverage</th>
+  </tr>
+  <tr>
+    <td>On-chain</td>
+    <td>7</td>
+    <td>Admin ProcessSurrender, post-deadline ProcessSurrender (fail), pre-deadline AdminWithdraw (fail), post-deadline AdminWithdraw, non-admin ProcessSurrender (fail), non-admin AdminWithdraw (fail), missing datum (fail)</td>
+  </tr>
+  <tr>
+    <td>Red-team</td>
+    <td>8</td>
+    <td>All on-chain tests + wrong redeemer data (fail), fabricated UTxO (fail), admin happy-path ProcessSurrender, admin happy-path AdminWithdraw. Executed against live preprod deployment.</td>
+  </tr>
+  <tr>
+    <td>Preprod</td>
+    <td>9 stages</td>
+    <td>Full lifecycle: wallet creation, cMATRA minting, pool deployment, user surrender, red-team attacks, admin withdrawal. 9/9 stages passed.</td>
+  </tr>
+</table>
+
+<h2>7. Conclusion</h2>
+<p>
+  The cMATRA surrender pool validator is a minimal, well-scoped Plutus V3 script that
+  correctly enforces its two design invariants: administrator authorization and time-locked
+  spending windows. The Aiken stdlib interval functions provide clean boundary semantics with
+  no exploitable edge cases at the deadline.
+</p>
+<p>
+  One low-severity griefing vector was found in the off-chain pool discovery logic and has
+  been remediated. The validator's deliberate omission of on-chain value preservation is
+  documented as a design decision with appropriate operational mitigations.
+</p>
+
+<div class="infobox green">
+  <p><strong>Assessment:</strong> The surrender pool validator is correctly implemented and
+  suitable for mainnet deployment. No critical, high, or medium severity vulnerabilities
+  were identified.</p>
+</div>
+
+<div class="footer">
+  <p>cMATRA Surrender Pool — Smart Contract Audit &mdash; April 14, 2026 &mdash; Flux Point Studios &mdash; Public Release</p>
+</div>
+</div>
+
+</body>
+</html>

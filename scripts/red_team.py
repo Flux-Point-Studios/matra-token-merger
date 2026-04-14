@@ -107,6 +107,10 @@ def _query_live_pool_utxos(
     pool_utxos: list[dict[str, Any]] = []
 
     for u in utxos:
+        # Skip datum-less UTxOs (griefing protection)
+        if not u.get("inline_datum") and not u.get("data_hash"):
+            continue
+
         cmatra_qty = 0
         ada_qty = 0
         for amt in u.get("amount", []):

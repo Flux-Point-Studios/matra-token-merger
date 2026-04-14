@@ -221,6 +221,20 @@ def find_pool_utxos(
         tx_hash = utxo.get("tx_hash", "")
         output_index = utxo.get("output_index", utxo.get("tx_index", 0))
 
+        # Skip UTxOs without a datum — the validator requires Some(Void).
+        # An attacker can send cMATRA to the script address without a datum
+        # to grief pool discovery; these UTxOs are unspendable on-chain
+        # and must be excluded here to avoid tx build failures.
+        has_datum = bool(
+            utxo.get("inline_datum") or utxo.get("data_hash")
+        )
+        if not has_datum:
+            logger.debug(
+                "Skipping datum-less UTxO %s#%d at script address",
+                tx_hash[:16], output_index,
+            )
+            continue
+
         cmatra_amount = 0
         ada_amount = 0
 
