@@ -1,4 +1,4 @@
-/// Surrender Pool Validator (Parameterized)
+/// Surrender Pool Validator (Dual-Signer, Parameterized)
 ///
 /// Location: onchain/claim_validator/validators/claim_validator.ak
 ///
@@ -7,23 +7,22 @@
 /// requests during a 6-month window, then reclaims any remaining pool balance
 /// after the deadline expires.
 ///
-/// This file replaces the previous per-claimant claim validator. Instead of
-/// per-user datums, pool UTxOs use Void (unit) datums — the pool is fungible,
-/// and the admin orchestrates all spending.
+/// DUAL-SIGNER MODEL: Two separate admin keys must both sign every pool spend.
+/// This eliminates the single-point-of-failure risk — compromising one server
+/// does not grant the ability to drain the pool.  The keys are intended to
+/// reside on separate infrastructure (Server A builds + signs, Server B
+/// co-signs via authenticated API call).
 ///
 /// Parameters (applied at compile time via `aiken blueprint apply`):
-///   - admin_pkh:  VerificationKeyHash of the admin wallet
-///   - deadline:   POSIX milliseconds after which admin may withdraw remaining pool
+///   - admin_pkh_1:  VerificationKeyHash of the primary admin key (Server A)
+///   - admin_pkh_2:  VerificationKeyHash of the co-signer key (Server B)
+///   - deadline:     POSIX milliseconds after which admins may withdraw remaining pool
 ///
 /// Datum:  Void (unit) — no per-UTxO data needed
 ///
 /// Redeemer:
-///   ProcessSurrender — Admin fulfills a user surrender during the window
-///   AdminWithdraw    — Admin reclaims remaining pool after deadline
-///
-/// Spending paths:
-///   1. **ProcessSurrender** — admin signs + tx validity entirely before deadline
-///   2. **AdminWithdraw**    — admin signs + tx validity entirely after deadline
+///   ProcessSurrender — Both admins sign + tx validity entirely before deadline
+///   AdminWithdraw    — Both admins sign + tx validity entirely after deadline
 ///
 /// Used by: off-chain Python tooling in tools/ and scripts/ for building
 /// surrender transactions and post-deadline sweep transactions.
@@ -38,14 +37,19 @@ use cardano/transaction.{OutputReference, Transaction, placeholder}
 
 /// Redeemer type: which spending path to take.
 pub type SurrenderAction {
-  /// Admin processes a user's surrender request during the open window.
+  /// Both admins process a user's surrender request during the open window.
   ProcessSurrender
-  /// Admin withdraws remaining pool balance after the deadline.
+  /// Both admins withdraw remaining pool balance after the deadline.
   AdminWithdraw
 }
 
-/// Parameterized spend validator: admin processes surrenders or withdraws after deadline.
-validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
+/// Parameterized spend validator: dual-signer admin processes surrenders or
+/// withdraws after deadline.
+validator surrender_pool(
+  admin_pkh_1: VerificationKeyHash,
+  admin_pkh_2: VerificationKeyHash,
+  deadline: Int,
+) {
   spend(
     datum: Option<Void>,
     redeemer: SurrenderAction,
@@ -55,19 +59,19 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
     // Datum is required — fail if missing (even though it is Void).
     expect Some(_) = datum
 
-    // Admin must always sign regardless of path.
-    let admin_signed = list.has(tx.extra_signatories, admin_pkh)
+    // Both admin keys must sign regardless of path.
+    let admin_1_signed = list.has(tx.extra_signatories, admin_pkh_1)
+    let admin_2_signed = list.has(tx.extra_signatories, admin_pkh_2)
+    let both_signed = admin_1_signed && admin_2_signed
 
     when redeemer is {
-      // Path 1: ProcessSurrender — admin signs and window is still open.
-      // The tx validity range must be entirely before the deadline.
+      // Path 1: ProcessSurrender — both admins sign and window is still open.
       ProcessSurrender ->
-        admin_signed && is_entirely_before(tx.validity_range, deadline)
+        both_signed && is_entirely_before(tx.validity_range, deadline)
 
-      // Path 2: AdminWithdraw — admin signs and window has closed.
-      // The tx validity range must be entirely after the deadline.
+      // Path 2: AdminWithdraw — both admins sign and window has closed.
       AdminWithdraw ->
-        admin_signed && is_entirely_after(tx.validity_range, deadline)
+        both_signed && is_entirely_after(tx.validity_range, deadline)
     }
   }
 
@@ -82,7 +86,6 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
 
 /// Build a test transaction with given signers and a validity range
 /// from lower_bound (inclusive) to upper_bound (exclusive-ish).
-/// For "entirely before deadline" tests we need a finite upper bound.
 fn test_tx_bounded(
   signers: List<VerificationKeyHash>,
   lower_bound: Int,
@@ -102,7 +105,6 @@ fn test_tx_bounded(
 }
 
 /// Build a test transaction with validity range [lower, +inf).
-/// This is useful for "entirely after" checks.
 fn test_tx_open_end(
   signers: List<VerificationKeyHash>,
   lower_bound: Int,
@@ -115,7 +117,6 @@ fn test_tx_open_end(
 }
 
 /// Build a test transaction with validity range (-inf, upper].
-/// This is useful for "entirely before" checks.
 fn test_tx_open_start(
   signers: List<VerificationKeyHash>,
   upper_bound: Int,
@@ -136,8 +137,11 @@ fn test_tx_open_start(
   }
 }
 
-const test_admin_pkh: VerificationKeyHash =
+const test_admin_1_pkh: VerificationKeyHash =
   #"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb"
+
+const test_admin_2_pkh: VerificationKeyHash =
+  #"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbcc"
 
 const test_random_pkh: VerificationKeyHash =
   #"ccccccccccccccccccccccccccccccccccccccccccccccccccccccdd"
@@ -152,14 +156,20 @@ fn test_own_ref() -> OutputReference {
   }
 }
 
+/// Helper: both admins sign
+fn both_admins() -> List<VerificationKeyHash> {
+  [test_admin_1_pkh, test_admin_2_pkh]
+}
+
 // ----- ProcessSurrender tests -----
 
-test admin_can_process_surrender() {
-  // Admin signs, upper bound is before deadline -> passes
+test both_admins_can_process_surrender() {
+  // Both admins sign, upper bound is before deadline -> passes
   let datum = Some(Void)
-  let tx = test_tx_open_start([test_admin_pkh], test_deadline - 1)
+  let tx = test_tx_open_start(both_admins(), test_deadline - 1)
   surrender_pool.spend(
-    test_admin_pkh,
+    test_admin_1_pkh,
+    test_admin_2_pkh,
     test_deadline,
     datum,
     ProcessSurrender,
@@ -169,11 +179,12 @@ test admin_can_process_surrender() {
 }
 
 test process_surrender_after_deadline_fails() fail {
-  // Admin signs, but validity range is after deadline -> must fail
+  // Both admins sign, but validity range is after deadline -> must fail
   let datum = Some(Void)
-  let tx = test_tx_open_end([test_admin_pkh], test_deadline + 1)
+  let tx = test_tx_open_end(both_admins(), test_deadline + 1)
   surrender_pool.spend(
-    test_admin_pkh,
+    test_admin_1_pkh,
+    test_admin_2_pkh,
     test_deadline,
     datum,
     ProcessSurrender,
@@ -185,11 +196,12 @@ test process_surrender_after_deadline_fails() fail {
 // ----- AdminWithdraw tests -----
 
 test admin_withdraw_before_deadline_fails() fail {
-  // Admin signs, but validity range is before deadline -> must fail
+  // Both admins sign, but validity range is before deadline -> must fail
   let datum = Some(Void)
-  let tx = test_tx_open_start([test_admin_pkh], test_deadline - 1)
+  let tx = test_tx_open_start(both_admins(), test_deadline - 1)
   surrender_pool.spend(
-    test_admin_pkh,
+    test_admin_1_pkh,
+    test_admin_2_pkh,
     test_deadline,
     datum,
     AdminWithdraw,
@@ -199,11 +211,12 @@ test admin_withdraw_before_deadline_fails() fail {
 }
 
 test admin_withdraw_after_deadline_passes() {
-  // Admin signs, lower bound after deadline -> passes
+  // Both admins sign, lower bound after deadline -> passes
   let datum = Some(Void)
-  let tx = test_tx_open_end([test_admin_pkh], test_deadline + 1)
+  let tx = test_tx_open_end(both_admins(), test_deadline + 1)
   surrender_pool.spend(
-    test_admin_pkh,
+    test_admin_1_pkh,
+    test_admin_2_pkh,
     test_deadline,
     datum,
     AdminWithdraw,
@@ -212,14 +225,62 @@ test admin_withdraw_after_deadline_passes() {
   )
 }
 
-// ----- Authorization tests -----
+// ----- Single-signer tests (must fail — need BOTH) -----
+
+test only_admin_1_process_fails() fail {
+  // Only admin_1 signs — admin_2 missing -> must fail
+  let datum = Some(Void)
+  let tx = test_tx_open_start([test_admin_1_pkh], test_deadline - 1)
+  surrender_pool.spend(
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    test_deadline,
+    datum,
+    ProcessSurrender,
+    test_own_ref(),
+    tx,
+  )
+}
+
+test only_admin_2_process_fails() fail {
+  // Only admin_2 signs — admin_1 missing -> must fail
+  let datum = Some(Void)
+  let tx = test_tx_open_start([test_admin_2_pkh], test_deadline - 1)
+  surrender_pool.spend(
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    test_deadline,
+    datum,
+    ProcessSurrender,
+    test_own_ref(),
+    tx,
+  )
+}
+
+test only_admin_1_withdraw_fails() fail {
+  // Only admin_1 signs for withdraw -> must fail
+  let datum = Some(Void)
+  let tx = test_tx_open_end([test_admin_1_pkh], test_deadline + 1)
+  surrender_pool.spend(
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    test_deadline,
+    datum,
+    AdminWithdraw,
+    test_own_ref(),
+    tx,
+  )
+}
+
+// ----- Non-admin tests -----
 
 test random_signer_process_fails() fail {
   // Non-admin tries ProcessSurrender during window -> must fail
   let datum = Some(Void)
   let tx = test_tx_open_start([test_random_pkh], test_deadline - 1)
   surrender_pool.spend(
-    test_admin_pkh,
+    test_admin_1_pkh,
+    test_admin_2_pkh,
     test_deadline,
     datum,
     ProcessSurrender,
@@ -233,7 +294,8 @@ test random_signer_withdraw_fails() fail {
   let datum = Some(Void)
   let tx = test_tx_open_end([test_random_pkh], test_deadline + 1)
   surrender_pool.spend(
-    test_admin_pkh,
+    test_admin_1_pkh,
+    test_admin_2_pkh,
     test_deadline,
     datum,
     AdminWithdraw,
@@ -245,11 +307,12 @@ test random_signer_withdraw_fails() fail {
 // ----- Datum robustness test -----
 
 test no_datum_fails() fail {
-  // Missing datum (None) should fail even with valid admin + timing
+  // Missing datum (None) should fail even with valid both admins + timing
   let datum: Option<Void> = None
-  let tx = test_tx_open_start([test_admin_pkh], test_deadline - 1)
+  let tx = test_tx_open_start(both_admins(), test_deadline - 1)
   surrender_pool.spend(
-    test_admin_pkh,
+    test_admin_1_pkh,
+    test_admin_2_pkh,
     test_deadline,
     datum,
     ProcessSurrender,

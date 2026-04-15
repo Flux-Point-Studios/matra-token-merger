@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import cbor2
+import httpx
 from cbor2 import CBORTag
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -109,6 +110,11 @@ API_PORT: int = int(os.environ.get("SURRENDER_API_PORT", "8420"))
 # Dedicated collateral UTxO — bounds max collateral loss on phase-2 failure.
 # Format: "txhash#index" (e.g. "abc123...#0"). If unset, pycardano auto-selects.
 COLLATERAL_UTXO: str = os.environ.get("COLLATERAL_UTXO", "")
+
+# Co-signer service (Server B) — required for dual-admin validator.
+# The co-signer holds the second admin key on separate infrastructure.
+COSIGNER_URL: str = os.environ.get("COSIGNER_URL", "")
+COSIGNER_SECRET: str = os.environ.get("COSIGNER_API_SECRET", "")
 
 # Shared secret — the Next.js proxy must send this in X-API-Secret header.
 # Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -475,13 +481,65 @@ def build_surrender(req: BuildSurrenderRequest):
     )
 
 
+def _fetch_cosigner_pkh() -> None:
+    """Fetch and cache the co-signer's PKH from their health endpoint."""
+    try:
+        resp = httpx.get(f"{COSIGNER_URL}/health", timeout=5.0)
+        data = resp.json()
+        pkh_hex = data.get("pkh", "").replace("...", "")
+        if pkh_hex and len(pkh_hex) >= 56:
+            # Health returns truncated PKH — use the /cosign endpoint to get full PKH
+            # For now, fetch it by doing a dummy cosign or reading from env
+            pass
+        logger.info("Co-signer service reachable at %s", COSIGNER_URL)
+    except Exception as e:
+        logger.warning("Co-signer service unreachable: %s", e)
+
+    # Read co-signer PKH from env (most reliable — set during deployment)
+    cosigner_pkh_hex = os.environ.get("COSIGNER_PKH", "")
+    if cosigner_pkh_hex:
+        from pycardano.hash import VerificationKeyHash
+        state.cosigner_pkh = VerificationKeyHash(bytes.fromhex(cosigner_pkh_hex))
+        logger.info("Co-signer PKH: %s", cosigner_pkh_hex[:16])
+    else:
+        state.cosigner_pkh = None
+        logger.warning("COSIGNER_PKH not set — dual-admin mode disabled")
+
+
+def _get_cosigner_witness(tx_hash_hex: str) -> VerificationKeyWitness:
+    """Call the co-signer service to sign a transaction hash.
+
+    Returns a VerificationKeyWitness ready to merge into the witness set.
+    """
+    try:
+        resp = httpx.post(
+            f"{COSIGNER_URL}/cosign",
+            json={"tx_hash_hex": tx_hash_hex},
+            headers={"X-API-Secret": COSIGNER_SECRET},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        vk = VerificationKey.from_primitive(bytes.fromhex(data["vkey_hex"]))
+        sig = bytes.fromhex(data["signature_hex"])
+        return VerificationKeyWitness(vk, sig)
+
+    except httpx.HTTPStatusError as e:
+        logger.error("Co-signer returned %d: %s", e.response.status_code, e.response.text[:200])
+        raise HTTPException(503, "Co-signer service error")
+    except Exception as e:
+        logger.error("Co-signer call failed: %s", e)
+        raise HTTPException(503, "Co-signer service unavailable")
+
+
 def _build_cosigned_surrender_tx(
     user_address: str,
     total_cmatra: int,
     legacy_assets: list[dict[str, Any]],
     pool_utxo: dict[str, Any],
 ) -> tuple[str, str]:
-    """Build a surrender tx and partially sign with admin key.
+    """Build a surrender tx and partially sign with admin key(s).
 
     Transaction structure:
       Inputs:
@@ -584,13 +642,22 @@ def _build_cosigned_surrender_tx(
             TransactionOutput(quarantine_addr, Value(quarantine_min_ada, quarantine_multi))
         )
 
-    # Required signer: admin PKH
+    # Required signers: both admin PKHs (dual-signer validator)
     builder.required_signers = [state.admin_pkh]
+    # Add co-signer PKH if configured (dual-admin mode)
+    cosigner_pkh_bytes = None
+    if COSIGNER_URL:
+        # Fetch co-signer's PKH from their health endpoint at startup
+        # (cached in state.cosigner_pkh after first call)
+        if not hasattr(state, "cosigner_pkh") or state.cosigner_pkh is None:
+            _fetch_cosigner_pkh()
+        if state.cosigner_pkh:
+            builder.required_signers.append(state.cosigner_pkh)
 
     # Build the transaction — change goes to user
     tx_body = builder.build(change_address=user_addr)
 
-    # Create admin witness (partial sign)
+    # Create admin 1 witness (Server A — local key)
     tx_hash = tx_body.hash()
     admin_signature = state.admin_sk.sign(tx_hash)
     admin_vk_witness = VerificationKeyWitness(
@@ -598,12 +665,16 @@ def _build_cosigned_surrender_tx(
         admin_signature,
     )
 
-    # Build witness set with admin signature + script + redeemer
-    # The user's wallet will add their VK witness when they signTx
+    # Build witness set with admin 1 signature + script + redeemer
     witness_set = builder.build_witness_set()
     if witness_set.vkey_witnesses is None:
         witness_set.vkey_witnesses = []
     witness_set.vkey_witnesses.append(admin_vk_witness)
+
+    # Get admin 2 witness from co-signer service (Server B)
+    if COSIGNER_URL:
+        cosigner_witness = _get_cosigner_witness(tx_hash.payload.hex())
+        witness_set.vkey_witnesses.append(cosigner_witness)
 
     # Assemble the partially-signed transaction
     tx = Transaction(tx_body, witness_set)
