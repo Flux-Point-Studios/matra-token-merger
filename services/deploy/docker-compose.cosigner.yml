@@ -1,0 +1,38 @@
+version: "3.8"
+# ============================================================================
+# Co-Signer Service (Server B) — Docker Compose
+# ============================================================================
+#
+# Runs on a SEPARATE machine from Server A (the surrender API).
+# This machine holds admin key 2 and signs transaction hashes on request.
+#
+# Setup:
+#   1. Copy this file + .env.cosigner to the GMKTec
+#   2. Place admin_2.skey in ./keys/ (NEVER let this file leave this machine)
+#   3. Run: docker compose -f docker-compose.cosigner.yml up -d
+#
+# ============================================================================
+
+services:
+  cosigner:
+    build:
+      context: ../..
+      dockerfile: services/deploy/Dockerfile.cosigner
+    container_name: cmatra-cosigner
+    restart: unless-stopped
+    ports:
+      - "${COSIGNER_PORT:-8421}:8421"
+    env_file:
+      - .env.cosigner
+    volumes:
+      - ./keys:/app/keys:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8421/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

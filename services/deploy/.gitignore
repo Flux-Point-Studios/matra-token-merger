@@ -1,0 +1,7 @@
+# Keys — NEVER commit
+keys/
+*.skey
+*.vkey
+
+# Secrets — NEVER commit
+.env.cosigner
