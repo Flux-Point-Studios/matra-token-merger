@@ -102,14 +102,15 @@
   invariants for every pool UTxO spend:
 </p>
 <ol>
-  <li><strong>Authorization:</strong> The designated administrator's verification key hash must appear in the transaction's required signers.</li>
+  <li><strong>Dual-signer authorization:</strong> Two designated administrator verification key hashes must both appear in the transaction's required signers. The keys are intended to reside on separate infrastructure, eliminating single-point-of-failure risk.</li>
   <li><strong>Time control:</strong> The transaction's validity range must fall entirely within the correct window &mdash; before the deadline for surrender processing, or after the deadline for pool withdrawal.</li>
 </ol>
 
 <h3>2.2 Parameters</h3>
 <table>
   <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-  <tr><td><code>admin_pkh</code></td><td>Blake2b-224 hash (28 bytes)</td><td>Administrator verification key hash, baked in at compile time</td></tr>
+  <tr><td><code>admin_pkh_1</code></td><td>Blake2b-224 hash (28 bytes)</td><td>Primary admin key hash (Server A), baked in at compile time</td></tr>
+  <tr><td><code>admin_pkh_2</code></td><td>Blake2b-224 hash (28 bytes)</td><td>Co-signer key hash (Server B), baked in at compile time</td></tr>
   <tr><td><code>deadline</code></td><td>POSIX milliseconds (Int)</td><td>End of the surrender window, baked in at compile time</td></tr>
 </table>
 
@@ -118,28 +119,30 @@
   <tr><th>Redeemer</th><th>Conditions</th><th>Purpose</th></tr>
   <tr>
     <td><code>ProcessSurrender</code></td>
-    <td>Admin signed AND validity range entirely before deadline</td>
+    <td>Both admins signed AND validity range entirely before deadline</td>
     <td>Process a user's asset surrender during the open window</td>
   </tr>
   <tr>
     <td><code>AdminWithdraw</code></td>
-    <td>Admin signed AND validity range entirely after deadline</td>
+    <td>Both admins signed AND validity range entirely after deadline</td>
     <td>Reclaim remaining pool balance after the window closes</td>
   </tr>
 </table>
 
 <h3>2.4 Validator Source</h3>
 <pre>
-validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
+validator surrender_pool(admin_pkh_1: VerificationKeyHash, admin_pkh_2: VerificationKeyHash, deadline: Int) {
   spend(datum: Option&lt;Void&gt;, redeemer: SurrenderAction, _own_ref: OutputReference, tx: Transaction) {
     expect Some(_) = datum
-    let admin_signed = list.has(tx.extra_signatories, admin_pkh)
+    let admin_1_signed = list.has(tx.extra_signatories, admin_pkh_1)
+    let admin_2_signed = list.has(tx.extra_signatories, admin_pkh_2)
+    let both_signed = admin_1_signed &amp;&amp; admin_2_signed
 
     when redeemer is {
       ProcessSurrender -&gt;
-        admin_signed &amp;&amp; is_entirely_before(tx.validity_range, deadline)
+        both_signed &amp;&amp; is_entirely_before(tx.validity_range, deadline)
       AdminWithdraw -&gt;
-        admin_signed &amp;&amp; is_entirely_after(tx.validity_range, deadline)
+        both_signed &amp;&amp; is_entirely_after(tx.validity_range, deadline)
     }
   }
 
@@ -323,12 +326,14 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
   <tr><td>Unbounded (&minus;inf, +inf)</td><td>Rejected</td><td>Rejected</td></tr>
 </table>
 
-<h3>5.3 Authorization Model</h3>
+<h3>5.3 Dual-Signer Authorization Model</h3>
 <p class="secure">SECURE</p>
 <p>
-  The Cardano ledger enforces that every PKH in <code>required_signers</code> has a
-  corresponding VK witness. No mechanism exists to spoof <code>extra_signatories</code>
-  without the private key.
+  The validator requires both <code>admin_pkh_1</code> and <code>admin_pkh_2</code> in
+  <code>tx.extra_signatories</code>. The Cardano ledger enforces that every PKH in
+  <code>required_signers</code> has a corresponding VK witness. A transaction signed by
+  only one admin key is rejected. This eliminates single-point-of-failure risk: an attacker
+  who compromises one server cannot drain the pool without also compromising the other.
 </p>
 
 <h3>5.4 Datum Robustness &amp; Deserialization</h3>
@@ -428,13 +433,13 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
   </tr>
   <tr>
     <td>On-chain</td>
-    <td>7</td>
-    <td>Admin ProcessSurrender, post-deadline ProcessSurrender (fail), pre-deadline AdminWithdraw (fail), post-deadline AdminWithdraw, non-admin ProcessSurrender (fail), non-admin AdminWithdraw (fail), missing datum (fail)</td>
+    <td>10</td>
+    <td>Both-admin ProcessSurrender, post-deadline ProcessSurrender (fail), pre-deadline AdminWithdraw (fail), both-admin AdminWithdraw, single-admin-1 ProcessSurrender (fail), single-admin-2 ProcessSurrender (fail), single-admin-1 AdminWithdraw (fail), non-admin ProcessSurrender (fail), non-admin AdminWithdraw (fail), missing datum (fail)</td>
   </tr>
   <tr>
     <td>Red-team</td>
-    <td>8</td>
-    <td>All on-chain tests + wrong redeemer data (fail), fabricated UTxO (fail), admin happy-path ProcessSurrender, admin happy-path AdminWithdraw. Executed against live preprod deployment.</td>
+    <td>10</td>
+    <td>All on-chain tests + wrong redeemer (fail), fabricated UTxO (fail), single-admin ProcessSurrender (fail), single-admin AdminWithdraw (fail), both-admin happy-path ProcessSurrender, both-admin happy-path AdminWithdraw. Executed against live preprod deployment.</td>
   </tr>
   <tr>
     <td>Preprod</td>
@@ -445,7 +450,7 @@ validator surrender_pool(admin_pkh: VerificationKeyHash, deadline: Int) {
 
 <h2>9. Deployment Recommendations</h2>
 <ul>
-  <li><strong>Admin key protection:</strong> Consider native multi-signature (M-of-N) for the admin credential to eliminate the single-key risk. Use hardware key storage for mainnet.</li>
+  <li><strong>Admin key separation:</strong> The dual-signer model requires both admin keys on separate infrastructure (Server A and Server B). Neither key should be accessible from the other server&rsquo;s environment. Generate key pairs independently and deploy each to its respective server only.</li>
   <li><strong>Compiler version pinning:</strong> Pin Aiken compiler version in CI/CD. A different compiler version may produce a different script hash.</li>
   <li><strong>Deterministic build verification:</strong> Publish the exact script hash and build instructions so that third parties can independently verify the deployed validator matches the audited source.</li>
   <li><strong>Enterprise-type addresses:</strong> Use addresses without staking credentials for both the script address and quarantine address.</li>

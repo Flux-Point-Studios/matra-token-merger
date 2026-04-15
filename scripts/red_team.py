@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """
-scripts/red_team.py — Red-Team Test Suite for Surrender Pool Validator v3.0
+scripts/red_team.py — Red-Team Test Suite for Surrender Pool Validator v4.0
 ===========================================================================
 
 Runs adversarial tests against the deployed surrender pool validator on preprod.
 Requires a completed preprod rehearsal (stages 1-6 at minimum — pool deployed).
 
-The surrender model uses Void datums and admin-only spending. Two paths:
-  - ProcessSurrender: admin signs + tx validity entirely BEFORE deadline
-  - AdminWithdraw:    admin signs + tx validity entirely AFTER deadline
+The surrender model uses Void datums and DUAL-ADMIN spending. Two paths:
+  - ProcessSurrender: BOTH admins sign + tx validity entirely BEFORE deadline
+  - AdminWithdraw:    BOTH admins sign + tx validity entirely AFTER deadline
 
 Tests (negative — validator must REJECT):
   1. Non-admin ProcessSurrender — random wallet tries to spend pool UTxO
-  2. Post-deadline ProcessSurrender — admin ProcessSurrender after deadline
-  3. Pre-deadline AdminWithdraw — admin AdminWithdraw before deadline
+  2. Post-deadline ProcessSurrender — both admins ProcessSurrender after deadline
+  3. Pre-deadline AdminWithdraw — both admins AdminWithdraw before deadline
   4. Non-admin AdminWithdraw — random wallet tries AdminWithdraw after deadline
   5. Wrong redeemer data — garbage Constr(99, [...]) redeemer
   6. Fabricated UTxO reference — non-existent pool UTxO (all-zero tx hash)
+  7. Single-admin ProcessSurrender — only admin_1 signs (admin_2 missing)
+  8. Single-admin AdminWithdraw — only admin_2 signs (admin_1 missing)
 
 Tests (positive — validator must ACCEPT):
-  7. Admin ProcessSurrender before deadline — happy-path surrender
-  8. Admin AdminWithdraw after deadline — happy-path sweep
+  9. Both admins ProcessSurrender before deadline — happy-path surrender
+  10. Both admins AdminWithdraw after deadline — happy-path sweep
 
 Each negative test should FAIL (i.e., the validator rejects the tx).
 A "PASS" means the validator correctly rejected the attack.
@@ -451,20 +453,17 @@ def test_fabricated_utxo(
                 "rejection": str(e)[:300]}
 
 
-def test_admin_process_surrender_happy(
+def test_single_admin_process_surrender(
     context: BlockFrostChainContext,
-    admin,
+    admin_1,
     pool_ref: dict,
     script_address: str,
     script: PlutusV3Script,
     cmatra_policy_id: ScriptHash,
     cmatra_asset_hex: str,
-    deadline_posix_ms: int,
 ) -> dict[str, Any]:
-    """Test 7 (positive): Admin ProcessSurrender before deadline. Should SUCCEED."""
+    """Test 7: Only admin_1 signs ProcessSurrender (admin_2 missing). Should FAIL."""
     try:
-        from tools.cardano_utils import posix_ms_to_slot
-
         builder = TransactionBuilder(context)
         utxo = make_pool_utxo(
             pool_ref["tx_hash"], pool_ref["output_index"],
@@ -473,29 +472,25 @@ def test_admin_process_surrender_happy(
         )
         builder.add_script_input(utxo, script=script, redeemer=process_surrender_redeemer())
 
-        builder.required_signers = [admin.vkey.hash()]
-        builder.add_input_address(admin.address)
-
-        # Ensure validity range is entirely before deadline
-        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
-        builder.ttl = deadline_slot - 1
+        # Only admin_1 signs — admin_2 is missing
+        builder.required_signers = [admin_1.vkey.hash()]
+        builder.add_input_address(admin_1.address)
 
         signed_tx = builder.build_and_sign(
-            signing_keys=[admin.skey],
-            change_address=admin.address,
+            signing_keys=[admin_1.skey],
+            change_address=admin_1.address,
         )
         context.submit_tx(signed_tx)
-        tx_hash = signed_tx.id.payload.hex()
-        return {"test": "admin_process_surrender_happy", "passed": True,
-                "tx_hash": tx_hash, "note": "Admin successfully processed surrender"}
+        return {"test": "single_admin_process_surrender", "passed": False,
+                "error": "Single-admin ProcessSurrender was accepted!"}
     except Exception as e:
-        return {"test": "admin_process_surrender_happy", "passed": False,
-                "error": str(e)[:300]}
+        return {"test": "single_admin_process_surrender", "passed": True,
+                "rejection": str(e)[:300]}
 
 
-def test_admin_withdraw_happy(
+def test_single_admin_withdraw(
     context: BlockFrostChainContext,
-    admin,
+    admin_2,
     pool_ref: dict,
     script_address: str,
     script: PlutusV3Script,
@@ -503,7 +498,7 @@ def test_admin_withdraw_happy(
     cmatra_asset_hex: str,
     deadline_posix_ms: int,
 ) -> dict[str, Any]:
-    """Test 8 (positive): Admin AdminWithdraw after deadline. Should SUCCEED."""
+    """Test 8: Only admin_2 signs AdminWithdraw (admin_1 missing). Should FAIL."""
     try:
         from tools.cardano_utils import posix_ms_to_slot
 
@@ -515,23 +510,110 @@ def test_admin_withdraw_happy(
         )
         builder.add_script_input(utxo, script=script, redeemer=admin_withdraw_redeemer())
 
-        builder.required_signers = [admin.vkey.hash()]
-        builder.add_input_address(admin.address)
+        # Only admin_2 signs — admin_1 is missing
+        builder.required_signers = [admin_2.vkey.hash()]
+        builder.add_input_address(admin_2.address)
+
+        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
+        builder.validity_start = deadline_slot + 1
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin_2.skey],
+            change_address=admin_2.address,
+        )
+        context.submit_tx(signed_tx)
+        return {"test": "single_admin_withdraw", "passed": False,
+                "error": "Single-admin AdminWithdraw was accepted!"}
+    except Exception as e:
+        return {"test": "single_admin_withdraw", "passed": True,
+                "rejection": str(e)[:300]}
+
+
+def test_admin_process_surrender_happy(
+    context: BlockFrostChainContext,
+    admin_1,
+    admin_2,
+    pool_ref: dict,
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+    deadline_posix_ms: int,
+) -> dict[str, Any]:
+    """Test 9 (positive): Both admins ProcessSurrender before deadline. Should SUCCEED."""
+    try:
+        from tools.cardano_utils import posix_ms_to_slot
+
+        builder = TransactionBuilder(context)
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+        builder.add_script_input(utxo, script=script, redeemer=process_surrender_redeemer())
+
+        # Both admins must sign
+        builder.required_signers = [admin_1.vkey.hash(), admin_2.vkey.hash()]
+        builder.add_input_address(admin_1.address)
+
+        # Ensure validity range is entirely before deadline
+        deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
+        builder.ttl = deadline_slot - 1
+
+        signed_tx = builder.build_and_sign(
+            signing_keys=[admin_1.skey, admin_2.skey],
+            change_address=admin_1.address,
+        )
+        context.submit_tx(signed_tx)
+        tx_hash = signed_tx.id.payload.hex()
+        return {"test": "both_admins_process_surrender_happy", "passed": True,
+                "tx_hash": tx_hash, "note": "Both admins successfully processed surrender"}
+    except Exception as e:
+        return {"test": "both_admins_process_surrender_happy", "passed": False,
+                "error": str(e)[:300]}
+
+
+def test_admin_withdraw_happy(
+    context: BlockFrostChainContext,
+    admin_1,
+    admin_2,
+    pool_ref: dict,
+    script_address: str,
+    script: PlutusV3Script,
+    cmatra_policy_id: ScriptHash,
+    cmatra_asset_hex: str,
+    deadline_posix_ms: int,
+) -> dict[str, Any]:
+    """Test 10 (positive): Both admins AdminWithdraw after deadline. Should SUCCEED."""
+    try:
+        from tools.cardano_utils import posix_ms_to_slot
+
+        builder = TransactionBuilder(context)
+        utxo = make_pool_utxo(
+            pool_ref["tx_hash"], pool_ref["output_index"],
+            pool_ref["cmatra_amount"], pool_ref["ada_amount"],
+            script_address, cmatra_policy_id, cmatra_asset_hex,
+        )
+        builder.add_script_input(utxo, script=script, redeemer=admin_withdraw_redeemer())
+
+        # Both admins must sign
+        builder.required_signers = [admin_1.vkey.hash(), admin_2.vkey.hash()]
+        builder.add_input_address(admin_1.address)
 
         # Set validity_start AFTER deadline
         deadline_slot = posix_ms_to_slot(deadline_posix_ms, "preprod")
         builder.validity_start = deadline_slot + 1
 
         signed_tx = builder.build_and_sign(
-            signing_keys=[admin.skey],
-            change_address=admin.address,
+            signing_keys=[admin_1.skey, admin_2.skey],
+            change_address=admin_1.address,
         )
         context.submit_tx(signed_tx)
         tx_hash = signed_tx.id.payload.hex()
-        return {"test": "admin_withdraw_happy", "passed": True,
-                "tx_hash": tx_hash, "note": "Admin successfully withdrew after deadline"}
+        return {"test": "both_admins_withdraw_happy", "passed": True,
+                "tx_hash": tx_hash, "note": "Both admins successfully withdrew after deadline"}
     except Exception as e:
-        return {"test": "admin_withdraw_happy", "passed": False,
+        return {"test": "both_admins_withdraw_happy", "passed": False,
                 "error": str(e)[:300]}
 
 
@@ -620,9 +702,22 @@ def run_red_team(
         )
         sys.exit(1)
 
-    # Load admin wallet
-    admin = Wallet.load("admin", keys_dir)
-    logger.info("Admin wallet: %s (%s)", admin.name, admin.pkh_hex[:16])
+    # Load admin wallets (dual-signer model)
+    admin_1 = Wallet.load("admin", keys_dir)
+    logger.info("Admin 1 wallet: %s (%s)", admin_1.name, admin_1.pkh_hex[:16])
+
+    # Admin 2: try "admin2" first, fall back to second test wallet
+    try:
+        admin_2 = Wallet.load("admin2", keys_dir)
+    except Exception:
+        # If no admin2 wallet, use a test wallet as stand-in for dual-signer tests
+        test_wallet_names = [w["name"] for w in state.get("test_wallets", [])]
+        if len(test_wallet_names) >= 2:
+            admin_2 = Wallet.load(test_wallet_names[1], keys_dir)
+        else:
+            logger.error("Need admin2 wallet or at least 2 test wallets for dual-signer tests.")
+            sys.exit(1)
+    logger.info("Admin 2 wallet: %s (%s)", admin_2.name, admin_2.pkh_hex[:16])
 
     # Load a random test wallet for non-admin attack tests
     test_wallet_names = [w["name"] for w in state.get("test_wallets", [])]
@@ -642,7 +737,7 @@ def run_red_team(
     pos_ref_1 = pool_utxos[0]  # for test 7 (will be consumed)
     pos_ref_2 = pool_utxos[1]  # for test 8 (separate UTxO)
 
-    # --- Negative tests (1-6) ---
+    # --- Negative tests (1-8) ---
 
     # Test 1: Non-admin ProcessSurrender
     logger.info("-" * 40)
@@ -654,22 +749,22 @@ def run_red_team(
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-    # Test 2: Post-deadline ProcessSurrender
+    # Test 2: Post-deadline ProcessSurrender (both admins, wrong timing)
     logger.info("-" * 40)
     logger.info("TEST 2: Post-deadline ProcessSurrender")
     r = test_postdeadline_process_surrender(
-        context, admin, neg_ref,
+        context, admin_1, neg_ref,
         script_address, script, cmatra_policy_id, cmatra_asset_hex,
         deadline_ms,
     )
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-    # Test 3: Pre-deadline AdminWithdraw
+    # Test 3: Pre-deadline AdminWithdraw (both admins, wrong timing)
     logger.info("-" * 40)
     logger.info("TEST 3: Pre-deadline AdminWithdraw")
     r = test_predeadline_admin_withdraw(
-        context, admin, neg_ref,
+        context, admin_1, neg_ref,
         script_address, script, cmatra_policy_id, cmatra_asset_hex,
         deadline_ms,
     )
@@ -691,7 +786,7 @@ def run_red_team(
     logger.info("-" * 40)
     logger.info("TEST 5: Wrong redeemer data")
     r = test_wrong_redeemer(
-        context, admin, neg_ref,
+        context, admin_1, neg_ref,
         script_address, script, cmatra_policy_id, cmatra_asset_hex,
     )
     results.append(r)
@@ -701,27 +796,51 @@ def run_red_team(
     logger.info("-" * 40)
     logger.info("TEST 6: Fabricated UTxO reference")
     r = test_fabricated_utxo(
-        context, admin,
+        context, admin_1,
         script_address, script, cmatra_policy_id, cmatra_asset_hex,
     )
     results.append(r)
     logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
-    # --- Positive tests (7-8) ---
+    # Test 7: Single-admin ProcessSurrender (only admin_1, missing admin_2)
+    logger.info("-" * 40)
+    logger.info("TEST 7: Single-admin ProcessSurrender (admin_2 missing)")
+    r = test_single_admin_process_surrender(
+        context, admin_1, neg_ref,
+        script_address, script, cmatra_policy_id, cmatra_asset_hex,
+    )
+    results.append(r)
+    logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+
+    # Test 8: Single-admin AdminWithdraw (only admin_2, missing admin_1)
+    if deadline_passed:
+        logger.info("-" * 40)
+        logger.info("TEST 8: Single-admin AdminWithdraw (admin_1 missing)")
+        r = test_single_admin_withdraw(
+            context, admin_2, neg_ref,
+            script_address, script, cmatra_policy_id, cmatra_asset_hex,
+            deadline_ms,
+        )
+        results.append(r)
+        logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
+    else:
+        logger.info("-" * 40)
+        logger.info("TEST 8: Single-admin AdminWithdraw — SKIPPED (deadline not passed)")
+
+    # --- Positive tests (9-10) ---
     # These actually spend pool UTxOs, so we check timing constraints.
 
     # Determine current time vs deadline for positive test eligibility
     current_posix_ms = int(time.time() * 1000)
     deadline_passed = current_posix_ms > deadline_ms
 
-    # Test 7: Admin ProcessSurrender before deadline (happy path)
+    # Test 9: Both admins ProcessSurrender before deadline (happy path)
     if not deadline_passed:
         logger.info("-" * 40)
-        logger.info("TEST 7: Admin ProcessSurrender (happy path)")
-        # Use a fresh context to avoid any cached state
-        ctx7 = BlockFrostChainContext(project_id=blockfrost_project_id)
+        logger.info("TEST 9: Both admins ProcessSurrender (happy path)")
+        ctx9 = BlockFrostChainContext(project_id=blockfrost_project_id)
         r = test_admin_process_surrender_happy(
-            ctx7, admin, pos_ref_1,
+            ctx9, admin_1, admin_2, pos_ref_1,
             script_address, script, cmatra_policy_id, cmatra_asset_hex,
             deadline_ms,
         )
@@ -729,31 +848,29 @@ def run_red_team(
         logger.info("Result: %s", "PASS" if r["passed"] else "FAIL")
 
         if r["passed"]:
-            # Wait for chain confirmation before test 8
-            logger.info("Waiting 30s for chain confirmation before test 8...")
+            logger.info("Waiting 30s for chain confirmation before test 10...")
             time.sleep(30)
     else:
         logger.warning(
             "Deadline has passed (current: %d > deadline: %d). "
-            "Skipping test 7 (ProcessSurrender requires pre-deadline).",
+            "Skipping test 9 (ProcessSurrender requires pre-deadline).",
             current_posix_ms, deadline_ms,
         )
 
-    # Test 8: Admin AdminWithdraw after deadline (happy path)
+    # Test 10: Both admins AdminWithdraw after deadline (happy path)
     if deadline_passed:
         logger.info("-" * 40)
-        logger.info("TEST 8: Admin AdminWithdraw after deadline (happy path)")
+        logger.info("TEST 10: Both admins AdminWithdraw after deadline (happy path)")
 
-        # Re-query pool UTxOs in case test 7 consumed one
         fresh_pool = _query_live_pool_utxos(
             bf_client, script_address, cmatra_policy_hex, cmatra_asset_hex,
         )
         if not fresh_pool:
-            logger.warning("No pool UTxOs remaining for test 8.")
+            logger.warning("No pool UTxOs remaining for test 10.")
         else:
-            ctx8 = BlockFrostChainContext(project_id=blockfrost_project_id)
+            ctx10 = BlockFrostChainContext(project_id=blockfrost_project_id)
             r = test_admin_withdraw_happy(
-                ctx8, admin, fresh_pool[0],
+                ctx10, admin_1, admin_2, fresh_pool[0],
                 script_address, script, cmatra_policy_id, cmatra_asset_hex,
                 deadline_ms,
             )
@@ -762,13 +879,13 @@ def run_red_team(
     else:
         logger.warning(
             "Deadline has NOT passed (current: %d < deadline: %d). "
-            "Skipping test 8 (AdminWithdraw requires post-deadline).",
+            "Skipping test 10 (AdminWithdraw requires post-deadline).",
             current_posix_ms, deadline_ms,
         )
 
     # --- Summary ---
     logger.info("=" * 60)
-    logger.info("RED-TEAM SUMMARY (Surrender Model v3.0)")
+    logger.info("RED-TEAM SUMMARY (Surrender Model v4.0 — Dual-Signer)")
     logger.info("=" * 60)
     passed = sum(1 for r in results if r["passed"])
     total = len(results)
