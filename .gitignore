@@ -35,6 +35,13 @@ onchain/claim_validator/build/
 onchain/claim_validator/artifacts/
 onchain/flux_mint_policy/build/
 
+# Delegation rewards (TypeScript/Node)
+delegation-rewards/node_modules/
+delegation-rewards/dist/
+delegation-rewards/*.sqlite
+delegation-rewards/keys/*.skey
+delegation-rewards/keys/*.vkey
+
 # OS
 Thumbs.db
 .DS_Store
@@ -46,4 +53,4 @@ nul
 htmlcov/
 aiken_err.txt
 aiken_out.txt
-.env.example
+# Root .env.example is tracked explicitly; subdirectory ones use their own .gitignore

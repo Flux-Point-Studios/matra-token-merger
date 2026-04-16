@@ -1,0 +1,27 @@
+{
+  "name": "cardano-delegation-rewards",
+  "version": "1.0.0",
+  "description": "Cardano SPO delegation rewards distribution tool for Materios",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "snapshot": "tsx src/cli.ts snapshot",
+    "distribute": "tsx src/cli.ts distribute",
+    "status": "tsx src/cli.ts status"
+  },
+  "dependencies": {
+    "@blockfrost/blockfrost-js": "^5.0.0",
+    "better-sqlite3": "^11.0.0",
+    "dotenv": "^16.0.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0"
+  }
+}

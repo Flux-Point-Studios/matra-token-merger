@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.sqlite
+keys/*.skey
+keys/*.vkey
+.env
