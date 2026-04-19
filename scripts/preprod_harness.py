@@ -1393,8 +1393,8 @@ def run_preprod_rehearsal(
         else:
             logger.warning("cMATRA_TEST mint not confirmed after 180s — proceeding anyway")
 
-        # Build simple rate table: 85% pool split equally between AGENT and SHARDS
-        pool_base = int(CMATRA_TEST_SUPPLY_BASE * 0.85)
+        # Build simple rate table: 72.25% pool split equally between AGENT and SHARDS (v5.1)
+        pool_base = int(CMATRA_TEST_SUPPLY_BASE * 0.7225)
         agent_bucket = pool_base // 2
         shards_bucket = pool_base - agent_bucket
         rate_table = {

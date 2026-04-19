@@ -24,7 +24,7 @@ SHARDS_UNIT = (
 )
 
 FLUX_MAX_SUPPLY_BASE = 1_000_000_000_000_000  # 1e15 (cMATRA: 6 decimals)
-PUBLIC_POOL_BASE = 850_000_000_000_000  # 85% of max supply
+PUBLIC_POOL_BASE = 722_500_000_000_000  # v5.1: 72.25% of max supply (15% dilution)
 
 # A valid 28-byte payment key hash (64 hex chars → 56 hex chars)
 SAMPLE_PKH_1 = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"

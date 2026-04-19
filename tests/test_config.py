@@ -4,16 +4,21 @@ from tools.config import (
     AGENT,
     AGENT_DECIMALS,
     AGENT_UNIT,
+    ATTESTOR_EMISSIONS_BASE,
+    ECOSYSTEM_TREASURY_BASE,
     FLUX_DECIMALS,
     FLUX_MAX_SUPPLY_BASE,
     FLUX_MAX_SUPPLY_DISPLAY,
     LEGACY_TOKENS,
+    LIQUIDITY_BASE,
     MERGE_TOKEN_SUPPLY_BASE,
     PUBLIC_POOL_BASE,
     SHARDS,
     SHARDS_DECIMALS,
     SHARDS_UNIT,
+    STRATEGIC_BASE,
     TokenInfo,
+    VALIDATOR_EMISSIONS_BASE,
     VALIDATOR_RESERVE_BASE,
 )
 
@@ -57,14 +62,54 @@ class TestMergeTokenConstants:
     def test_decimals(self):
         assert FLUX_DECIMALS == 6
 
-    def test_public_pool_is_85_percent(self):
-        assert PUBLIC_POOL_BASE == 850_000_000_000_000
+    def test_public_pool_is_72_25_percent(self):
+        """v5.1: Public Redemption Pool = 722.5M (72.25% of 1B)."""
+        assert PUBLIC_POOL_BASE == 722_500_000_000_000
 
-    def test_validator_reserve_is_15_percent(self):
-        assert VALIDATOR_RESERVE_BASE == 150_000_000_000_000
+    def test_network_incentives_reserve_is_27_75_percent(self):
+        """v5.1: Network Incentives Reserve = 277.5M (27.75% of 1B).
+
+        Renamed from "validator reserve" — now covers 5 sub-buckets
+        (validator emissions, attestor emissions, ecosystem, strategic,
+        liquidity).
+        """
+        assert VALIDATOR_RESERVE_BASE == 277_500_000_000_000
 
     def test_pool_plus_reserve_equals_max(self):
         assert PUBLIC_POOL_BASE + VALIDATOR_RESERVE_BASE == MERGE_TOKEN_SUPPLY_BASE
+
+
+class TestNetworkIncentivesSubBuckets:
+    """v5.1: Network Incentives Reserve breaks into 5 sub-buckets."""
+
+    def test_validator_emissions_is_115m(self):
+        assert VALIDATOR_EMISSIONS_BASE == 115_000_000_000_000
+
+    def test_attestor_emissions_is_65m(self):
+        assert ATTESTOR_EMISSIONS_BASE == 65_000_000_000_000
+
+    def test_ecosystem_treasury_is_40m(self):
+        assert ECOSYSTEM_TREASURY_BASE == 40_000_000_000_000
+
+    def test_strategic_is_30m(self):
+        """30M cMATRA reserved for Strategic/Investor (Orion Fund target)."""
+        assert STRATEGIC_BASE == 30_000_000_000_000
+
+    def test_liquidity_is_27_5m(self):
+        """27.5M = 5M bridge + 17.5M POL + 5M maker rebates."""
+        assert LIQUIDITY_BASE == 27_500_000_000_000
+
+    def test_sub_buckets_sum_to_reserve(self):
+        """Sub-buckets must sum to exactly the Network Incentives Reserve."""
+        total = (
+            VALIDATOR_EMISSIONS_BASE
+            + ATTESTOR_EMISSIONS_BASE
+            + ECOSYSTEM_TREASURY_BASE
+            + STRATEGIC_BASE
+            + LIQUIDITY_BASE
+        )
+        assert total == VALIDATOR_RESERVE_BASE
+        assert total == 277_500_000_000_000
 
 
 class TestNftCollectionInfo:

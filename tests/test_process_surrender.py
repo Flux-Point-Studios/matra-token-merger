@@ -46,7 +46,7 @@ def _make_rate_table(
                 "asset_name_hex": "ddd",
             },
         },
-        "public_pool_base": 850_000_000_000_000,
+        "public_pool_base": 722_500_000_000_000,
     }
 
 
@@ -173,7 +173,7 @@ class TestLoadRateTable:
         path.write_text(json.dumps(rt_data))
 
         result = load_rate_table(path)
-        assert result["public_pool_base"] == 850_000_000_000_000
+        assert result["public_pool_base"] == 722_500_000_000_000
 
 
 # ---------------------------------------------------------------------------
