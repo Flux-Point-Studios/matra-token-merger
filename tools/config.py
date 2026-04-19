@@ -87,12 +87,17 @@ MERGE_TOKEN_SUPPLY_BASE: int = MERGE_TOKEN_SUPPLY_DISPLAY * (10 ** MERGE_TOKEN_D
 # Dilution multiplier vs v3/v4: 722.5 / 850 = 0.85 exactly. Redemption rates
 # in the off-chain rate table shrink by the same 0.85 factor, so 1 AGENT
 # drops from ~0.5446 cMATRA to ~0.4629 cMATRA.
-VALIDATOR_RESERVE_FRACTION: float = 0.2775
-PUBLIC_POOL_FRACTION: float = 1.0 - VALIDATOR_RESERVE_FRACTION  # 0.7225
+# Tokenomics is defined in integer base units to avoid float drift
+# (e.g. 1.0 - 0.2775 = 0.7224999999999999 in IEEE-754 binary floating point).
+# The *_FRACTION aliases below are cosmetic-only — never used for arithmetic.
 VALIDATOR_RESERVE_DISPLAY: int = 277_500_000  # 277.5M cMATRA
 PUBLIC_POOL_DISPLAY: int = MERGE_TOKEN_SUPPLY_DISPLAY - VALIDATOR_RESERVE_DISPLAY  # 722.5M
 VALIDATOR_RESERVE_BASE: int = VALIDATOR_RESERVE_DISPLAY * (10 ** MERGE_TOKEN_DECIMALS)
 PUBLIC_POOL_BASE: int = MERGE_TOKEN_SUPPLY_BASE - VALIDATOR_RESERVE_BASE
+
+# Cosmetic fractions (for logging / docs only — DO NOT use in arithmetic)
+VALIDATOR_RESERVE_FRACTION: float = VALIDATOR_RESERVE_DISPLAY / MERGE_TOKEN_SUPPLY_DISPLAY  # 0.2775
+PUBLIC_POOL_FRACTION: float = PUBLIC_POOL_DISPLAY / MERGE_TOKEN_SUPPLY_DISPLAY  # 0.7225
 
 # Network Incentives Reserve sub-buckets (v5.1)
 VALIDATOR_EMISSIONS_BASE: int = 115_000_000 * (10 ** MERGE_TOKEN_DECIMALS)
