@@ -1,0 +1,429 @@
+{
+  "report_type": "twap_snapshot_pools",
+  "generated_at": "2026-03-12T03:49:11.447084+00:00",
+  "parameters": {
+    "primary_window": "7d",
+    "extra_windows": [
+      "24h",
+      "30d"
+    ],
+    "min_tvl_ada": 10000,
+    "top_pools": 3,
+    "combine_mode": "median"
+  },
+  "ada_usd_price": 0.2600961636,
+  "tokens": {
+    "AGENT": {
+      "unit": "97bbb7db0baef89caefce61b8107ac74c7a7340166b39d906f174bec54616c6f73",
+      "decimals": 0,
+      "eligible_pools": 3,
+      "pools": [
+        {
+          "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+          "dex": "Splash",
+          "tvl_ada": 117064.191373,
+          "windows": {
+            "7d": {
+              "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.0013999036981098706,
+              "latest_close": 0.0014818406071409932,
+              "min_close": 0.001297205672753371,
+              "max_close": 0.0014818406071409932
+            },
+            "24h": {
+              "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.0013836091095651313,
+              "latest_close": 0.0014818406071409932,
+              "min_close": 0.0013314931627278139,
+              "max_close": 0.0014818406071409932
+            },
+            "30d": {
+              "pool_id": "d8eb52caf3289a2880288b23141ce3d2a7025dcf76f26fd5659add06.7a1c5a84bbe123614501299e753e76738fc2a33eda54ebb3774aa13b7e679588",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.0015773009379701527,
+              "latest_close": 0.0014818406071409932,
+              "min_close": 0.0013003008620194427,
+              "max_close": 0.001886457755823308
+            }
+          }
+        },
+        {
+          "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+          "dex": "Minswap (V2)",
+          "tvl_ada": 39283.923009,
+          "windows": {
+            "7d": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.0013988472802126642,
+              "latest_close": 0.0015139079878264356,
+              "min_close": 0.0012708611651650302,
+              "max_close": 0.0015139079878264356
+            },
+            "24h": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.001350558225894881,
+              "latest_close": 0.0015139079878264356,
+              "min_close": 0.0012488672041366217,
+              "max_close": 0.0015268376626495588
+            },
+            "30d": {
+              "pool_id": "f5808c2c990d86da54bfc97d89cee6efa20cd8461616359478d96b4c.cc92eb089f1308c6cd9f55298ca716a66aa84534ea6ad6c6c5d9ffbbcad79281",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.0015750921479904423,
+              "latest_close": 0.0015139079878264356,
+              "min_close": 0.0012708611651650302,
+              "max_close": 0.0018881072625702043
+            }
+          }
+        },
+        {
+          "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+          "dex": "WingRiders (V2)",
+          "tvl_ada": 10545.22015,
+          "windows": {
+            "7d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.0014953695367967545,
+              "latest_close": 0.0015619766894843317,
+              "min_close": 0.0013848127548213665,
+              "max_close": 0.0015619766894843317
+            },
+            "24h": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.0014594957758613412,
+              "latest_close": 0.0015619766894843317,
+              "min_close": 0.001432526042430469,
+              "max_close": 0.0015619766894843317
+            },
+            "30d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.a555e14a0b9dec3ab1e12ba68c0e381c7573649619998a1063ac0964d4451fe1",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.0016663616556518571,
+              "latest_close": 0.0015619766894843317,
+              "min_close": 0.0014290877932411055,
+              "max_close": 0.001943788012108669
+            }
+          }
+        }
+      ],
+      "combined_twap": {
+        "window": "7d",
+        "mode": "median",
+        "ada": 0.0013999036981098706,
+        "usd": 0.0003641095812878299,
+        "per_pool_twaps_ada": [
+          0.0013999036981098706,
+          0.0013988472802126642,
+          0.0014953695367967545
+        ]
+      }
+    },
+    "SHARDS": {
+      "unit": "ea153b5d4864af15a1079a94a0e2486d6376fa28aafad272d15b243a0014df10536861726473",
+      "decimals": 6,
+      "eligible_pools": 1,
+      "pools": [
+        {
+          "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+          "dex": "WingRiders (V2)",
+          "tvl_ada": 10164.074669,
+          "windows": {
+            "7d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+              "interval": "1h",
+              "num_candles_requested": 168,
+              "num_candles_received": 168,
+              "twap": 0.077629731076621,
+              "latest_close": 0.0829990057968943,
+              "min_close": 0.07141786761825157,
+              "max_close": 0.0876196027762667
+            },
+            "24h": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+              "interval": "15m",
+              "num_candles_requested": 96,
+              "num_candles_received": 96,
+              "twap": 0.08298331536871019,
+              "latest_close": 0.0829990057968943,
+              "min_close": 0.08297257981258423,
+              "max_close": 0.0829990057968943
+            },
+            "30d": {
+              "pool_id": "6fdc63a1d71dc2c65502b79baae7fb543185702b12c3c5fb639ed737.2324a550ff15c4e94dc5a5fd0469cec594bf59bae8843c7805753d0f0e25a923",
+              "interval": "4h",
+              "num_candles_requested": 180,
+              "num_candles_received": 180,
+              "twap": 0.08536055136315074,
+              "latest_close": 0.0829990057968943,
+              "min_close": 0.07141786761825157,
+              "max_close": 0.1115438581526645
+            }
+          }
+        }
+      ],
+      "combined_twap": {
+        "window": "7d",
+        "mode": "median",
+        "ada": 0.077629731076621,
+        "usd": 0.02019119523432882,
+        "per_pool_twaps_ada": [
+          0.077629731076621
+        ]
+      }
+    },
+    "FLUX_PASS": {
+      "policy_id": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+      "display_name": "Flux Point Team Pass",
+      "is_nft": true,
+      "decimals": 0,
+      "nft_floor_twap": {
+        "primary": {
+          "policy_id": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+          "interval": "1d",
+          "num_candles_requested": 7,
+          "num_candles_received": 7,
+          "twap": 215.892857,
+          "latest_close": 215.892857,
+          "min_close": 215.892857,
+          "max_close": 215.892857
+        },
+        "extra_windows": {
+          "24h": {
+            "policy_id": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+            "interval": "1h",
+            "num_candles_requested": 24,
+            "num_candles_received": 24,
+            "twap": 215.89285699999996,
+            "latest_close": 215.892857,
+            "min_close": 215.892857,
+            "max_close": 215.892857
+          },
+          "30d": {
+            "policy_id": "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+            "interval": "1d",
+            "num_candles_requested": 30,
+            "num_candles_received": 30,
+            "twap": 215.892857,
+            "latest_close": 215.892857,
+            "min_close": 215.892857,
+            "max_close": 215.892857
+          }
+        }
+      },
+      "combined_twap": {
+        "window": "7d",
+        "mode": "floor_mean",
+        "ada": 215.892857,
+        "usd": 56.1529038543434
+      }
+    },
+    "SE_BRAWLERS": {
+      "policy_id": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc",
+      "display_name": "SE Brawlers",
+      "is_nft": true,
+      "decimals": 0,
+      "nft_floor_twap": {
+        "primary": {
+          "policy_id": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc",
+          "interval": "1d",
+          "num_candles_requested": 7,
+          "num_candles_received": 7,
+          "twap": 110.0,
+          "latest_close": 110.0,
+          "min_close": 110.0,
+          "max_close": 110.0
+        },
+        "extra_windows": {
+          "24h": {
+            "policy_id": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc",
+            "interval": "1h",
+            "num_candles_requested": 24,
+            "num_candles_received": 24,
+            "twap": 110.0,
+            "latest_close": 110.0,
+            "min_close": 110.0,
+            "max_close": 110.0
+          },
+          "30d": {
+            "policy_id": "25c75bbf105310685d51cd3adbdd50b72fdbd99be2cc3757dde7eafc",
+            "interval": "1d",
+            "num_candles_requested": 30,
+            "num_candles_received": 30,
+            "twap": 110.0,
+            "latest_close": 110.0,
+            "min_close": 110.0,
+            "max_close": 110.0
+          }
+        }
+      },
+      "combined_twap": {
+        "window": "7d",
+        "mode": "floor_mean",
+        "ada": 110.0,
+        "usd": 28.610577996
+      }
+    },
+    "BRAWL_PASS_ETD": {
+      "policy_id": "d3a197c4814054623432c882c60e6a81e8f3b94158033432529a02d2",
+      "display_name": "Brawl Pass: Enter the Dragon",
+      "is_nft": true,
+      "decimals": 0,
+      "nft_floor_twap": {
+        "primary": {
+          "policy_id": "d3a197c4814054623432c882c60e6a81e8f3b94158033432529a02d2",
+          "interval": "1d",
+          "num_candles_requested": 7,
+          "num_candles_received": 7,
+          "twap": 350.0,
+          "latest_close": 350.0,
+          "min_close": 350.0,
+          "max_close": 350.0
+        },
+        "extra_windows": {
+          "24h": {
+            "policy_id": "d3a197c4814054623432c882c60e6a81e8f3b94158033432529a02d2",
+            "interval": "1h",
+            "num_candles_requested": 24,
+            "num_candles_received": 24,
+            "twap": 350.0,
+            "latest_close": 350.0,
+            "min_close": 350.0,
+            "max_close": 350.0
+          },
+          "30d": {
+            "policy_id": "d3a197c4814054623432c882c60e6a81e8f3b94158033432529a02d2",
+            "interval": "1d",
+            "num_candles_requested": 30,
+            "num_candles_received": 30,
+            "twap": 350.0,
+            "latest_close": 350.0,
+            "min_close": 350.0,
+            "max_close": 350.0
+          }
+        }
+      },
+      "combined_twap": {
+        "window": "7d",
+        "mode": "floor_mean",
+        "ada": 350.0,
+        "usd": 91.03365726
+      }
+    },
+    "T1_ADAM_PASS": {
+      "policy_id": "b46891456b77dbc77c16090fd92a37f087f9a68e953c56b00a20332f",
+      "display_name": "T1 ADAM Launch Pass",
+      "is_nft": true,
+      "decimals": 0,
+      "nft_floor_twap": {
+        "primary": {
+          "policy_id": "b46891456b77dbc77c16090fd92a37f087f9a68e953c56b00a20332f",
+          "interval": "1d",
+          "num_candles_requested": 7,
+          "num_candles_received": 7,
+          "twap": 9947.984694,
+          "latest_close": 9947.984694,
+          "min_close": 9947.984694,
+          "max_close": 9947.984694
+        },
+        "extra_windows": {
+          "24h": {
+            "policy_id": "b46891456b77dbc77c16090fd92a37f087f9a68e953c56b00a20332f",
+            "interval": "1h",
+            "num_candles_requested": 24,
+            "num_candles_received": 24,
+            "twap": 9947.984694,
+            "latest_close": 9947.984694,
+            "min_close": 9947.984694,
+            "max_close": 9947.984694
+          },
+          "30d": {
+            "policy_id": "b46891456b77dbc77c16090fd92a37f087f9a68e953c56b00a20332f",
+            "interval": "1d",
+            "num_candles_requested": 30,
+            "num_candles_received": 30,
+            "twap": 9947.984694,
+            "latest_close": 9947.984694,
+            "min_close": 9947.984694,
+            "max_close": 9947.984694
+          }
+        }
+      },
+      "combined_twap": {
+        "window": "7d",
+        "mode": "floor_mean",
+        "ada": 9947.984694,
+        "usd": 2587.43265446092
+      }
+    },
+    "T2_ADAM_PASS": {
+      "policy_id": "06a64965c0ac1144a72a6ddfcb23aa9d4d7742a5b20ddd5cfb1164b9",
+      "display_name": "T2 ADAM Launch Pass",
+      "is_nft": true,
+      "decimals": 0,
+      "nft_floor_twap": {
+        "primary": {
+          "policy_id": "06a64965c0ac1144a72a6ddfcb23aa9d4d7742a5b20ddd5cfb1164b9",
+          "interval": "1d",
+          "num_candles_requested": 7,
+          "num_candles_received": 7,
+          "twap": 586.989796,
+          "latest_close": 586.989796,
+          "min_close": 586.989796,
+          "max_close": 586.989796
+        },
+        "extra_windows": {
+          "24h": {
+            "policy_id": "06a64965c0ac1144a72a6ddfcb23aa9d4d7742a5b20ddd5cfb1164b9",
+            "interval": "1h",
+            "num_candles_requested": 24,
+            "num_candles_received": 24,
+            "twap": 586.989796,
+            "latest_close": 586.989796,
+            "min_close": 586.989796,
+            "max_close": 586.989796
+          },
+          "30d": {
+            "policy_id": "06a64965c0ac1144a72a6ddfcb23aa9d4d7742a5b20ddd5cfb1164b9",
+            "interval": "1d",
+            "num_candles_requested": 30,
+            "num_candles_received": 30,
+            "twap": 494.46428573333327,
+            "latest_close": 586.989796,
+            "min_close": 462.627551,
+            "max_close": 586.989796
+          }
+        }
+      },
+      "combined_twap": {
+        "window": "7d",
+        "mode": "floor_mean",
+        "ada": 586.989796,
+        "usd": 152.6737940119466
+      }
+    }
+  }
+}
