@@ -1,17 +1,17 @@
 {
-  "subject": "POLICY_ID_HERE464c5558",
+  "subject": "POLICY_ID_HERE634d41545241",
   "name": {
-    "value": "FLUX",
+    "value": "cMATRA",
     "sequenceNumber": 0,
     "signatures": []
   },
   "description": {
-    "value": "FLUX — unified token from the AGENT + SHARDS merger",
+    "value": "cMATRA — Cardano representation of Materios MATRA, unified token from the AGENT + SHARDS + NFT merger",
     "sequenceNumber": 0,
     "signatures": []
   },
   "ticker": {
-    "value": "FLUX",
+    "value": "cMATRA",
     "sequenceNumber": 0,
     "signatures": []
   },

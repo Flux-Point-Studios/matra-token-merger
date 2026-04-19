@@ -53,7 +53,7 @@ from tools.config import ADMIN_PKH, CLAIM_DEADLINE_POSIX_MS, NETWORK
 
 logger = logging.getLogger(__name__)
 
-FLUX_ASSET_NAME_HEX = "464c5558"
+FLUX_ASSET_NAME_HEX = "634d41545241"  # hex("cMATRA") — asset name for mainnet mint
 
 
 def discover_unclaimed_utxos(
