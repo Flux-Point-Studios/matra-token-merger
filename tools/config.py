@@ -74,13 +74,46 @@ MERGE_TOKEN_DECIMALS: int = 6
 MERGE_TOKEN_SUPPLY_DISPLAY: int = 1_000_000_000  # 1 billion
 MERGE_TOKEN_SUPPLY_BASE: int = MERGE_TOKEN_SUPPLY_DISPLAY * (10 ** MERGE_TOKEN_DECIMALS)  # 1e15
 
-# Redemption model: 85% public pool, 15% validator reserve
-VALIDATOR_RESERVE_FRACTION: float = 0.15
-PUBLIC_POOL_FRACTION: float = 1.0 - VALIDATOR_RESERVE_FRACTION  # 0.85
-VALIDATOR_RESERVE_DISPLAY: int = int(MERGE_TOKEN_SUPPLY_DISPLAY * VALIDATOR_RESERVE_FRACTION)  # 150M
-PUBLIC_POOL_DISPLAY: int = MERGE_TOKEN_SUPPLY_DISPLAY - VALIDATOR_RESERVE_DISPLAY  # 850M
+# v5.1 Redemption model: 72.25% public pool, 27.75% Network Incentives Reserve
+#
+# Public Redemption Pool (722.5M) — distributed to AGENT/SHARDS/NFT holders
+# Network Incentives Reserve (277.5M) splits into 5 sub-buckets:
+#   * 115.0M Validator emissions
+#   * 65.0M Attestor emissions
+#   * 40.0M Ecosystem Treasury
+#   * 30.0M Strategic / Investor (Orion Fund target)
+#   * 27.5M Liquidity (5M bridge + 17.5M POL + 5M maker rebates)
+#
+# Dilution multiplier vs v3/v4: 722.5 / 850 = 0.85 exactly. Redemption rates
+# in the off-chain rate table shrink by the same 0.85 factor, so 1 AGENT
+# drops from ~0.5446 cMATRA to ~0.4629 cMATRA.
+# Tokenomics is defined in integer base units to avoid float drift
+# (e.g. 1.0 - 0.2775 = 0.7224999999999999 in IEEE-754 binary floating point).
+# The *_FRACTION aliases below are cosmetic-only — never used for arithmetic.
+VALIDATOR_RESERVE_DISPLAY: int = 277_500_000  # 277.5M cMATRA
+PUBLIC_POOL_DISPLAY: int = MERGE_TOKEN_SUPPLY_DISPLAY - VALIDATOR_RESERVE_DISPLAY  # 722.5M
 VALIDATOR_RESERVE_BASE: int = VALIDATOR_RESERVE_DISPLAY * (10 ** MERGE_TOKEN_DECIMALS)
 PUBLIC_POOL_BASE: int = MERGE_TOKEN_SUPPLY_BASE - VALIDATOR_RESERVE_BASE
+
+# Cosmetic fractions (for logging / docs only — DO NOT use in arithmetic)
+VALIDATOR_RESERVE_FRACTION: float = VALIDATOR_RESERVE_DISPLAY / MERGE_TOKEN_SUPPLY_DISPLAY  # 0.2775
+PUBLIC_POOL_FRACTION: float = PUBLIC_POOL_DISPLAY / MERGE_TOKEN_SUPPLY_DISPLAY  # 0.7225
+
+# Network Incentives Reserve sub-buckets (v5.1)
+VALIDATOR_EMISSIONS_BASE: int = 115_000_000 * (10 ** MERGE_TOKEN_DECIMALS)
+ATTESTOR_EMISSIONS_BASE: int = 65_000_000 * (10 ** MERGE_TOKEN_DECIMALS)
+ECOSYSTEM_TREASURY_BASE: int = 40_000_000 * (10 ** MERGE_TOKEN_DECIMALS)
+STRATEGIC_BASE: int = 30_000_000 * (10 ** MERGE_TOKEN_DECIMALS)  # Orion Fund target
+LIQUIDITY_BASE: int = 27_500_000 * (10 ** MERGE_TOKEN_DECIMALS)  # 5M bridge + 17.5M POL + 5M maker rebates
+
+assert (
+    VALIDATOR_EMISSIONS_BASE
+    + ATTESTOR_EMISSIONS_BASE
+    + ECOSYSTEM_TREASURY_BASE
+    + STRATEGIC_BASE
+    + LIQUIDITY_BASE
+    == VALIDATOR_RESERVE_BASE
+), "sub-buckets must sum to Network Incentives Reserve"
 
 # Legacy aliases (used by downstream code)
 FLUX_TICKER: str = MERGE_TOKEN_TICKER

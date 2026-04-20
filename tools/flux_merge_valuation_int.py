@@ -281,8 +281,17 @@ def build_rate_table(
         redeemable = on_chain_supply - waived + materialized
         if redeemable <= 0:
             rate_base = 0
+            rate_numerator = 0
+            rate_denominator = 1
         else:
             rate_base = bucket // redeemable
+            # Rational rate representation: exact rate = bucket / redeemable
+            # Consumers should compute: (balance * rate_numerator) // rate_denominator
+            # for precision.  rate_base_per_unit is the floor() of this and is
+            # kept for display / backwards compatibility, but would truncate
+            # SHARDS from 29.12 -> 29 (~3% precision loss => ~13M cMATRA dust).
+            rate_numerator = bucket
+            rate_denominator = redeemable
 
         tokens[name] = {
             "bucket_base": bucket,
@@ -293,20 +302,33 @@ def build_rate_table(
             "redeemable_supply_base": redeemable,
             "redeemable_supply_display": redeemable / (10 ** decimals),
             "rate_base_per_unit": rate_base,
+            "rate_numerator": rate_numerator,
+            "rate_denominator": rate_denominator,
             "rate_display": rate_base / (10 ** FLUX_DECIMALS),
+            "rate_display_exact": (
+                rate_numerator / rate_denominator / (10 ** FLUX_DECIMALS)
+                if rate_denominator > 0 else 0.0
+            ),
             "is_nft": entry.get("is_nft", False),
         }
 
-    # Compute team carve-out: cMATRA owed to team for waived treasury balances
+    # Compute team carve-out: cMATRA owed to team for waived treasury balances.
+    # Uses the rational rate (num/den) for precision — matches allocation math.
     team_carve: dict[str, Any] = {}
     total_carve_base = 0
     for asset_name, waiver_base in team_waivers.items():
         if waiver_base > 0 and asset_name in tokens:
-            rate = tokens[asset_name]["rate_base_per_unit"]
-            carve = waiver_base * rate
+            tok = tokens[asset_name]
+            rate_num = tok["rate_numerator"]
+            rate_den = tok["rate_denominator"]
+            rate_int = tok["rate_base_per_unit"]
+            # Rational floor division — no precision loss
+            carve = (waiver_base * rate_num) // rate_den if rate_den > 0 else 0
             team_carve[asset_name] = {
                 "waiver_base": waiver_base,
-                "rate_base_per_unit": rate,
+                "rate_base_per_unit": rate_int,
+                "rate_numerator": rate_num,
+                "rate_denominator": rate_den,
                 "carve_cmatra_base": carve,
                 "carve_cmatra_display": carve / (10 ** FLUX_DECIMALS),
             }

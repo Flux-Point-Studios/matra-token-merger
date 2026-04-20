@@ -308,7 +308,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--payment-skey", type=str, required=True)
     parser.add_argument("--script-address", type=str, default=None)
     parser.add_argument("--flux-policy", type=str, default=None)
-    parser.add_argument("--flux-asset-hex", type=str, default="464c5558")
+    parser.add_argument("--flux-asset-hex", type=str, default="634d41545241")
     parser.add_argument("--check-only", action="store_true", default=False)
     parser.add_argument("--submit", action="store_true", default=False)
     parser.add_argument("--preflight", action="store_true", default=False,
@@ -328,7 +328,7 @@ def main(argv: list[str] | None = None) -> None:
         index = index_data["index"]
         script_address = args.script_address or index_data.get("script_address", "")
         flux_policy = args.flux_policy or index_data.get("flux_policy_hex", "")
-        flux_asset = args.flux_asset_hex or index_data.get("flux_asset_hex", "464c5558")
+        flux_asset = args.flux_asset_hex or index_data.get("flux_asset_hex", "634d41545241")
     else:
         # Minimal index format (just the mapping)
         index = index_data

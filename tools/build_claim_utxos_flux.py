@@ -234,7 +234,7 @@ def build_claim_vault(
     funding_skey_path: str,
     script_address: str,
     flux_policy_hex: str,
-    flux_asset_hex: str = "464c5558",
+    flux_asset_hex: str = "634d41545241",
     batch_size: int = 40,
     out_dir: Path | None = None,
     submit: bool = False,
@@ -350,7 +350,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--funding-skey", type=str, required=True)
     parser.add_argument("--script-address", type=str, required=True)
     parser.add_argument("--flux-policy", type=str, required=True)
-    parser.add_argument("--flux-asset-hex", type=str, default="464c5558")
+    parser.add_argument("--flux-asset-hex", type=str, default="634d41545241")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--out-dir", type=str, required=True)
     parser.add_argument("--submit", action="store_true", default=False)

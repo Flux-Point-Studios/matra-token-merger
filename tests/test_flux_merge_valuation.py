@@ -284,11 +284,20 @@ class TestTeamCarve:
         assert "team_carve" not in rt
 
     def test_carve_math(self):
+        """v5.1: carve uses rational rate (exact floor division) rather than
+        waiver * rate_base_per_unit, which introduced ~0.02% precision loss
+        that contributed to the SHARDS dust bug.
+        """
         waiver = 10_000_000
         rt = build_rate_table(self._make_report(), team_waiver_supplies={"AGENT": waiver})
-        rate = rt["tokens"]["AGENT"]["rate_base_per_unit"]
+        entry = rt["tokens"]["AGENT"]
+        num = entry["rate_numerator"]
+        den = entry["rate_denominator"]
+        expected = (waiver * num) // den
         carve = rt["team_carve"]["per_asset"]["AGENT"]["carve_cmatra_base"]
-        assert carve == waiver * rate
+        assert carve == expected
+        # Sanity: rational carve >= integer-rate carve (never worse)
+        assert carve >= waiver * entry["rate_base_per_unit"]
 
     def test_carve_total(self):
         waivers = {"AGENT": 10_000_000, "SHARDS": 500_000_000_000}

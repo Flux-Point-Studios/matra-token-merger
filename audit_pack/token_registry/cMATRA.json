@@ -1,15 +1,15 @@
 {
-  "subject": "<policy_id>464c5558",
+  "subject": "<policy_id>634d41545241",
   "name": {
-    "value": "FLUX",
+    "value": "cMATRA",
     "sequenceNumber": 0
   },
   "description": {
-    "value": "Merged governance token (AGENT + SHARDS)",
+    "value": "cMATRA — Cardano representation of Materios MATRA (AGENT + SHARDS + NFT merger)",
     "sequenceNumber": 0
   },
   "ticker": {
-    "value": "FLUX",
+    "value": "cMATRA",
     "sequenceNumber": 0
   },
   "decimals": {
@@ -17,7 +17,7 @@
     "sequenceNumber": 0
   },
   "url": {
-    "value": "https://fluxpoint.studio",
+    "value": "https://fluxpointstudios.com",
     "sequenceNumber": 0
   }
 }

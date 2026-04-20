@@ -24,7 +24,7 @@ SHARDS_UNIT = (
 )
 
 FLUX_MAX_SUPPLY_BASE = 1_000_000_000_000_000  # 1e15 (cMATRA: 6 decimals)
-PUBLIC_POOL_BASE = 850_000_000_000_000  # 85% of max supply
+PUBLIC_POOL_BASE = 722_500_000_000_000  # v5.1: 72.25% of max supply (15% dilution)
 
 # A valid 28-byte payment key hash (64 hex chars → 56 hex chars)
 SAMPLE_PKH_1 = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
@@ -40,7 +40,7 @@ SAMPLE_SCRIPT_ADDRESS = (
 )
 
 SAMPLE_FLUX_POLICY = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef01"
-SAMPLE_FLUX_ASSET = "464c5558"
+SAMPLE_FLUX_ASSET = "634d41545241"  # hex("cMATRA") — asset name post-v5.1 rename
 
 SAMPLE_NFT_POLICY = "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a"
 

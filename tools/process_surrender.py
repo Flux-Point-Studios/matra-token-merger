@@ -172,6 +172,18 @@ def compute_redemption(
             f"Quantity must be positive, got {quantity_base}"
         )
 
+    # Prefer rational (numerator/denominator) when available — avoids the
+    # floor() precision loss that truncates e.g. SHARDS from 29.12 -> 29
+    # (~3% under-redemption).  Rational fields were added in v5.1 by
+    # build_rate_table().  Legacy rate tables without them still use the
+    # integer rate_base_per_unit for backwards compatibility.
+    rate_num = entry.get("rate_numerator")
+    rate_den = entry.get("rate_denominator")
+    if rate_num is not None and rate_den is not None and rate_den > 0:
+        # Floor division — on-chain contract uses the same formula
+        return (quantity_base * rate_num) // rate_den
+
+    # Fallback: integer rate (legacy)
     # Both fungible and NFT use the same formula:
     #   fungible: quantity_base (in smallest unit) * rate_base_per_unit
     #   NFT:      count_of_nfts * rate_base_per_unit
