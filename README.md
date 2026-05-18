@@ -191,9 +191,16 @@ The mainnet deploy is a single ceremony, run once. The high-level path:
    for the Server B half.
 2. **Pick a seed UTxO** controlled by `admin_pkh_1` — this becomes the
    one-shot-mint anchor.
-3. **`aiken blueprint apply`** the three params (`seed_utxo`, `admin_pkh_1`,
-   `admin_pkh_2`) to each validator → final `plutus.json` with the
-   applied `PolicyId` and surrender-pool `ScriptAddress`.
+3. **`aiken blueprint apply`** parameters to each validator:
+   - `flux_mint_policy`: three params in order — `seed_utxo`,
+     `admin_pkh_1`, `admin_pkh_2`
+   - `claim_validator`: three params in order — `admin_pkh_1`,
+     `admin_pkh_2`, `deadline` (POSIX milliseconds, the cutoff after
+     which surrender transactions are rejected on-chain and admin
+     withdraw becomes valid)
+
+   Result: `plutus.json` blueprints with the applied `cmatra_policy_id`
+   (mint policy) and `surrender_pool_address` (script address).
 4. **Mint 1 B cMATRA** in one transaction that consumes `seed_utxo` and
    pays the full supply into the surrender pool address (both admins
    co-sign). After this tx, the policy can never mint again.
@@ -240,7 +247,16 @@ address at surrender time), and they cannot impose new surrender terms.
 | Mint policy bypass | Mint cMATRA with bogus seed_utxo | PASS (rejected) |
 | Mint over cap | Mint > 1 B in the parameterized tx | PASS (rejected) |
 | Mint wrong asset name | Mint under policy with different name | PASS (rejected) |
-| Admin sweep before deadline | Both admins try to sweep early | PASS (rejected) |
+| `ProcessSurrender` after deadline | Both admins try to surrender past deadline | PASS (rejected) |
+| `AdminWithdraw` before deadline | Both admins try to sweep early | PASS (rejected) |
+
+The deadline check on `ProcessSurrender` is enforced on chain via
+`is_entirely_before(tx.validity_range, deadline)` (see
+`onchain/claim_validator/validators/claim_validator.ak:69-70`). The mirror
+check `is_entirely_after` is enforced on `AdminWithdraw`. The deadline
+is a compile-time parameter of the validator and is baked into the
+script hash — it cannot be changed without redeploying at a new
+address.
 
 Full audit at [`audit_pack/2026-04-14/smart_contract_audit.html`](audit_pack/2026-04-14/smart_contract_audit.html).
 

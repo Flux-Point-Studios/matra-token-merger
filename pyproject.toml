@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "cMATRA Token Merger — surrender pool + one-shot mint on Cardano"
 requires-python = ">=3.10"
 dependencies = [
-    "pycardano>=0.11.0",
+    # pycardano 0.13+ drops the cbor2pure fallback and uses cbor2 natively.
+    # Older 0.11/0.12 paths pull cbor2pure which then breaks against
+    # cbor2 >= 5.5 (removed `CBORDecodeValueError` symbol cbor2pure
+    # imports from at module load time).
+    "pycardano>=0.13.0",
     "blockfrost-python>=0.6.0",
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",

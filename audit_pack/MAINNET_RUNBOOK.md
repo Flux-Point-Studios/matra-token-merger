@@ -52,8 +52,12 @@ Pick a UTxO controlled by `admin_pkh_1`.
 
 - [ ] `flux_mint_policy` — `aiken blueprint apply` with three params
       in order (`seed_utxo`, `admin_pkh_1`, `admin_pkh_2`)
-- [ ] `claim_validator` — `aiken blueprint apply` with two params
-      in order (`admin_pkh_1`, `admin_pkh_2`)
+- [ ] `claim_validator` — `aiken blueprint apply` with three params
+      in order (`admin_pkh_1`, `admin_pkh_2`, `deadline`).
+      `deadline` is a `POSIX milliseconds Int`, sourced from
+      `CLAIM_DEADLINE_POSIX_MS` in env. **This is baked into the script
+      hash — changing it requires re-deploying the validator at a new
+      script address.**
 - [ ] `cmatra_policy_id` (mint policy applied hash): _______________________
 - [ ] `surrender_pool_script_hash` (claim validator applied hash): _________
 - [ ] `surrender_pool_address` (bech32): __________________________________
@@ -127,7 +131,7 @@ shape, even if the PKHs differ).
 - [ ] Mint policy preflight on preprod (with test admin keys)
 - [ ] Pool initialization on preprod
 - [ ] 5 surrender txs on preprod (admin co-signed) — all settle within 2 blocks
-- [ ] All 8 red-team tests pass on preprod:
+- [ ] All red-team tests pass on preprod:
   - [ ] Single-admin surrender attempt (rejected)
   - [ ] No-admin surrender attempt (rejected)
   - [ ] Wrong redeemer (rejected)
@@ -135,7 +139,14 @@ shape, even if the PKHs differ).
   - [ ] Mint with wrong seed_utxo (rejected)
   - [ ] Mint over the supply cap (rejected)
   - [ ] Mint a different asset name (rejected)
-  - [ ] Admin sweep before deadline (rejected)
+  - [ ] `ProcessSurrender` **before** deadline + both admins (accepted)
+  - [ ] `ProcessSurrender` **after** deadline + both admins (rejected —
+        the validator enforces `is_entirely_before(tx.validity_range, deadline)`
+        on this path, mirrored by `claim_validator.ak` unit test
+        `process_surrender_after_deadline_fails`)
+  - [ ] `AdminWithdraw` **before** deadline + both admins (rejected —
+        the symmetric `is_entirely_after` check)
+  - [ ] `AdminWithdraw` **after** deadline + both admins (accepted)
 
 ---
 
@@ -184,11 +195,27 @@ shape, even if the PKHs differ).
 
 ### Deadline extension
 
-Deadlines are baked into off-chain orchestration, not into the validator
-itself (the validator only requires both admin signatures — there is no
-time check on the surrender path). Admins can extend by simply continuing
-to co-sign surrender transactions after the originally announced date,
-and by delaying the sweep tx.
+**The deadline is a compile-time parameter of `claim_validator` and is
+baked into the script hash.** `ProcessSurrender` enforces
+`is_entirely_before(tx.validity_range, deadline)` on chain, and
+`AdminWithdraw` enforces the symmetric `is_entirely_after` check. After
+the on-chain deadline passes, surrender transactions are **rejected at
+submission** — there is no soft / operational extension.
+
+Extending the window requires:
+
+1. Deploying a new `claim_validator` instance with a later `deadline`
+   parameter (new script address).
+2. Both admins co-signing an `AdminWithdraw` against the old pool to
+   recover the remaining cMATRA.
+3. Both admins co-signing a fresh pool-initialization tx that pays
+   the recovered cMATRA into the new script address.
+4. Updating `surrender_api.py` `SURRENDER_SCRIPT_ADDRESS` env var and
+   redeploying the service.
+
+Plan accordingly — operators who need extension capability should
+either pick a generous initial deadline or build the new-validator
+ceremony into their launch playbook.
 
 ### Admin key compromise — pre-deadline
 
