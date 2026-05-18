@@ -1,0 +1,50 @@
+name: aiken
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: aiken-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-build:
+    name: aiken check + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        validator:
+          - onchain/claim_validator
+          - onchain/flux_mint_policy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Aiken (pinned to audited version)
+        run: |
+          curl -sSf https://install.aiken-lang.org | bash -s -- --version v1.1.21
+          echo "$HOME/.aiken/bin" >> "$GITHUB_PATH"
+
+      - name: aiken --version
+        run: aiken --version
+
+      - name: aiken check (${{ matrix.validator }})
+        working-directory: ${{ matrix.validator }}
+        run: aiken check
+
+      - name: aiken build (${{ matrix.validator }})
+        working-directory: ${{ matrix.validator }}
+        run: aiken build
+
+      - name: Verify reproducible build script
+        working-directory: ${{ matrix.validator }}
+        run: |
+          if [ -x ./verify_build.sh ]; then
+            ./verify_build.sh
+          else
+            echo "no verify_build.sh — skipping"
+          fi

@@ -1,149 +1,123 @@
-# FLUX Token Merger
+# cMATRA Token Merger
 
-**AGENT + SHARDS -> FLUX** on Cardano.
+Cardano-native consolidation of seven legacy Flux Point Studios assets into a
+single new token — **cMATRA** — via a dual-admin surrender pool and a
+parameterized one-shot mint policy.
 
-A deterministic, auditable pipeline that consolidates two legacy Cardano native assets into a single new token using value-weighted allocation and a signature-gated claim vault.
+| In (legacy) | Policy ID | Type |
+|---|---|---|
+| AGENT (Talos) | `97bbb7db…174bec` | fungible (0-dec) |
+| SHARDS | `ea153b5d…15b243a` | fungible (6-dec) |
+| FLUX_PASS | `0889a2d5…64f683a` | NFT (401 ct) |
+| SE_BRAWLERS | `25c75bbf…dde7eafc` | NFT (242 ct) |
+| BRAWL_PASS_ETD | `d3a197c4…529a02d2` | NFT (44 ct) |
+| T1_ADAM_PASS | `b4689145…a20332f` | NFT (43 ct) |
+| T2_ADAM_PASS | `06a64965…fb1164b9` | NFT (25 ct) |
 
-| Token | Policy | Decimals |
-|-------|--------|----------|
-| AGENT (Talos) | `97bbb7db...174bec` | 0 |
-| SHARDS | `ea153b5d...15b243a` | 6 |
-| **FLUX** (new) | minted at merge | 6 |
+| Out (new) | Decimals | Supply cap | On-chain symbol |
+|---|---|---|---|
+| **cMATRA** | 6 | 1,000,000,000 (1 × 10¹⁵ base units) | `cMATRA` (hex `634d41545241`) |
 
-**FLUX max supply:** 1,000,000,000 (1e15 base units)
+cMATRA stays Cardano-side in v0. The Materios partner-chain `MATRA` token
+(same total cap, Substrate-side) is a separate track — see
+[`Flux-Point-Studios/materios`](https://github.com/Flux-Point-Studios/materios).
+
+---
+
+## Status
+
+| Component | Status |
+|---|---|
+| `claim_validator` (surrender pool, Aiken Plutus V3) | Audited, preprod-rehearsed |
+| `flux_mint_policy` (one-shot mint, Aiken Plutus V3) | Audited, unit-tested, **mainnet mint pending** |
+| `services/surrender_api.py` (Server A) | Containerized, preprod-tested |
+| `services/cosigner_api.py` (Server B) | Containerized, preprod-tested |
+| `tools/*` (off-chain pipeline) | ~160 pytest tests passing |
+| Preprod rehearsal | 9 / 9 stages + 8 / 8 red-team tests pass |
+| Mainnet deploy | Pending: admin keys, deadline, deploy ceremony |
+
+**Pre-mainnet readiness:** see [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md).
 
 ---
 
 ## Architecture
 
-```
-  TapTools API          Blockfrost API
-       |                      |
-  TWAP prices           holder snapshots
-       |                      |
-       v                      v
-  +----------+   +------------------------+
-  | Phase 1  |   | Phase 3                |
-  | TWAP &   |-->| Snapshot + Allocation  |
-  | Pools    |   | (integer math)         |
-  +----------+   +------------------------+
-       |                      |
-       v                      v
-  +----------+   +------------------------+
-  | Phase 2  |   | Phase 4                |
-  | Merge    |   | (reserved)             |
-  | Valuation|   |                        |
-  +----------+   +------------------------+
-                              |
-                              v
-               +--------------+-----------+
-               |                          |
-          +----------+             +----------+
-          | Phase 5  |             | Phase 6  |
-          | Mint     |             | Build    |
-          | FLUX     |             | Claim    |
-          +----------+             | UTxOs    |
-                                   +----------+
-                                        |
-                                        v
-                                   +----------+
-                                   | Phase 7  |
-                                   | Build    |
-                                   | Index    |
-                                   +----------+
-                                        |
-                                        v
-                                   +----------+
-                                   | Phase 8  |
-                                   | Claim    |
-                                   | Client   |
-                                   +----------+
-```
+The merger has **two on-chain pieces** and **two operator services**.
 
 ### On-chain components
 
-- **Claim Validator** (Aiken, Plutus V3) -- parameterized signature-gated lockbox with admin reclaim. Datum encodes a `VerificationKeyHash`; only that signer can spend the UTxO. After a configurable deadline, the admin can sweep unclaimed UTxOs.
-- **FLUX Mint Policy** -- native script with admin signature + timelock to enforce one-time mint.
+```
+┌─────────────────────────────┐      ┌─────────────────────────────┐
+│   onchain/flux_mint_policy  │      │   onchain/claim_validator   │
+│   ─────────────────────────  │      │   ─────────────────────────  │
+│   one-shot 1 B cMATRA mint  │      │   dual-admin surrender pool │
+│   parameterized by:         │      │   parameterized by:         │
+│     • seed_utxo             │      │     • admin_pkh_1           │
+│     • admin_pkh_1           │      │     • admin_pkh_2           │
+│     • admin_pkh_2           │      │                             │
+│                             │      │   pool UTxOs hold cMATRA;   │
+│   one transaction ever,     │      │   each surrender tx is      │
+│   exact supply cap          │      │   admin-co-signed and       │
+│                             │      │   atomically pays out at    │
+│                             │      │   fixed rate-table prices   │
+└─────────────────────────────┘      └─────────────────────────────┘
+                │                                  ▲
+                └──────── 1 B cMATRA ──────────────┘
+                         minted into pool
+```
 
-### Off-chain pipeline
+**`flux_mint_policy`** enforces (audited at `audit_pack/2026-04-14/`):
 
-Six deterministic tools (each a standalone CLI) produce a reproducible audit pack:
+1. **One-shot mint** — parameterized by an `OutputReference` (`seed_utxo`).
+   The mint tx must consume that UTxO; once spent, no second mint is possible.
+2. **Exact supply cap** — net mint of cMATRA must equal exactly
+   `1_000_000_000 × 10⁶ = 1 × 10¹⁵` base units.
+3. **Single asset name** — only `cMATRA` (hex `634d41545241`); any other
+   asset name under this policy is rejected.
+4. **Dual-admin signatures** — both `admin_pkh_1` AND `admin_pkh_2` must sign.
+5. **Permissionless burn** — any holder can burn cMATRA (negative net mint)
+   with no signature.
 
-1. **TWAP & Pool Selection** -- multi-pool time-weighted average pricing
-2. **Merge Valuation** -- value-based token weighting with integer bucket allocation
-3. **Snapshot & Allocation** -- holder scan, script-address exclusion, floor-division allocation
-4. **Claim UTxO Builder** -- batched transactions locking FLUX at the script address
-5. **Claim Index Builder** -- maps payment-key-hash to UTxO references
-6. **Claim Client** -- index-based claiming (no full script-address scan)
+**`claim_validator` (surrender pool)** enforces:
 
----
+1. **Dual-admin signatures** — both admin keys must sign every surrender or
+   admin sweep.
+2. **No claimant-side keys** — the user wallet signs the surrender of legacy
+   assets; the pool pays out cMATRA at the rate-table-locked price.
+3. **Admin sweep after deadline** — once the 6-month window closes, remaining
+   pool cMATRA can be reclaimed by both admins co-signing.
 
-## Progress
-
-### Mainnet pipeline (Phases 1-3)
-
-| Phase | Tool | Status | Artifact |
-|-------|------|--------|----------|
-| 1 | TWAP & Pool Selection | Done | `audit_pack/2026-02-11/twap_report.json` |
-| 2 | Merge Valuation | Done | `audit_pack/2026-02-11/merge_report.json` |
-| 3 | Snapshot & Allocation | Done | `audit_pack/2026-02-11/allocations_flux.csv` |
-| 4 | *(reserved)* | -- | -- |
-| 5 | Mint FLUX | Blocked on governance approval | -- |
-| 6 | Build Claim UTxOs | Blocked on Phase 5 | -- |
-| 7 | Build Claim Index | Blocked on Phase 6 | -- |
-| 8 | Claim Client | Blocked on Phase 7 | -- |
-
-### Preprod rehearsal (Phases 5-9)
-
-Full end-to-end deployment on Cardano preprod testnet with synthetic data.
-
-| Stage | Description | Status |
-|-------|-------------|--------|
-| 1 | Wallet generation (admin + 20 test wallets) | Done |
-| 2 | Mint AgentTest (1B) + ShardsTest (3T) | Done |
-| 3 | Adversarial token distribution (20 wallets) | Done |
-| 4 | Synthetic allocation CSV | Done |
-| 5 | Mint FLUX_TEST (1Q) with timelock | Done |
-| 6 | Deploy claim validator + build 20 claim UTxOs | Done |
-| 7 | Build claim index (20 keyhashes) | Done |
-| 8 | Happy-path claims (5/5 successful) | Done |
-| 9 | Red-team adversarial tests (8/8 pass) | Done |
-
-**Preprod validator:** `addr_test1wplwxwujdq6t6lvc8j5agv7wurxpjx8dt094779t09whq4chqhwe6`
-Script hash: `7ee33b926834bd7d983ca9d433cee0cc1918ed5bcb5f78ab795d7057`
-
-### Red-team results
-
-| Test | Attack vector | Result |
-|------|---------------|--------|
-| Wrong signer | Attacker signs victim's UTxO | PASS (rejected) |
-| Double claim | Re-spend consumed UTxO | PASS (rejected) |
-| Wrong redeemer | Garbage CBOR redeemer data | PASS (rejected) |
-| Datum swap | Attacker substitutes own pkh in datum | PASS (rejected) |
-| Index poisoning | Fabricated UTxO reference | PASS (rejected) |
-| Franken address | Claim via addr(victim_pkh, attacker_stk) | PASS (rejected) |
-| Admin reclaim before deadline | Admin sweeps before deadline expires | PASS (rejected) |
-| Admin reclaim after deadline | Admin sweeps after deadline (expected success) | PASS (accepted) |
-
-### Test suite
-
-~160 unit/integration tests covering all tools, utilities, and E2E pipeline flow.
+### Off-chain services
 
 ```
-tests/test_api_clients.py          13 tests
-tests/test_build_claim_index.py     6 tests
-tests/test_build_claim_utxos.py    12 tests
-tests/test_cardano_utils.py        12 tests
-tests/test_claim_flux_indexed.py   13 tests
-tests/test_config.py               10 tests
-tests/test_e2e_pipeline.py         15 tests
-tests/test_flux_merge_valuation.py 11 tests
-tests/test_snapshot_allocate.py    18 tests  (incl. 4 franken address tests)
-tests/test_twap_snapshot_pools.py  19 tests
-tests/test_funding_calculator.py   10 tests  (NEW)
-tests/test_cross_check.py         11 tests  (NEW)
-tests/test_admin_reclaim.py       12 tests  (NEW)
+                      flux1 website (Next.js)
+                              │
+                              │ HTTPS + X-API-Secret
+                              ▼
+                  ┌─────────────────────────┐
+                  │  surrender_api.py       │
+                  │  (Server A)             │
+                  │  • holds admin_1.skey   │
+                  │  • builds surrender tx  │
+                  └───────────┬─────────────┘
+                              │ HTTPS (LAN only)
+                              │ X-Cosigner-Secret
+                              ▼
+                  ┌─────────────────────────┐
+                  │  cosigner_api.py        │
+                  │  (Server B — separate   │
+                  │  physical host)         │
+                  │  • holds admin_2.skey   │
+                  │  • signs only when tx   │
+                  │    matches expected     │
+                  │    surrender pattern    │
+                  └─────────────────────────┘
 ```
+
+Server A and Server B are deployed on **separate physical machines** so that
+compromising one does not yield minting or pool-drain authority. The
+co-signer service refuses to sign any transaction that doesn't match the
+expected surrender / mint / admin-sweep shape.
 
 ---
 
@@ -151,320 +125,195 @@ tests/test_admin_reclaim.py       12 tests  (NEW)
 
 ### Prerequisites
 
-- Python 3.10+
-- [Aiken](https://aiken-lang.org/) v1.1+ (for on-chain contract compilation)
+- Python 3.10+ (3.11 recommended)
+- [Aiken](https://aiken-lang.org/) `v1.1.21` (pin matches the audited version)
+- Docker + Docker Compose (for running `surrender_api` / `cosigner_api`)
 
 ### Setup
 
 ```bash
-git clone https://github.com/Flux-Point-Studios/flux-merger.git
-cd flux-merger
+git clone https://github.com/Flux-Point-Studios/matra-token-merger.git
+cd matra-token-merger
 
 python -m venv .venv
-source .venv/bin/activate    # or .venv\Scripts\activate on Windows
-
+source .venv/bin/activate
 pip install -e ".[dev]"
 
 cp .env.example env.local
-# Edit env.local with your API keys
-```
-
-### Environment variables
-
-```bash
-NETWORK=mainnet                 # mainnet | preprod | preview
-BLOCKFROST_PROJECT_ID=mainnet...
-BLOCKFROST_PROJECT_ID_PREPROD=preprod...
-TAP_TOOLS_API_KEY=...
+# Edit env.local with your Blockfrost / TapTools API keys
 ```
 
 ### Run tests
 
 ```bash
+# Python pipeline (~160 tests)
 pytest
+
+# On-chain Plutus V3 validators (Aiken)
+( cd onchain/claim_validator && aiken check && aiken build )
+( cd onchain/flux_mint_policy && aiken check && aiken build )
 ```
 
-### Run the pipeline
+### Verify reproducible builds
+
+The on-chain compiled blueprints (`plutus.json`) are deterministic given the
+pinned Aiken version. Each `onchain/*/` directory has a `verify_build.sh`
+script that recompiles and reports the unapplied script hash for independent
+verification.
 
 ```bash
-# Phase 1: TWAP report
-python -m tools.twap_snapshot_pools \
-  --interval 1h --num-intervals 168 \
-  --top-pools 3 --min-tvl-ada 10000 \
-  --combine median --quote USD \
-  --out audit_pack/YYYY-MM-DD/twap_report.json
-
-# Phase 2: Merge valuation
-python -m tools.flux_merge_valuation_int \
-  --primary-window 7d --quote USD \
-  --out-json audit_pack/YYYY-MM-DD/merge_report.json
-
-# Phase 3: Snapshot + allocation
-python -m tools.snapshot_allocate_flux \
-  --merge-report audit_pack/YYYY-MM-DD/merge_report.json \
-  --exclude-script-addresses \
-  --denominator-mode eligible \
-  --out audit_pack/YYYY-MM-DD/allocations_flux.csv \
-  --out-summary audit_pack/YYYY-MM-DD/allocations_summary.json
-
-# Phase 6: Build claim vault
-python -m tools.build_claim_utxos_flux \
-  --allocations-csv audit_pack/YYYY-MM-DD/allocations_flux.csv \
-  --funding-skey payment.skey \
-  --script-address <claim_script_addr> \
-  --flux-policy <policy_hex> \
-  --batch-size 40
-
-# Phase 7: Build claim index
-python -m tools.build_flux_claim_index \
-  --manifest audit_pack/YYYY-MM-DD/claim_tx_out/manifest.json
-
-# Phase 8: Claim (per user)
-python -m tools.claim_flux_indexed \
-  --index-file audit_pack/YYYY-MM-DD/claim_index_min.json \
-  --blueprint onchain/claim_validator/plutus.json \
-  --payment-skey payment.skey \
-  --submit
+bash onchain/flux_mint_policy/verify_build.sh
+bash onchain/claim_validator/verify_build.sh
 ```
 
 ### Run preprod rehearsal
 
+The preprod harness exercises all 9 deployment stages plus 8 red-team
+attacks against a parameterized validator with synthetic test wallets.
+
 ```bash
 NETWORK=preprod python -m scripts.preprod_harness
-# Resume from any stage:
+# Resume from a specific stage:
 NETWORK=preprod python -m scripts.preprod_harness --skip-to-stage 6
-```
-
-### Run red-team tests
-
-```bash
+# Run the red-team suite:
 NETWORK=preprod python -m scripts.red_team
 ```
 
 ---
 
-## Key design decisions
+## Deployment (mainnet)
 
-### Value-based merge weights
-Each legacy token's share of FLUX is proportional to its market value:
-- `weight_i = (TWAP_price_i * supply_i) / total_valuation`
-- Integer bucket: `B_i = floor(weight_i * 1e15)`, remainder to last token
+The mainnet deploy is a single ceremony, run once. The high-level path:
 
-### Integer-only allocation
-No floating point in allocation math. For each address:
-- `alloc_i(addr) = floor(balance_i * B_i / eligible_supply_i)`
-- Dust from floor rounding is tracked and published
+1. **Generate admin keys** — two separate physical machines, one
+   `admin_1.skey` on Server A, one `admin_2.skey` on Server B. See
+   [`services/deploy/setup-cosigner.sh`](services/deploy/setup-cosigner.sh)
+   for the Server B half.
+2. **Pick a seed UTxO** controlled by `admin_pkh_1` — this becomes the
+   one-shot-mint anchor.
+3. **`aiken blueprint apply`** the three params (`seed_utxo`, `admin_pkh_1`,
+   `admin_pkh_2`) to each validator → final `plutus.json` with the
+   applied `PolicyId` and surrender-pool `ScriptAddress`.
+4. **Mint 1 B cMATRA** in one transaction that consumes `seed_utxo` and
+   pays the full supply into the surrender pool address (both admins
+   co-sign). After this tx, the policy can never mint again.
+5. **Deploy `surrender_api`** + `cosigner_api` containers, point flux1
+   front-end at the public surrender_api URL, set `WINDOW_OPEN = true`.
+6. **Six-month surrender window** — users submit legacy assets via flux1;
+   each surrender is admin co-signed.
+7. **After deadline** — both admins co-sign a sweep tx to retire any
+   unclaimed cMATRA from the pool.
 
-### Inline datum claim vault
-Each claim UTxO has an inline datum encoding the claimant's payment verification key hash. The Plutus V3 validator checks `list.has(tx.extra_signatories, datum.claimant_pkh)` -- only the authorized keyholder can spend.
+Full step-by-step go/no-go checklist:
+[`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md).
 
-### Multi-pool TWAP
-Price manipulation resistance via:
-- Top N pools by TVL (default: 3)
-- Minimum TVL threshold (default: 10,000 ADA)
-- Median combination across pools
-- 7-day window with 1h candles (168 data points)
+---
 
-### Burn adjustment
-88,551 SHARDS + 4,002 AGENT permanently locked in a dead script wallet (`$burnsnek`) are subtracted from eligible supply before allocation.
+## Security model
+
+The threat model is **dual-admin compromise**:
+
+- Compromising Server A (admin_1) without Server B grants no minting and no
+  pool draining. Surrender transactions require both signatures.
+- Compromising Server B (admin_2) without Server A grants no minting and
+  no pool draining for the same reason. The cosigner service additionally
+  refuses to sign anything that doesn't match the expected transaction
+  pattern (this is defense-in-depth on top of the dual-signature requirement).
+- Compromising the flux1 front-end can at worst block surrenders (DoS); it
+  cannot mint or drain. The front-end never holds either admin key.
+- Compromising user wallets is out of scope — that's a per-user problem,
+  not a protocol-level one.
+
+Once the surrender deadline passes, the only on-chain operation the admins
+can perform is the sweep of unclaimed cMATRA. They cannot mint more, they
+cannot recover surrendered legacy assets (those moved to a quarantine
+address at surrender time), and they cannot impose new surrender terms.
+
+**Audit + adversarial testing:**
+
+| Test | Attack vector | Result |
+|---|---|---|
+| Wrong signer (single-admin) | Only one of the two admins signs | PASS (rejected) |
+| No signers | Surrender with no admin sigs | PASS (rejected) |
+| Wrong redeemer | Garbage CBOR redeemer data | PASS (rejected) |
+| Datum swap | Modify pool datum to redirect cMATRA | PASS (rejected) |
+| Mint policy bypass | Mint cMATRA with bogus seed_utxo | PASS (rejected) |
+| Mint over cap | Mint > 1 B in the parameterized tx | PASS (rejected) |
+| Mint wrong asset name | Mint under policy with different name | PASS (rejected) |
+| Admin sweep before deadline | Both admins try to sweep early | PASS (rejected) |
+
+Full audit at [`audit_pack/2026-04-14/smart_contract_audit.html`](audit_pack/2026-04-14/smart_contract_audit.html).
 
 ---
 
 ## Repository structure
 
 ```
-flux-merger/
+matra-token-merger/
   onchain/
-    claim_validator/
-      validators/claim_validator.ak    # Aiken Plutus V3 validator (parameterized)
-      plutus.json                      # compiled blueprint
-      aiken.toml
-  tools/
-    config.py                          # shared config + env loading
-    api_clients.py                     # Blockfrost + TapTools + Koios clients
-    cardano_utils.py                   # address parsing, datum encoding, param application
-    twap_snapshot_pools.py             # Phase 1: TWAP
-    flux_merge_valuation_int.py        # Phase 2: valuation
-    snapshot_allocate_flux.py          # Phase 3: snapshot + allocation
-    build_claim_utxos_flux.py          # Phase 6: claim vault builder (+ --preflight)
-    build_flux_claim_index.py          # Phase 7: index builder
-    claim_flux_indexed.py              # Phase 8: claim client (+ --preflight)
-    funding_calculator.py              # Funding estimate calculator
-    cross_check_holders.py             # Blockfrost vs Koios cross-check
-    admin_reclaim.py                   # Post-deadline admin sweep
+    claim_validator/                # surrender pool (Aiken Plutus V3)
+      validators/claim_validator.ak
+      plutus.json                   # compiled blueprint
+      verify_build.sh
+    flux_mint_policy/               # one-shot mint policy (Aiken Plutus V3)
+      validators/flux_mint_policy.ak
+      plutus.json
+      verify_build.sh
+      README.md                     # parameter spec + ceremony
+  services/
+    surrender_api.py                # Server A FastAPI (holds admin_1)
+    cosigner_api.py                 # Server B FastAPI (holds admin_2)
+    deploy/
+      setup-cosigner.sh             # Server B bootstrap script
+      docker-compose.cosigner.yml   # Server B container
+      Dockerfile.cosigner
+      .env.cosigner.example
+  tools/                            # off-chain pipeline (~160 pytest tests)
+    twap_snapshot_pools.py          # multi-pool TWAP
+    flux_merge_valuation_int.py     # integer-only valuation
+    snapshot_allocate_flux.py       # holder snapshot + allocation
+    build_surrender_pool.py         # pool initialization
+    process_surrender.py            # per-tx surrender flow
+    admin_reclaim.py                # post-deadline sweep
+    cardano_utils.py                # address / datum / param helpers
+    api_clients.py                  # Blockfrost + TapTools + Koios
+    config.py                       # env loading
   scripts/
-    preprod_harness.py                 # 9-stage preprod rehearsal
-    red_team.py                        # adversarial test suite (7 tests)
-  tests/                               # ~160 tests
+    preprod_harness.py              # 9-stage rehearsal
+    red_team.py                     # adversarial test suite
+  tests/                            # ~160 pytest tests
   audit_pack/
-    2026-02-11/                        # mainnet artifacts (Phases 1-3)
-    preprod/                           # preprod rehearsal state + data
-    token_registry/FLUX.json           # CIP-26 token registry template
-    MAINNET_RUNBOOK.md                 # Go/no-go checklist
+    2026-04-14/                     # smart contract audit
+    2026-04-19/                     # canonical mainnet rate table
+    preprod/                        # preprod rehearsal state + test wallets
+    MAINNET_RUNBOOK.md              # go/no-go checklist
   .env.example
   pyproject.toml
 ```
 
 ---
 
-## Appendix: Code reference
+## Contributing
 
-### On-chain contract
+PRs welcome. We require:
 
-| File | Line | Description |
-|------|------|-------------|
-| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 25-28 | `ClaimDatum` type definition (`claimant_pkh: VerificationKeyHash`) |
-| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 31-53 | `claim_validator.spend` -- parameterized validation (claimant claim + admin reclaim) |
-| [`onchain/claim_validator/validators/claim_validator.ak`](onchain/claim_validator/validators/claim_validator.ak) | 62+ | On-chain tests (6 tests: claimant, admin before/at/after deadline, wrong key, third party) |
-| [`onchain/claim_validator/plutus.json`](onchain/claim_validator/plutus.json) | -- | Compiled Plutus V3 blueprint (hash changes after parameter application) |
+- All Python tests passing (`pytest`)
+- Aiken validators pass `aiken check` for both `claim_validator/` and
+  `flux_mint_policy/`
+- Signed commits (`git config --global commit.gpgsign true` + SSH signing
+  key registered with GitHub — see materios-intent-settlement's
+  [`docs/onboarding-signing.md`](https://github.com/Flux-Point-Studios/materios-intent-settlement/blob/main/docs/onboarding-signing.md)
+  for the recipe; the same setup applies to this repo)
+- Security-sensitive changes (validators, surrender / mint / sweep paths,
+  admin-key handling) go through `/security-review` before merge
 
-### Shared infrastructure
-
-| File | Line | Description |
-|------|------|-------------|
-| [`tools/config.py`](tools/config.py) | 33-36 | Network selection (`NETWORK` env var) |
-| [`tools/config.py`](tools/config.py) | 42-45 | Network-aware Blockfrost project ID resolution |
-| [`tools/config.py`](tools/config.py) | 72-75 | FLUX supply constants (`1e15` base units) |
-| [`tools/config.py`](tools/config.py) | 101-129 | `TokenInfo` dataclass + `AGENT`/`SHARDS` definitions |
-| [`tools/api_clients.py`](tools/api_clients.py) | 33-80 | `_request_with_retry` -- backoff + retry for API calls |
-| [`tools/api_clients.py`](tools/api_clients.py) | 82-181 | `BlockfrostClient` -- asset info, holders, UTxOs, tx submission |
-| [`tools/api_clients.py`](tools/api_clients.py) | 183-254 | `TapToolsClient` -- pool discovery, OHLCV candles, ADA/USD |
-| [`tools/cardano_utils.py`](tools/cardano_utils.py) | 29-50 | `address_to_payment_key_hash` -- bech32 address parsing |
-| [`tools/cardano_utils.py`](tools/cardano_utils.py) | 51-58 | `is_script_address` -- script vs pubkey address detection |
-| [`tools/cardano_utils.py`](tools/cardano_utils.py) | 73-88 | `encode_claim_datum` -- CBOR datum encoding |
-| [`tools/cardano_utils.py`](tools/cardano_utils.py) | 107-116 | `derive_script_address` -- from script hash to bech32 |
-
-### Phase 1: TWAP & Pool Selection
-
-| File | Line | Description |
-|------|------|-------------|
-| [`tools/twap_snapshot_pools.py`](tools/twap_snapshot_pools.py) | 46-56 | `compute_twap` -- time-weighted average from candle array |
-| [`tools/twap_snapshot_pools.py`](tools/twap_snapshot_pools.py) | 58-74 | `combine_twaps` -- median / deepest / liquidity-weighted modes |
-| [`tools/twap_snapshot_pools.py`](tools/twap_snapshot_pools.py) | 95-111 | `discover_pools` -- TVL filtering + top-N selection |
-| [`tools/twap_snapshot_pools.py`](tools/twap_snapshot_pools.py) | 152-239 | `build_twap_report` -- full report assembly |
-
-### Phase 2: Merge Valuation
-
-| File | Line | Description |
-|------|------|-------------|
-| [`tools/flux_merge_valuation_int.py`](tools/flux_merge_valuation_int.py) | 39-43 | `fetch_supply` -- on-chain supply via Blockfrost |
-| [`tools/flux_merge_valuation_int.py`](tools/flux_merge_valuation_int.py) | 50-76 | `compute_valuations` -- `V_i = price * supply` per token |
-| [`tools/flux_merge_valuation_int.py`](tools/flux_merge_valuation_int.py) | 83-109 | `compute_integer_buckets` -- floor division, remainder to last token |
-| [`tools/flux_merge_valuation_int.py`](tools/flux_merge_valuation_int.py) | 116-211 | `build_merge_report` -- orchestrates valuation + bucket computation |
-
-### Phase 3: Snapshot & Allocation
-
-| File | Line | Description |
-|------|------|-------------|
-| [`tools/snapshot_allocate_flux.py`](tools/snapshot_allocate_flux.py) | 37-47 | `fetch_holders` -- paginated asset holder scan |
-| [`tools/snapshot_allocate_flux.py`](tools/snapshot_allocate_flux.py) | 49-67 | `filter_holders` -- script address exclusion + burn adjustment |
-| [`tools/snapshot_allocate_flux.py`](tools/snapshot_allocate_flux.py) | 74-83 | `capture_snapshot_anchor` -- block hash/height/time |
-| [`tools/snapshot_allocate_flux.py`](tools/snapshot_allocate_flux.py) | 90-129 | `allocate_flux` -- integer floor-division allocation |
-| [`tools/snapshot_allocate_flux.py`](tools/snapshot_allocate_flux.py) | 136-298 | `run_snapshot_and_allocate` -- full pipeline orchestrator |
-
-### Phase 6: Claim UTxO Builder
-
-| File | Line | Description |
-|------|------|-------------|
-| [`tools/build_claim_utxos_flux.py`](tools/build_claim_utxos_flux.py) | 52-67 | `load_allocations` -- CSV parsing with payment key hash extraction |
-| [`tools/build_claim_utxos_flux.py`](tools/build_claim_utxos_flux.py) | 74-106 | `build_claim_outputs` -- datum construction + script output building |
-| [`tools/build_claim_utxos_flux.py`](tools/build_claim_utxos_flux.py) | 119-191 | `build_batch_tx_cbor` -- batched transaction CBOR generation |
-| [`tools/build_claim_utxos_flux.py`](tools/build_claim_utxos_flux.py) | 198-292 | `build_claim_vault` -- full vault orchestrator with manifest |
-
-### Phase 7: Claim Index Builder
-
-| File | Line | Description |
-|------|------|-------------|
-| [`tools/build_flux_claim_index.py`](tools/build_flux_claim_index.py) | 34-178 | `build_index_from_manifest` -- tx UTxO querying + datum matching |
-| [`tools/build_flux_claim_index.py`](tools/build_flux_claim_index.py) | 185-193 | `write_index_csv` -- CSV export of index |
-
-### Phase 8: Claim Client
-
-| File | Line | Description |
-|------|------|-------------|
-| [`tools/claim_flux_indexed.py`](tools/claim_flux_indexed.py) | 56-122 | `verify_claim_utxo` -- address + datum + asset verification |
-| [`tools/claim_flux_indexed.py`](tools/claim_flux_indexed.py) | 129-177 | `find_claimable_utxos` -- index lookup + on-chain verification |
-| [`tools/claim_flux_indexed.py`](tools/claim_flux_indexed.py) | 179-259 | `build_claim_tx` -- Plutus V3 script input + redeemer construction |
-| [`tools/claim_flux_indexed.py`](tools/claim_flux_indexed.py) | 274-292 | `load_script_from_blueprint` -- Aiken blueprint parsing |
-
-### Preprod rehearsal
-
-| File | Line | Description |
-|------|------|-------------|
-| [`scripts/preprod_harness.py`](scripts/preprod_harness.py) | 284-353 | `distribute_test_tokens` -- batch distribution with fresh context per batch |
-| [`scripts/preprod_harness.py`](scripts/preprod_harness.py) | 460-464 | `mint_flux_test` -- timelock native script mint |
-| [`scripts/preprod_harness.py`](scripts/preprod_harness.py) | 561-633 | `build_claim_utxos` -- preprod claim UTxO batching |
-| [`scripts/preprod_harness.py`](scripts/preprod_harness.py) | 640-661 | `build_claim_index_from_batches` -- deterministic index from batch results |
-| [`scripts/preprod_harness.py`](scripts/preprod_harness.py) | 673-730 | `claim_flux` -- claim transaction building with collateral |
-| [`scripts/preprod_harness.py`](scripts/preprod_harness.py) | 732-786 | `red_team_wrong_signer` -- adversarial wrong-key test |
-| [`scripts/preprod_harness.py`](scripts/preprod_harness.py) | 788-844 | `red_team_double_claim` -- adversarial double-spend test |
-
-### Red-team suite
-
-| File | Line | Description |
-|------|------|-------------|
-| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_wrong_signer` -- wrong key claims victim's UTxO |
-| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_wrong_redeemer` -- garbage redeemer data |
-| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_datum_swap` -- attacker substitutes own pkh in datum |
-| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_index_poisoning` -- fabricated UTxO reference |
-| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_franken_address_claim` -- franken address (shared pkh, different staking key) |
-| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_admin_reclaim_before_deadline` -- admin sweep before deadline (rejected) |
-| [`scripts/red_team.py`](scripts/red_team.py) | -- | `test_admin_reclaim_after_deadline` -- admin sweep after deadline (accepted) |
-
-### Mainnet tooling
-
-| File | Description |
-|------|-------------|
-| [`tools/funding_calculator.py`](tools/funding_calculator.py) | Estimate total ADA required for claim vault deployment |
-| [`tools/cross_check_holders.py`](tools/cross_check_holders.py) | Blockfrost vs Koios holder cross-check |
-| [`tools/admin_reclaim.py`](tools/admin_reclaim.py) | Post-deadline admin sweep of unclaimed UTxOs |
-| [`audit_pack/token_registry/FLUX.json`](audit_pack/token_registry/FLUX.json) | CIP-26 token registry template |
-| [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md) | Go/no-go deployment checklist |
-
----
-
-## Security model
-
-The claim validator is a parameterized Plutus V3 lockbox with two spending paths:
-
-```
-claimant_claims = list.has(tx.extra_signatories, datum.claimant_pkh)
-admin_reclaims  = list.has(tx.extra_signatories, admin_pkh)
-                  && is_entirely_after(tx.validity_range, deadline)
-
-claimant_claims || admin_reclaims
-```
-
-**Claimant path (no time restriction):**
-- Each UTxO is keyed to exactly one payment key hash via inline datum
-- Inline datums are authoritative on Cardano -- attackers cannot substitute their own
-- The signer check prevents unauthorized spending
-- Double-claims are prevented by the UTXO model itself (spent UTxOs cease to exist)
-
-**Admin reclaim path (post-deadline only):**
-- After the claim deadline, the admin can sweep unclaimed UTxOs
-- Requires both admin signature AND `invalid_before > deadline`
-- Before the deadline, the admin key has no special power over claim UTxOs
-- Deadline is baked into the script as a parameter (cannot be changed post-deployment)
-
-**Tested adversarial scenarios:**
-- Wrong signer (rejected by validator)
-- Datum swap (rejected -- inline datums are on-chain authoritative)
-- Double claim (rejected -- UTxO already consumed)
-- Index poisoning (rejected -- UTxO doesn't exist on chain)
-- Garbage redeemer (rejected at CBOR deserialization)
-- Franken address (rejected -- attacker constructs `addr(victim_pkh, attacker_stk)` but lacks the payment signing key; validator requires `extra_signatories` match)
-- Admin reclaim before deadline (rejected -- `is_entirely_after` check fails)
-- Admin reclaim after deadline (accepted -- this is the designed recovery mechanism)
-
-**Franken address defense:**
-The allocation pipeline groups holders by payment key hash, not by full address. Two addresses sharing the same payment credential (e.g., a base address and a franken address with a different staking part) merge into a single claim UTxO keyed to that payment key hash. Only the holder of the corresponding payment signing key can claim.
-
-**Mainnet readiness:**
-See [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md) for the full go/no-go checklist.
+See [`SECURITY.md`](SECURITY.md) for vulnerability disclosure.
 
 ---
 
 ## License
 
-Private. (c) Flux Point Studios.
+Dual-licensed at your option:
+
+- [Apache License 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
