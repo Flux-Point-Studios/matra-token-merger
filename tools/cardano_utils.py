@@ -138,126 +138,22 @@ def posix_ms_to_slot(posix_ms: int, network: str = "mainnet") -> int:
 # ---------------------------------------------------------------------------
 # Parameterized validator helpers
 # ---------------------------------------------------------------------------
-
-
-def load_parameterized_script(
-    blueprint_path: str,
-    admin_pkh_hex: str,
-    deadline_posix_ms: int,
-) -> tuple[bytes, str]:
-    """Load an Aiken blueprint and apply parameters (admin_pkh, deadline).
-
-    Uses cbor2 to manually apply UPLC parameters when `aiken` CLI is not
-    available.  Works by double-CBOR-wrapping the applied params onto the
-    unapplied compiled code.
-
-    Returns (script_bytes, script_hash_hex).
-    """
-    import json
-    import cbor2
-    from cbor2 import CBORTag
-
-    with open(blueprint_path) as f:
-        blueprint = json.load(f)
-
-    validators = blueprint.get("validators", [])
-    compiled_hex = None
-    for v in validators:
-        if "spend" in v.get("title", "").lower():
-            compiled_hex = v.get("compiledCode")
-            break
-    if compiled_hex is None and validators:
-        compiled_hex = validators[0].get("compiledCode")
-    if compiled_hex is None:
-        raise ValueError(f"No compiled validator in {blueprint_path}")
-
-    # Check if blueprint already has params applied (hash present)
-    for v in validators:
-        if "spend" in v.get("title", "").lower() and v.get("hash"):
-            # Already applied — return as-is
-            script_bytes = bytes.fromhex(compiled_hex)
-            return script_bytes, v["hash"]
-
-    # Manual UPLC application: wrap compiledCode with parameters
-    # The unapplied code is a CBOR-encoded UPLC program.  Applying a param
-    # is: [Apply [compiled] [Const param]]
-    # For Aiken parameterized validators, we apply params left to right.
-    raw_code = bytes.fromhex(compiled_hex)
-
-    # Encode admin_pkh as Plutus Data: Bytes
-    admin_bytes = bytes.fromhex(admin_pkh_hex)
-    assert len(admin_bytes) == 28, f"admin_pkh must be 28 bytes, got {len(admin_bytes)}"
-
-    # Encode deadline as Plutus Data: Integer
-    deadline_int = deadline_posix_ms
-
-    # Build the applied code using cbor2
-    # This is a simplified approach — for production, use `aiken blueprint apply`
-    # The actual application is done by the Aiken CLI; this is a fallback.
-    import hashlib
-    script_bytes = raw_code
-    script_hash = hashlib.blake2b(b"\x03" + script_bytes, digest_size=28).hexdigest()
-
-    return script_bytes, script_hash
-
-
-def apply_validator_params_cli(
-    blueprint_path: str,
-    admin_pkh_hex: str,
-    deadline_posix_ms: int,
-) -> tuple[str, str]:
-    """Apply parameters to the Aiken blueprint using the CLI.
-
-    Runs `aiken blueprint apply` twice (once per param) and returns
-    (compiled_code_hex, script_hash_hex) from the updated blueprint.
-
-    Raises RuntimeError if aiken is not available.
-    """
-    import json
-    import shutil
-    import subprocess
-
-    if shutil.which("aiken") is None:
-        raise RuntimeError(
-            "Aiken CLI not found. Install from https://aiken-lang.org/ "
-            "or use load_parameterized_script() as a fallback."
-        )
-
-    # Apply admin_pkh (first parameter — bytes)
-    cmd1 = [
-        "aiken", "blueprint", "apply",
-        "-v", "claim_validator.claim_validator.spend",
-        "-p", json.dumps({"bytes": admin_pkh_hex}),
-    ]
-    result1 = subprocess.run(
-        cmd1, capture_output=True, text=True,
-        cwd=str(Path(blueprint_path).parent.parent),
-    )
-    if result1.returncode != 0:
-        raise RuntimeError(f"aiken blueprint apply (param 1) failed: {result1.stderr}")
-
-    # Apply deadline (second parameter — int)
-    cmd2 = [
-        "aiken", "blueprint", "apply",
-        "-v", "claim_validator.claim_validator.spend",
-        "-p", json.dumps({"int": deadline_posix_ms}),
-    ]
-    result2 = subprocess.run(
-        cmd2, capture_output=True, text=True,
-        cwd=str(Path(blueprint_path).parent.parent),
-    )
-    if result2.returncode != 0:
-        raise RuntimeError(f"aiken blueprint apply (param 2) failed: {result2.stderr}")
-
-    # Read back the updated blueprint
-    with open(blueprint_path) as f:
-        bp = json.load(f)
-
-    for v in bp.get("validators", []):
-        if "spend" in v.get("title", "").lower():
-            return v["compiledCode"], v.get("hash", "")
-
-    raise RuntimeError("Could not find spend validator in updated blueprint")
+#
+# Apply parameters to a parameterized validator via the Aiken CLI directly:
+#
+#   aiken blueprint apply <CBOR-hex-encoded-param> -i plutus.json -o applied.json
+#
+# Aiken applies one parameter at a time, in declaration order. Encode each
+# parameter as Plutus Data CBOR (see Aiken docs). For the surrender_pool
+# validator the order is: admin_pkh_1, admin_pkh_2, deadline.
+#
+# Earlier in-repo Python helpers (`load_parameterized_script`,
+# `apply_validator_params_cli`) hardcoded the old `claim_validator.claim_validator.spend`
+# validator title with a 2-param shape (admin_pkh, deadline). Both were
+# removed in this PR — see PR #6 — because the current `surrender_pool`
+# validator takes 3 params and they had no in-repo callers. Use `aiken
+# blueprint apply` directly from a deploy script. The corresponding mainnet
+# deploy values are pinned at the top of the runbook.
 
 
 def estimate_min_ada(
