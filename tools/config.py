@@ -122,10 +122,58 @@ FLUX_MAX_SUPPLY_DISPLAY: int = MERGE_TOKEN_SUPPLY_DISPLAY
 FLUX_MAX_SUPPLY_BASE: int = MERGE_TOKEN_SUPPLY_BASE
 
 # ---------------------------------------------------------------------------
-# Admin / claim-validator parameters
+# Admin / claim-validator parameters (dual-admin: see project_cmatra_admin_keys
+# for mainnet PKH coordinates)
 # ---------------------------------------------------------------------------
+#
+# Both the surrender pool validator and the cMATRA mint policy are parameterized
+# by TWO admin keys, held on two separate physical machines (Server A + Server
+# B). The on-chain claim_validator requires BOTH signatures for every spend
+# (ProcessSurrender and AdminWithdraw alike — see
+# onchain/claim_validator/validators/claim_validator.ak:62-75).
+#
+# - tools/admin_reclaim.py (post-deadline sweep) uses SSH to reach admin_2 on
+#   Server B for the second signature, mirroring mint-ceremony.sh stage_sign2.
+# - services/surrender_api.py uses HTTPS to talk to services/cosigner_api.py
+#   on Server B for the per-surrender signature (different topology — the
+#   cosigner is online-and-listening; admin_reclaim is a once-every-6-months
+#   batch job).
+#
+# ADMIN_PKH is kept as a deprecated alias falling back to ADMIN_PKH_1 so any
+# old scripts that still read it don't break — but new code should read the
+# numbered variants.
+ADMIN_PKH_1: str = os.environ.get("ADMIN_PKH_1", "")
+ADMIN_PKH_2: str = os.environ.get("ADMIN_PKH_2", "")
+ADMIN_PKH: str = os.environ.get("ADMIN_PKH", ADMIN_PKH_1)  # deprecated alias
 
-ADMIN_PKH: str = os.environ.get("ADMIN_PKH", "")
+# Local + remote signing-key coordinates for the dual-admin reclaim flow.
+# Defaults match the post-2026-05-18 mainnet custody layout
+# (project_cmatra_admin_keys.md).
+ADMIN_1_SKEY_PATH: str = os.environ.get(
+    "ADMIN_1_SKEY_PATH",
+    str(Path.home() / "cmatra-merger-keys" / "admin_1.skey"),
+)
+ADMIN_2_SSH_HOST: str = os.environ.get("ADMIN_2_SSH_HOST", "")
+ADMIN_2_SKEY_REMOTE: str = os.environ.get(
+    "ADMIN_2_SKEY_REMOTE",
+    "/home/deci/cmatra-merger-keys/admin_2.skey",
+)
+ADMIN_2_CARDANO_CLI_REMOTE: str = os.environ.get(
+    "ADMIN_2_CARDANO_CLI_REMOTE",
+    "~/bin/cardano-cli",
+)
+CARDANO_CLI_LOCAL: str = os.environ.get("CARDANO_CLI_LOCAL", "cardano-cli")
+
+# cardano-cli --mainnet / --testnet-magic <N> flag, network-derived.
+# Used by admin_reclaim.py when shelling out to cardano-cli for witness +
+# assemble stages.
+_NETWORK_MAGIC = {
+    "mainnet": "--mainnet",
+    "preprod": "--testnet-magic 1",
+    "preview": "--testnet-magic 2",
+}
+NETWORK_MAGIC_FLAG: str = _NETWORK_MAGIC[NETWORK]
+
 CLAIM_DEADLINE_POSIX_MS: int = int(os.environ.get("CLAIM_DEADLINE_POSIX_MS", "0"))
 
 # ---------------------------------------------------------------------------

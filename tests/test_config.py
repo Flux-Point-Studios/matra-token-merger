@@ -202,3 +202,41 @@ class TestFilterNftAssets:
     def test_empty_assets(self):
         from tools.config import filter_nft_assets
         assert filter_nft_assets([]) == []
+
+
+class TestDualAdminEnvSurface:
+    """task #326 — the reclaim ceremony needs both PKHs + the SSH coordinates
+    exposed from tools.config so admin_reclaim.py doesn't shell out to env
+    lookups scattered through the module."""
+
+    def test_dual_admin_pkh_slots_exist(self):
+        # Importable, even if unset in the current env (defaults to "")
+        from tools.config import ADMIN_PKH_1, ADMIN_PKH_2  # noqa: F401
+        # Backwards-compat alias
+        from tools.config import ADMIN_PKH  # noqa: F401
+
+    def test_admin_2_ssh_slots_exist(self):
+        from tools.config import (  # noqa: F401
+            ADMIN_1_SKEY_PATH,
+            ADMIN_2_CARDANO_CLI_REMOTE,
+            ADMIN_2_SKEY_REMOTE,
+            ADMIN_2_SSH_HOST,
+            CARDANO_CLI_LOCAL,
+            NETWORK_MAGIC_FLAG,
+        )
+
+    def test_network_magic_flag_is_consistent(self):
+        from tools.config import NETWORK, NETWORK_MAGIC_FLAG
+        if NETWORK == "mainnet":
+            assert NETWORK_MAGIC_FLAG == "--mainnet"
+        elif NETWORK == "preprod":
+            assert NETWORK_MAGIC_FLAG == "--testnet-magic 1"
+        elif NETWORK == "preview":
+            assert NETWORK_MAGIC_FLAG == "--testnet-magic 2"
+
+    def test_admin_pkh_alias_back_compat(self):
+        """Old code that reads ADMIN_PKH should get ADMIN_PKH_1 by default."""
+        from tools.config import ADMIN_PKH, ADMIN_PKH_1
+        # Either both are empty (no env), or ADMIN_PKH falls back to ADMIN_PKH_1
+        if ADMIN_PKH_1:
+            assert ADMIN_PKH == ADMIN_PKH_1 or ADMIN_PKH == ""

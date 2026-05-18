@@ -193,7 +193,32 @@ shape, even if the PKHs differ).
 3. **Monitor surrenders** — watch `surrender_api.py` logs + the surrender
    pool address for incoming legacy assets and outgoing cMATRA.
 4. **After deadline** — both admins co-sign a sweep tx pulling remaining
-   pool cMATRA back to the reserve (`python -m tools.admin_reclaim --submit`).
+   pool cMATRA back to the reserve. The reclaim tool uses SSH (not the
+   long-running cosigner_api.py) since it's a once-per-cycle batch job:
+
+   ```bash
+   # 1) Set the dual-admin SSH coordinates in env.local (see .env.example):
+   #      ADMIN_PKH_1, ADMIN_PKH_2
+   #      ADMIN_1_SKEY_PATH=/home/deci/cmatra-merger-keys/admin_1.skey
+   #      ADMIN_2_SSH_HOST=deci@192.168.0.133
+   #      ADMIN_2_SKEY_REMOTE=/home/deci/cmatra-merger-keys/admin_2.skey
+   #      ADMIN_2_CARDANO_CLI_REMOTE=~/bin/cardano-cli
+   #
+   # 2) Dry-run first — builds, dual-signs (admin_1 local + admin_2 via SSH),
+   #    assembles, but does NOT broadcast. Inspect the artifacts under
+   #    /tmp/admin-reclaim-out/ before submitting:
+   python -m tools.admin_reclaim \
+       --script-address "$SURRENDER_SCRIPT_ADDRESS" \
+       --blueprint onchain/claim_validator/plutus.json \
+       --flux-policy "$CMATRA_POLICY_ID"
+   #
+   # 3) After review, broadcast:
+   python -m tools.admin_reclaim \
+       --script-address "$SURRENDER_SCRIPT_ADDRESS" \
+       --blueprint onchain/claim_validator/plutus.json \
+       --flux-policy "$CMATRA_POLICY_ID" \
+       --submit
+   ```
 
 ---
 
