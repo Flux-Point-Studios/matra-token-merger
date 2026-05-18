@@ -1,0 +1,14 @@
+name = "fluxpoint/quarantine-validator"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "Always-fails Plutus V3 lockbox — surrendered legacy assets land here, never leave"
+
+[repository]
+user = "fluxpoint"
+project = "quarantine-validator"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "2.2.0"
+source = "github"

@@ -47,3 +47,4 @@ htmlcov/
 aiken_err.txt
 aiken_out.txt
 .env.example
+onchain/quarantine_validator/build/

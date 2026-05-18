@@ -89,9 +89,15 @@ address (not destroyed on-chain — Cardano native assets cannot be burned
 unless the original policy supports it). The quarantine address holds
 them indefinitely.
 
-- [ ] `QUARANTINE_ADDRESS` (bech32): ______________________________________
-- [ ] Quarantine wallet documented as inert (no spending key in production
-      operator hands)
+- [x] `QUARANTINE_ADDRESS` (mainnet bech32):
+      **`addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl`**
+      (derived from `onchain/quarantine_validator`, always-fails Plutus V3,
+      script hash `288fea77a0f674c6080aadd8ed3ca42cd5a920bf1f00c0d3e63306e4`)
+- [x] Quarantine destination is cryptographically inert (always-fails
+      validator with no spending path — provably stronger than "admin
+      holds the key and promises not to spend"). Anyone can rebuild from
+      source at Aiken v1.1.21 and confirm via
+      `aiken blueprint hash` matches the expected value.
 
 ---
 

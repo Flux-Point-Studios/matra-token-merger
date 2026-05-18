@@ -21,6 +21,7 @@ jobs:
         validator:
           - onchain/claim_validator
           - onchain/flux_mint_policy
+          - onchain/quarantine_validator
     steps:
       - uses: actions/checkout@v4
 

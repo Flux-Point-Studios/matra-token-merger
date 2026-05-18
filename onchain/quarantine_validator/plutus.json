@@ -1,0 +1,46 @@
+{
+  "preamble": {
+    "title": "fluxpoint/quarantine-validator",
+    "description": "Always-fails Plutus V3 lockbox — surrendered legacy assets land here, never leave",
+    "version": "0.1.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.21+42babe5"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": [
+    {
+      "title": "quarantine_validator.quarantine.spend",
+      "datum": {
+        "title": "_datum",
+        "schema": {
+          "$ref": "#/definitions/Data"
+        }
+      },
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Data"
+        }
+      },
+      "compiledCode": "585c01010029800aba2aba1aab9eaab9dab9a4888896600264653001300600198031803800cc0180092225980099b8748008c01cdd500144c8cc892818050009805180580098041baa0028b200c180300098019baa0068a4d13656400401",
+      "hash": "288fea77a0f674c6080aadd8ed3ca42cd5a920bf1f00c0d3e63306e4"
+    },
+    {
+      "title": "quarantine_validator.quarantine.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "compiledCode": "585c01010029800aba2aba1aab9eaab9dab9a4888896600264653001300600198031803800cc0180092225980099b8748008c01cdd500144c8cc892818050009805180580098041baa0028b200c180300098019baa0068a4d13656400401",
+      "hash": "288fea77a0f674c6080aadd8ed3ca42cd5a920bf1f00c0d3e63306e4"
+    }
+  ],
+  "definitions": {
+    "Data": {
+      "title": "Data",
+      "description": "Any Plutus data."
+    }
+  }
+}
