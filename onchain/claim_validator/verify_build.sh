@@ -28,9 +28,12 @@ set -euo pipefail
 # --- Configuration ---
 REQUIRED_AIKEN_VERSION="v1.1.21"
 
-# Set this to the script hash of the deployed mainnet validator once known.
-# Leave empty during pre-deployment to just print the computed hash.
-EXPECTED_HASH=""
+# Expected unparameterized script hash for `claim_validator.surrender_pool`
+# (3 params: admin_pkh_1, admin_pkh_2, deadline). Computed with the audited
+# Aiken `v1.1.21+42babe5` at the commit that ships this verify script.
+# If a local rebuild does not match this, the source has drifted from the
+# audited blueprint.
+EXPECTED_HASH="5edc287248c087ea6971be8cfeb9943bdf3cb1137b08a51e5641cdb2"
 
 # --- Check Aiken version ---
 echo "=== Deterministic Build Verification ==="
