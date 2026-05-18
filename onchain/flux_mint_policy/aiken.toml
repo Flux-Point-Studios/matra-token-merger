@@ -1,0 +1,14 @@
+name = "fluxpoint/flux-mint-policy"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "cMATRA mint policy — one-shot mint via UTxO seed, dual-admin signatures, exact supply cap, single asset name; permissionless burn"
+
+[repository]
+user = "fluxpoint"
+project = "flux-mint-policy"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "2.2.0"
+source = "github"

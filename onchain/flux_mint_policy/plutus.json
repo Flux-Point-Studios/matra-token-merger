@@ -1,0 +1,112 @@
+{
+  "preamble": {
+    "title": "fluxpoint/flux-mint-policy",
+    "description": "cMATRA mint policy — one-shot mint via UTxO seed, dual-admin signatures, exact supply cap, single asset name; permissionless burn",
+    "version": "0.1.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.21+42babe5"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": [
+    {
+      "title": "flux_mint_policy.flux_mint_policy.mint",
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Data"
+        }
+      },
+      "parameters": [
+        {
+          "title": "seed_utxo",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        },
+        {
+          "title": "admin_pkh_1",
+          "schema": {
+            "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+          }
+        },
+        {
+          "title": "admin_pkh_2",
+          "schema": {
+            "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+          }
+        }
+      ],
+      "compiledCode": "5902d201010022229800aba2aba1aba0aab9faab9eaab9dab9a9bae0039bae00248888888896600264653001300a00198051805800cc0280092225980099b8748000c024dd50014660026eb8c034c028dd500148c038c03cc03cc03cc03c00644646600200200644b30010018a6103d87a8000899192cc004cdc8802800c56600266e3c014006266e9520003301230100024bd7045300103d87a80004039133004004301400340386eb8c038004c04400500f4dc3a40052300e300f300f300f300f300f300f300f300f001911919800800801912cc00400629422b30013371e6eb8c04400400e29462660040046024002806100f24444446644b30015980098029919800800801912cc0040062900044cdc02400466004004603000280aa2646600200200644b30010018a508992cc004cdc8a4506634d4154524100001899b8f48906634d4154524100001899801801980c8012026375c6026602e00280aa2941010456600266e2120000018acc00566002660066eb0c010c048dd5004807c4cc00cdd6180218091baa00900e8a50404115980099198008009bac30163013375401444b30010018a508acc004cdd7980b980a1baa301700101c8a51899801001180c000a024405513370e0029040405a666a6fe301c52820208a50404115980099b88001480022946294101020208a50404064b300130043010375400314bd6f7b63044dd5980a18089baa001403c660086eacc014c040dd5003803192cc004c010c040dd5000c5200089bad3014301137540028078c966002600860206ea8006298103d87a8000899198008009bab30153012375400444b30010018a6103d87a8000899192cc004cdc8a4506634d41545241000018acc004cdc7a44106634d4154524100001899ba548000cc05cc0540092f5c114c0103d87a8000404d1330040043019003404c6eb8c04c004c058005014201e330043756600a60206ea801c019164020300a00130053754015149a26cac80181",
+      "hash": "d4348bcd5e59a018e06c6c91337d5bc231534389bf8478160ab0a594"
+    },
+    {
+      "title": "flux_mint_policy.flux_mint_policy.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "parameters": [
+        {
+          "title": "seed_utxo",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        },
+        {
+          "title": "admin_pkh_1",
+          "schema": {
+            "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+          }
+        },
+        {
+          "title": "admin_pkh_2",
+          "schema": {
+            "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+          }
+        }
+      ],
+      "compiledCode": "5902d201010022229800aba2aba1aba0aab9faab9eaab9dab9a9bae0039bae00248888888896600264653001300a00198051805800cc0280092225980099b8748000c024dd50014660026eb8c034c028dd500148c038c03cc03cc03cc03c00644646600200200644b30010018a6103d87a8000899192cc004cdc8802800c56600266e3c014006266e9520003301230100024bd7045300103d87a80004039133004004301400340386eb8c038004c04400500f4dc3a40052300e300f300f300f300f300f300f300f300f001911919800800801912cc00400629422b30013371e6eb8c04400400e29462660040046024002806100f24444446644b30015980098029919800800801912cc0040062900044cdc02400466004004603000280aa2646600200200644b30010018a508992cc004cdc8a4506634d4154524100001899b8f48906634d4154524100001899801801980c8012026375c6026602e00280aa2941010456600266e2120000018acc00566002660066eb0c010c048dd5004807c4cc00cdd6180218091baa00900e8a50404115980099198008009bac30163013375401444b30010018a508acc004cdd7980b980a1baa301700101c8a51899801001180c000a024405513370e0029040405a666a6fe301c52820208a50404115980099b88001480022946294101020208a50404064b300130043010375400314bd6f7b63044dd5980a18089baa001403c660086eacc014c040dd5003803192cc004c010c040dd5000c5200089bad3014301137540028078c966002600860206ea8006298103d87a8000899198008009bab30153012375400444b30010018a6103d87a8000899192cc004cdc8a4506634d41545241000018acc004cdc7a44106634d4154524100001899ba548000cc05cc0540092f5c114c0103d87a8000404d1330040043019003404c6eb8c04c004c058005014201e330043756600a60206ea801c019164020300a00130053754015149a26cac80181",
+      "hash": "d4348bcd5e59a018e06c6c91337d5bc231534389bf8478160ab0a594"
+    }
+  ],
+  "definitions": {
+    "ByteArray": {
+      "title": "ByteArray",
+      "dataType": "bytes"
+    },
+    "Data": {
+      "title": "Data",
+      "description": "Any Plutus data."
+    },
+    "Int": {
+      "dataType": "integer"
+    },
+    "aiken/crypto/VerificationKeyHash": {
+      "title": "VerificationKeyHash",
+      "dataType": "bytes"
+    },
+    "cardano/transaction/OutputReference": {
+      "title": "OutputReference",
+      "description": "An `OutputReference` is a unique reference to an output on-chain. The `output_index`\n corresponds to the position in the output list of the transaction (identified by its id)\n that produced that output",
+      "anyOf": [
+        {
+          "title": "OutputReference",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "transaction_id",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "output_index",
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
