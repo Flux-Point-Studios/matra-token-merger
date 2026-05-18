@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "flux-merger"
+name = "cmatra-merger"
 version = "0.1.0"
-description = "FLUX Token Merger pipeline — AGENT + SHARDS → FLUX on Cardano"
+description = "cMATRA Token Merger — surrender pool + one-shot mint on Cardano"
 requires-python = ">=3.10"
 dependencies = [
     "pycardano>=0.11.0",
@@ -22,6 +22,10 @@ dev = [
     "pytest-mock>=3.12.0",
     "responses>=0.24.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["tools*", "services*", "scripts*"]
+exclude = ["audit_pack*", "onchain*", "tests*", ".github*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
