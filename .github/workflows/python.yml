@@ -1,0 +1,47 @@
+name: python
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Show resolved versions
+        run: |
+          pip show pycardano | grep -E '^(Name|Version|Requires):'
+          pip show cbor2 | grep -E '^(Name|Version):'
+          # cbor2pure is the broken transitive that we cap pycardano below
+          # to avoid; assert it's NOT installed so any future regression
+          # in pycardano's pin floor (or a resolver change) fails CI loudly
+          # instead of silently going green again.
+          if pip show cbor2pure >/dev/null 2>&1; then
+            echo "ERROR: cbor2pure is installed -- pycardano cap (<0.19.0) regressed." >&2
+            pip show cbor2pure
+            exit 1
+          fi
+
+      - name: pytest
+        run: pytest -q
