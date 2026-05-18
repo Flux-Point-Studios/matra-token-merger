@@ -425,6 +425,68 @@ test mint_after_seed_consumed_fails() fail {
   )
 }
 
+/// I1: the seed UTxO is one of several inputs (alongside unrelated fee /
+/// collateral / change inputs). The validator must STILL accept the mint —
+/// the rule is "seed is consumed", not "seed is the sole input". This
+/// reflects the real mainnet mint tx, which carried multiple admin-wallet
+/// inputs in addition to the seed UTxO.
+test mint_with_extra_inputs_passes() {
+  let mint_value =
+    from_asset(test_policy_id, cmatra_asset_name, total_supply_base)
+  let inputs =
+    [
+      // unrelated fee/change input from admin wallet
+      input_for(other_ref()),
+      // the seed UTxO — must be present somewhere in tx.inputs
+      input_for(test_seed_ref()),
+      // a second unrelated input (collateral / additional change)
+      input_for(
+        OutputReference {
+          transaction_id: #"efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+          output_index: 3,
+        },
+      ),
+    ]
+  let tx = test_tx(both_admins(), inputs, mint_value)
+  flux_mint_policy.mint(
+    test_seed_ref(),
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    Void,
+    test_policy_id,
+    tx,
+  )
+}
+
+/// I1: the seed UTxO is presented as a REFERENCE input (read-only), not a
+/// regular consumed input. Reference inputs do NOT consume the UTxO — it
+/// remains live on chain and could be referenced again in a later mint tx,
+/// breaking the one-shot guarantee. The validator must reject this case
+/// even with correct dual sigs + exact-cap quantity + correct asset name.
+test mint_seed_as_reference_input_fails() fail {
+  let mint_value =
+    from_asset(test_policy_id, cmatra_asset_name, total_supply_base)
+  // Build a tx with the seed in reference_inputs (read-only), and a
+  // different UTxO as the sole consumed input (txs need ≥1 input to
+  // pay fees; we model that with a non-seed input).
+  let tx =
+    Transaction {
+      ..placeholder,
+      extra_signatories: both_admins(),
+      inputs: [input_for(other_ref())],
+      reference_inputs: [input_for(test_seed_ref())],
+      mint: mint_value,
+    }
+  flux_mint_policy.mint(
+    test_seed_ref(),
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    Void,
+    test_policy_id,
+    tx,
+  )
+}
+
 // =========================================================================
 // FAILURE PATHS — combined / belt-and-braces
 // =========================================================================
