@@ -168,7 +168,7 @@ class TestLoadScriptFromBlueprint:
         blueprint = {
             "validators": [
                 {
-                    "title": "claim_validator.claim_validator.spend",
+                    "title": "claim_validator.surrender_pool.spend",
                     "compiledCode": "deadbeef01234567",
                 },
             ],
