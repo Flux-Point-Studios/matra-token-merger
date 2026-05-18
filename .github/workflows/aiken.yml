@@ -37,9 +37,49 @@ jobs:
         working-directory: ${{ matrix.validator }}
         run: aiken check
 
+      - name: Snapshot committed plutus.json (${{ matrix.validator }})
+        working-directory: ${{ matrix.validator }}
+        # Save the committed blueprint to a sibling path BEFORE we let
+        # `aiken build` overwrite plutus.json in-place. The snapshot is
+        # the reference we diff the freshly-built blueprint against in
+        # the "no drift" step below.
+        run: |
+          if [ ! -f plutus.json ]; then
+            echo "::error::no committed plutus.json in ${{ matrix.validator }} — every validator must ship a checked-in blueprint."
+            exit 1
+          fi
+          cp -f plutus.json plutus.committed.json
+
       - name: aiken build (${{ matrix.validator }})
         working-directory: ${{ matrix.validator }}
         run: aiken build
+
+      - name: No drift between committed plutus.json and aiken build output (${{ matrix.validator }})
+        working-directory: ${{ matrix.validator }}
+        # `aiken build` is byte-deterministic at the pinned compiler
+        # version (v1.1.21+42babe5) — same source + same compiler
+        # produces a byte-exact blueprint, every run. If this diff is
+        # non-empty, the committed blueprint has drifted from source.
+        # That is a structural deploy hazard: applied scripts will not
+        # match expectations and on-chain references will break.
+        # Reference: PR #6 (2026-05-18) — claim_validator/plutus.json
+        # had a 2-param-vs-3-param drift caught only by accident.
+        run: |
+          if ! diff -u plutus.committed.json plutus.json > drift.diff; then
+            echo "::error::DRIFT DETECTED in ${{ matrix.validator }}/plutus.json — committed blueprint does NOT match a fresh \`aiken build\` from source."
+            echo "::group::unified diff (committed <-> freshly built)"
+            cat drift.diff
+            echo "::endgroup::"
+            echo ""
+            echo "How to fix:"
+            echo "  cd ${{ matrix.validator }}"
+            echo "  aiken build"
+            echo "  git add plutus.json"
+            echo "  git commit -m 'chore(onchain): regenerate ${{ matrix.validator }}/plutus.json from source'"
+            exit 1
+          fi
+          echo "OK: ${{ matrix.validator }}/plutus.json is byte-exact with aiken build output."
+          rm -f plutus.committed.json drift.diff
 
       - name: Verify reproducible build script
         working-directory: ${{ matrix.validator }}
