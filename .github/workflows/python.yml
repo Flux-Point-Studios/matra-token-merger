@@ -28,6 +28,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          # pycardano transitively pins a cbor2pure version whose
+          # `__init__.py` imports `CBORDecodeValueError` from cbor2.
+          # That symbol no longer exists in cbor2 >= 5.5; cbor2pure
+          # 5.7.2 was released specifically to fix the import.
+          # Force-upgrade past pycardano's transitive pin.
+          pip install --upgrade "cbor2pure>=5.7.2"
 
       - name: pytest
         run: pytest -q
