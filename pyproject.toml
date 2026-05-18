@@ -13,13 +13,6 @@ dependencies = [
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
     "cbor2>=5.6.0",
-    # cbor2pure is a transitive dep of pycardano's cbor module. cbor2pure
-    # older than 5.7.2 hard-imports `CBORDecodeValueError` from `cbor2` at
-    # module load time — that symbol no longer exists in cbor2 >= 5.5, so
-    # any fresh install from PyPI explodes at `import pycardano`. Pin to
-    # the cbor2 6.x-compatible cbor2pure (the floor was released to fix
-    # exactly this regression).
-    "cbor2pure>=5.7.2",
 ]
 
 [project.optional-dependencies]
