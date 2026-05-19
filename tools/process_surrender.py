@@ -233,10 +233,14 @@ def find_pool_utxos(
         tx_hash = utxo.get("tx_hash", "")
         output_index = utxo.get("output_index", utxo.get("tx_index", 0))
 
-        # Only accept UTxOs with the correct Void inline datum.
-        # Void = Constr(0, []) = CBOR d87980.  Blockfrost returns the
-        # inline_datum as a JSON object: {"constructor": 0, "fields": []}.
-        # Reject: no datum, datum hash only (no inline), or wrong datum.
+        # Only accept UTxOs with a Void-equivalent inline datum.
+        # Void = Constr(0, []) = CBOR d87980.  Blockfrost returns inline_datum
+        # in two possible shapes depending on Cardano-CLI's encoding mode:
+        #   (a) canonical Plutus Core: the hex string "d87980" (3 bytes)
+        #   (b) legacy literal-JSON-map: dict {"constructor":0, "fields":[]}
+        #       — bytes a24b636f6e7374727563746f7200466669656c647380
+        # The on-chain validator's `expect Some(_)` accepts both encodings.
+        # Reject: no datum, datum hash only (no inline), or unrecognized datum.
         inline = utxo.get("inline_datum")
         if not inline:
             logger.debug(
@@ -244,10 +248,13 @@ def find_pool_utxos(
                 tx_hash[:16], output_index,
             )
             continue
-        # Verify Void: constructor 0, empty fields
-        if not (isinstance(inline, dict)
-                and inline.get("constructor") == 0
-                and inline.get("fields") == []):
+        is_canonical = isinstance(inline, str) and inline.lower() == "d87980"
+        is_map_form = (
+            isinstance(inline, dict)
+            and inline.get("constructor") == 0
+            and inline.get("fields") == []
+        )
+        if not (is_canonical or is_map_form):
             logger.debug(
                 "Skipping UTxO %s#%d — non-Void datum: %s",
                 tx_hash[:16], output_index, str(inline)[:80],
