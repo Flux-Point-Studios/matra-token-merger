@@ -97,6 +97,16 @@ CMATRA_POLICY_HEX: str = os.environ.get("CMATRA_POLICY_HEX", "")
 CMATRA_ASSET_HEX: str = os.environ.get("CMATRA_ASSET_HEX", "")
 QUARANTINE_ADDRESS: str = os.environ.get("QUARANTINE_ADDRESS", "")
 
+# Allowed user addresses for /build-surrender. Comma-separated bech32. Empty
+# string = no whitelist (window open to everyone). During the pre-launch
+# closed-beta window we restrict to internal test wallets; before flipping
+# the window public, unset this env (or set to empty).
+ALLOWED_USER_ADDRESSES: frozenset[str] = frozenset(
+    a.strip()
+    for a in os.environ.get("ALLOWED_USER_ADDRESSES", "").split(",")
+    if a.strip()
+)
+
 # CORS origins (flux1 site)
 CORS_ORIGINS: list[str] = json.loads(
     os.environ.get(
@@ -370,6 +380,14 @@ def build_surrender(req: BuildSurrenderRequest):
         raise
     except Exception:
         raise HTTPException(400, "Invalid Cardano address encoding")
+
+    # Closed-beta whitelist gate. If ALLOWED_USER_ADDRESSES is non-empty, only
+    # those exact bech32 addresses may build a surrender tx. Empty = open
+    # window (production behavior). Enforced before any chain query, key load,
+    # or pool reservation, so a non-allowed caller can never observe state or
+    # consume a pool slot.
+    if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
+        raise HTTPException(403, "Surrender window not yet open")
 
     # Validate state
     if not state.rate_table:
@@ -799,6 +817,8 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     """
     if not req.user_address.startswith("addr1"):
         raise HTTPException(400, "Invalid Cardano mainnet address")
+    if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
+        raise HTTPException(403, "Surrender window not yet open")
     if not state.rate_table:
         raise HTTPException(503, "Rate table not loaded")
     if not state.script_cbor_hex:
