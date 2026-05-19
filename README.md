@@ -327,6 +327,38 @@ See [`SECURITY.md`](SECURITY.md) for vulnerability disclosure.
 
 ---
 
+## Legal & disclosures
+
+The cMATRA Merger Portal is operated by **Flux Point Studios, Inc.**, a
+Delaware corporation. The authoritative legal materials live in three
+places — please review them before surrendering legacy assets:
+
+- **Portal disclosures** — the always-visible "cMATRA Merger Disclosures"
+  block on the live Portal at
+  [fluxpointstudios.com/matra-merger](https://fluxpointstudios.com/matra-merger).
+- **Docs** — the "Legal and Disclosures" section in the cMATRA Token
+  Merger docs:
+  [github.com/Flux-Point-Studios/docs](https://github.com/Flux-Point-Studios/docs/blob/main/materios/cmatra-token-merger/README.md#legal-and-disclosures)
+  (with companion FAQ entries 41b–41h in the same docs folder).
+- **Site-wide terms** — the FPS
+  [Terms of Service](https://fluxpointstudios.com/tos) and
+  [Privacy Policy](https://fluxpointstudios.com/privacy-policy), each of
+  which is incorporated by reference into the Portal disclosures.
+
+Use of the Portal is governed by all three documents together. Among
+other things, surrender transactions are **final and irreversible**,
+cMATRA is a **utility token** (no equity, dividend, revenue, or
+investment rights, and no future-value guarantee), the on-chain code is
+open source but **not** third-party audited, and you are solely
+responsible for tax consequences in your jurisdiction. The Terms of
+Service controls in the event of any conflict.
+
+This repository is provided for transparency and independent inspection
+under its dual Apache-2.0 / MIT license (see below). Nothing in this
+repository — including this README — is legal, tax, or investment advice.
+
+---
+
 ## License
 
 Dual-licensed at your option:
