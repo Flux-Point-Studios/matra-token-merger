@@ -459,9 +459,11 @@ def build_surrender(req: BuildSurrenderRequest):
     try:
         preflight_ctx = BlockFrostChainContext(
             project_id=state.bf.project_id,
-            base_url=state.bf.base_url,
+            base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
         )
-        preflight_ctx.evaluate_tx(bytes.fromhex(tx_cbor_hex))
+        # evaluate_tx_cbor accepts raw CBOR bytes; evaluate_tx wants a
+        # Transaction object. Use the cbor variant since we already have hex.
+        preflight_ctx.evaluate_tx_cbor(bytes.fromhex(tx_cbor_hex))
         logger.info("Preflight OK for tx %s", tx_hash[:16])
     except Exception as e:
         state.reserved_pool_utxos.pop(pool_utxo_key, None)
@@ -556,9 +558,15 @@ def _build_cosigned_surrender_tx(
 
     Returns (tx_cbor_hex, tx_hash_hex).
     """
+    # NOTE: state.bf is our custom BlockfrostClient (tools/api_clients.py)
+    # which stores base_url WITH '/v0' (e.g. ".../api/v0") because it builds
+    # request URLs as `base_url + path`. pycardano's BlockFrostChainContext,
+    # however, hands the URL to blockfrost-python's BlockFrostApi which
+    # AUTO-APPENDS '/v0'. So passing state.bf.base_url verbatim gives
+    # '/api/v0/v0/...' = 400 Invalid path. Strip the suffix.
     context = BlockFrostChainContext(
         project_id=state.bf.project_id,
-        base_url=state.bf.base_url,
+        base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
     )
 
     script = PlutusV3Script(bytes.fromhex(state.script_cbor_hex))
@@ -588,12 +596,14 @@ def _build_cosigned_surrender_tx(
     # Script input: pool UTxO
     builder.add_script_input(utxo, script=script, redeemer=redeemer)
 
-    # User's address for UTxO selection (legacy assets + fee contribution)
+    # User's address for UTxO selection (legacy assets + fee contribution).
+    # IMPORTANT: ONLY the user's address. Earlier code also called
+    # `add_input_address(state.admin_addr)` which let pycardano pick up
+    # admin_1's cMATRA reserve UTxO and route its value through to the user
+    # as change. Admin must NOT be a fee/UTxO source — only a script-spend
+    # co-signer. The pool UTxO is added explicitly via add_script_input above.
     user_addr = Address.from_primitive(user_address)
     builder.add_input_address(user_addr)
-
-    # Admin's address for collateral + fee contribution
-    builder.add_input_address(state.admin_addr)
 
     # Use dedicated collateral UTxO if configured (limits max collateral loss)
     if COLLATERAL_UTXO and "#" in COLLATERAL_UTXO:
@@ -610,7 +620,9 @@ def _build_cosigned_surrender_tx(
     # Output 1: cMATRA to user
     user_multi = MultiAsset()
     user_multi[cmatra_policy] = Asset({cmatra_asset: total_cmatra})
-    user_min_ada = estimate_min_ada(num_assets=1, datum_size_bytes=0)
+    # estimate_min_ada() under-counts vs Conway mainnet protocol params.
+    # Use a 1.5 ADA floor (covers any 1-asset, no-datum output up to ~340 bytes).
+    user_min_ada = max(estimate_min_ada(num_assets=1, datum_size_bytes=0), 1_500_000)
     builder.add_output(TransactionOutput(user_addr, Value(user_min_ada, user_multi)))
 
     # Output 2: remaining pool back to script
@@ -618,7 +630,8 @@ def _build_cosigned_surrender_tx(
     if remaining_cmatra > 0:
         return_multi = MultiAsset()
         return_multi[cmatra_policy] = Asset({cmatra_asset: remaining_cmatra})
-        return_min_ada = estimate_min_ada(num_assets=1, datum_size_bytes=8)
+        # 1.5 ADA floor for 1-asset + Void inline datum (D87980 = 3 bytes).
+        return_min_ada = max(estimate_min_ada(num_assets=1, datum_size_bytes=8), 1_500_000)
         return_datum = RawPlutusData(cbor2.loads(_VOID_DATUM_CBOR))
         builder.add_output(
             TransactionOutput(script_addr, Value(return_min_ada, return_multi), datum=return_datum)
@@ -634,8 +647,12 @@ def _build_cosigned_surrender_tx(
                 quarantine_multi[la_policy] = Asset({})
             quarantine_multi[la_policy][la_asset] = la["quantity"]
 
-        quarantine_min_ada = estimate_min_ada(
-            num_assets=len(legacy_assets), datum_size_bytes=0,
+        # 1.5 ADA per asset (safe floor); scales linearly with len(legacy_assets).
+        # The legacy bundle can be 1-7 assets across multiple policies, so this
+        # caps at ~10.5 ADA worst-case for a full 7-asset surrender.
+        quarantine_min_ada = max(
+            estimate_min_ada(num_assets=len(legacy_assets), datum_size_bytes=0),
+            1_500_000 * max(1, len(legacy_assets)),
         )
         quarantine_addr = Address.from_primitive(QUARANTINE_ADDRESS)
         builder.add_output(
@@ -671,15 +688,17 @@ def _build_cosigned_surrender_tx(
         witness_set.vkey_witnesses = []
     witness_set.vkey_witnesses.append(admin_vk_witness)
 
-    # Get admin 2 witness from co-signer service (Server B)
+    # Get admin 2 witness from co-signer service (Server B).
+    # NOTE: tx_body.hash() returns raw bytes in this pycardano version,
+    # NOT a TransactionId — so don't call .payload on it.
+    tx_hash_hex = tx_hash.hex() if isinstance(tx_hash, bytes) else tx_hash.payload.hex()
     if COSIGNER_URL:
-        cosigner_witness = _get_cosigner_witness(tx_hash.payload.hex())
+        cosigner_witness = _get_cosigner_witness(tx_hash_hex)
         witness_set.vkey_witnesses.append(cosigner_witness)
 
     # Assemble the partially-signed transaction
     tx = Transaction(tx_body, witness_set)
     tx_cbor_hex = tx.to_cbor().hex()
-    tx_hash_hex = tx_hash.payload.hex()
 
     logger.info(
         "Built co-signed surrender tx: %d cMATRA → %s (tx: %s)",
@@ -842,7 +861,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     try:
         context = BlockFrostChainContext(
             project_id=state.bf.project_id,
-            base_url=state.bf.base_url,
+            base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
         )
         tx_bytes = bytes.fromhex(tx_cbor_hex)
         eval_result = context.evaluate_tx(tx_bytes)
