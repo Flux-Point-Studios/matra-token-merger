@@ -53,11 +53,11 @@
 use aiken/collection/dict
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash}
-use cardano/address.{Address, VerificationKey}
+use cardano/address.{Address, Script, VerificationKey}
 use cardano/assets.{PolicyId, Value, from_asset, merge, quantity_of, tokens,
   zero}
-use cardano/transaction.{Input, NoDatum, Output, OutputReference, Transaction,
-  placeholder}
+use cardano/transaction.{DatumHash, InlineDatum, Input, NoDatum, Output,
+  OutputReference, Transaction, placeholder}
 
 // =========================================================================
 // Constants (audit-stable — NOT parameters, baked into the script hash)
@@ -111,17 +111,56 @@ validator flux_mint_policy(
     let seed_consumed =
       list.any(tx.inputs, fn(i) { i.output_reference == seed_utxo })
 
+    // ----- INVARIANT I6: cMATRA at script addresses MUST carry a datum -----
+    //
+    // Post-mortem fix for the 2026-05-18 catastrophe in which a no-datum
+    // surrender_pool output locked 722.5M cMATRA forever. The mint-side
+    // ceremony forgot --tx-out-inline-datum-value; the spend-side validator
+    // at the script address required `expect Some(_) = datum`; Conway-era
+    // ledger accepted the bad output. Three sec-review rounds missed the
+    // bridge between mint-side construction and validator-side requirement.
+    //
+    // This invariant moves the bridge enforcement INTO the mint policy
+    // itself. Any tx in which the policy emits a cMATRA output to a script
+    // address with NoDatum is rejected at submission. The ceremony tooling
+    // cannot silently produce stuck UTxOs.
+    //
+    // Key-address outputs (VerificationKey payment credential) are
+    // permitted with any datum shape — they are spendable by signature
+    // and do not rely on Plutus-eval-time datum availability.
+    let all_cmatra_script_outputs_have_datum =
+      list.all(
+        tx.outputs,
+        fn(o) {
+          if quantity_of(o.value, policy_id, cmatra_asset_name) > 0 {
+            when o.address.payment_credential is {
+              VerificationKey(_) -> True
+              Script(_) ->
+                when o.datum is {
+                  NoDatum -> False
+                  InlineDatum(_) -> True
+                  DatumHash(_) -> True
+                }
+            }
+          } else {
+            True
+          }
+        },
+      )
+
     // ----- Path selection by sign of net quantity -----
-    when single_asset_only is {
+    when single_asset_only && all_cmatra_script_outputs_have_datum is {
       False -> False
       True ->
         if qty > 0 {
           // MINT PATH — all of: dual-sig, seed-consumed, exact-cap.
-          // INVARIANT I2 + I4 + I1.
+          // INVARIANT I2 + I4 + I1 + I6.
           both_signed && seed_consumed && qty == total_supply_base
         } else if qty < 0 {
-          // BURN PATH — permissionless. INVARIANT I5.
-          // Single-asset constraint already enforced above.
+          // BURN PATH — permissionless. INVARIANT I5 + I6.
+          // I6 fires here too: a burn that accidentally directs remnants
+          // to a script address with no datum is rejected, sparing the
+          // burner from creating their own locked UTxO.
           True
         } else {
           // qty == 0: a single-asset-keyed entry with quantity zero is
@@ -207,9 +246,30 @@ fn test_tx(
   }
 }
 
+/// Build a test tx with the given signers, inputs, outputs, and net mint
+/// Value — used by the I6 (datum-required-at-script-addr) tests.
+fn test_tx_with_outputs(
+  signers: List<VerificationKeyHash>,
+  inputs: List<Input>,
+  outputs: List<Output>,
+  mint_value: Value,
+) -> Transaction {
+  Transaction {
+    ..placeholder,
+    extra_signatories: signers,
+    inputs: inputs,
+    outputs: outputs,
+    mint: mint_value,
+  }
+}
+
 fn both_admins() -> List<VerificationKeyHash> {
   [test_admin_1_pkh, test_admin_2_pkh]
 }
+
+// Stand-in script hash for "the surrender pool address" in I6 tests.
+const test_pool_script_hash: ByteArray =
+  #"e1a181b2f8b74be55e6160a7a82764b9b174e04c37c4ed49d349a3dd"
 
 // =========================================================================
 // HAPPY PATHS
@@ -435,6 +495,175 @@ test mint_after_seed_consumed_fails() fail {
 test burn_wrong_asset_name_fails() fail {
   let mint_value = from_asset(test_policy_id, wrong_asset_name, -1)
   let tx = test_tx([], [], mint_value)
+  flux_mint_policy.mint(
+    test_seed_ref(),
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    Void,
+    test_policy_id,
+    tx,
+  )
+}
+
+// =========================================================================
+// FAILURE PATHS — INVARIANT I6 (cMATRA at script addresses needs a datum)
+// =========================================================================
+//
+// These are the post-mortem regression tests for the 2026-05-18 catastrophe.
+// The mint ceremony produced a no-datum surrender_pool output, locking
+// 722.5M cMATRA forever. The mint policy now structurally rejects that
+// shape of transaction — no amount of mint-ceremony.sh forgetfulness can
+// reproduce the bug.
+
+/// I6 happy path: cMATRA → script address with InlineDatum passes.
+/// This is the corrected shape the new mint-ceremony.sh produces.
+test mint_to_script_with_inline_datum_passes() {
+  let mint_value =
+    from_asset(test_policy_id, cmatra_asset_name, total_supply_base)
+  let pool_output =
+    Output {
+      address: Address {
+        payment_credential: Script(test_pool_script_hash),
+        stake_credential: None,
+      },
+      value: from_asset(test_policy_id, cmatra_asset_name, total_supply_base),
+      datum: InlineDatum(Void),
+      reference_script: None,
+    }
+  let tx =
+    test_tx_with_outputs(
+      both_admins(),
+      [input_for(test_seed_ref())],
+      [pool_output],
+      mint_value,
+    )
+  flux_mint_policy.mint(
+    test_seed_ref(),
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    Void,
+    test_policy_id,
+    tx,
+  )
+}
+
+/// I6 REGRESSION: cMATRA → script address with NoDatum is rejected.
+/// This is exactly the shape that mint-ceremony.sh produced on
+/// 2026-05-18 and that locked 722.5M cMATRA. Must FAIL post-fix.
+test mint_to_script_no_datum_fails() fail {
+  let mint_value =
+    from_asset(test_policy_id, cmatra_asset_name, total_supply_base)
+  let pool_output =
+    Output {
+      address: Address {
+        payment_credential: Script(test_pool_script_hash),
+        stake_credential: None,
+      },
+      value: from_asset(test_policy_id, cmatra_asset_name, total_supply_base),
+      datum: NoDatum,
+      reference_script: None,
+    }
+  let tx =
+    test_tx_with_outputs(
+      both_admins(),
+      [input_for(test_seed_ref())],
+      [pool_output],
+      mint_value,
+    )
+  flux_mint_policy.mint(
+    test_seed_ref(),
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    Void,
+    test_policy_id,
+    tx,
+  )
+}
+
+/// I6: cMATRA → script address with DatumHash also passes. The chain-side
+/// requirement is "datum is recoverable," and a hash + witness-map entry
+/// is just as recoverable as an inline datum.
+test mint_to_script_with_datum_hash_passes() {
+  let mint_value =
+    from_asset(test_policy_id, cmatra_asset_name, total_supply_base)
+  let pool_output =
+    Output {
+      address: Address {
+        payment_credential: Script(test_pool_script_hash),
+        stake_credential: None,
+      },
+      value: from_asset(test_policy_id, cmatra_asset_name, total_supply_base),
+      datum: DatumHash(
+        #"0101010101010101010101010101010101010101010101010101010101010101",
+      ),
+      reference_script: None,
+    }
+  let tx =
+    test_tx_with_outputs(
+      both_admins(),
+      [input_for(test_seed_ref())],
+      [pool_output],
+      mint_value,
+    )
+  flux_mint_policy.mint(
+    test_seed_ref(),
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    Void,
+    test_policy_id,
+    tx,
+  )
+}
+
+/// I6: cMATRA → KEY address with NoDatum is fine — the invariant doesn't
+/// fire on VerificationKey credentials, because key-address UTxOs are
+/// spendable by signature and never reach a Plutus eval that wants datum.
+test mint_to_key_addr_no_datum_passes() {
+  let mint_value =
+    from_asset(test_policy_id, cmatra_asset_name, total_supply_base)
+  let admin_output =
+    Output {
+      address: Address {
+        payment_credential: VerificationKey(test_admin_1_pkh),
+        stake_credential: None,
+      },
+      value: from_asset(test_policy_id, cmatra_asset_name, total_supply_base),
+      datum: NoDatum,
+      reference_script: None,
+    }
+  let tx =
+    test_tx_with_outputs(
+      both_admins(),
+      [input_for(test_seed_ref())],
+      [admin_output],
+      mint_value,
+    )
+  flux_mint_policy.mint(
+    test_seed_ref(),
+    test_admin_1_pkh,
+    test_admin_2_pkh,
+    Void,
+    test_policy_id,
+    tx,
+  )
+}
+
+/// I6 on burn path: a permissionless burn that directs remnants to a
+/// script address with NoDatum is also rejected. The invariant fires
+/// on both mint and burn paths, sparing accidental locks.
+test burn_to_script_no_datum_fails() fail {
+  let mint_value = from_asset(test_policy_id, cmatra_asset_name, -1)
+  let remnant_output =
+    Output {
+      address: Address {
+        payment_credential: Script(test_pool_script_hash),
+        stake_credential: None,
+      },
+      value: from_asset(test_policy_id, cmatra_asset_name, 999),
+      datum: NoDatum,
+      reference_script: None,
+    }
+  let tx = test_tx_with_outputs([], [], [remnant_output], mint_value)
   flux_mint_policy.mint(
     test_seed_ref(),
     test_admin_1_pkh,
