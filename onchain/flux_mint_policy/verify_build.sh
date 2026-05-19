@@ -28,9 +28,14 @@ set -euo pipefail
 # --- Configuration ---
 REQUIRED_AIKEN_VERSION="v1.1.21"
 
-# Set this to the script hash of the deployed mainnet policy once known.
-# Leave empty during pre-deployment to just print the computed hash.
-EXPECTED_HASH=""
+# Unparameterized mint-policy script hash, computed with Aiken v1.1.21+42babe5
+# after the I6 (datum-required-at-script-addr) post-mortem fix landed.
+# The previous (pre-I6) baseline `5edc287248...` shipped to mainnet on
+# 2026-05-18 and caused the no-datum lock catastrophe — see
+# `feedback_cardano_script_output_datum_required.md`. The new code
+# structurally rejects any tx that places cMATRA at a script address with
+# NoDatum, so no replay of that mistake is possible.
+EXPECTED_HASH="f885091e5765152c8f65fb4d2cfd55056b79ea94c40dabca5537bdeb"
 
 # --- Check Aiken version ---
 echo "=== Deterministic Build Verification (cMATRA Mint Policy) ==="
