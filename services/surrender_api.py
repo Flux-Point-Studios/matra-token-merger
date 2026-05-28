@@ -18,13 +18,14 @@ Two-party co-signing flow:
 
 from __future__ import annotations
 
-import hashlib
+import asyncio
 import json
 import logging
 import os
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,12 @@ from tools.process_surrender import (
     find_pool_utxos,
     load_rate_table,
     load_script_from_blueprint,
+)
+from services.pool_tip import (
+    PoolSettlingError,
+    PoolTipError,
+    PoolTipManager,
+    extract_pool_output,
 )
 
 # ---------------------------------------------------------------------------
@@ -132,6 +139,30 @@ COSIGNER_SECRET: str = os.environ.get("COSIGNER_API_SECRET", "")
 # Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
 API_SECRET: str = os.environ.get("SURRENDER_API_SECRET", "")
 
+# --- Pool-tip tx-chaining tunables (see services/pool_tip.py) ---
+# Depth cap below the anchor-worker's 10 — surrender txs are much larger, so a
+# shorter chain bounds the worst-case unwind. A wallet that needs more chunks
+# than this proceeds in waves: at the cap, new builds 503 POOL_SETTLING until
+# the pending root confirms, then the tip re-seeds.
+POOL_TIP_DEPTH_CAP: int = int(os.environ.get("POOL_TIP_DEPTH_CAP", "8"))
+# Signing-round-trip timeout: the single-flight lock is reclaimed if a build
+# holds it longer than this (frontend never returned a signature). Tip
+# unchanged on reclaim.
+POOL_TIP_SIGNING_TIMEOUT_S: float = float(
+    os.environ.get("POOL_TIP_SIGNING_TIMEOUT_S", "90")
+)
+# Eviction window: a pending tip whose root tx hasn't confirmed on Blockfrost
+# within this many seconds is rolled back to confirmed state. MUST be well
+# below pycardano's auto-TTL (~2.7h) so the rollback happens before the tx
+# can no longer be resubmitted/expires.
+POOL_TIP_EVICTION_WINDOW_S: float = float(
+    os.environ.get("POOL_TIP_EVICTION_WINDOW_S", "240")
+)
+# Background watchdog tick.
+POOL_TIP_WATCHDOG_INTERVAL_S: float = float(
+    os.environ.get("POOL_TIP_WATCHDOG_INTERVAL_S", "30")
+)
+
 # ---------------------------------------------------------------------------
 # CBOR constants
 # ---------------------------------------------------------------------------
@@ -164,10 +195,17 @@ class AppState:
     pending_tx_cbor: dict[str, bytes] = {}
     TX_HASH_TTL: float = 600.0  # 10 minutes
 
-    # Pool UTxO reservation: prevents concurrent builds from targeting the
-    # same pool UTxO.  Maps "txhash#idx" -> expiry timestamp.
-    reserved_pool_utxos: dict[str, float] = {}
-    POOL_RESERVE_TTL: float = 120.0  # 2 minutes (enough for user to sign)
+    # Pool-tip chainer. Replaces the old per-build Blockfrost re-query +
+    # reserved_pool_utxos reservation set — the tip IS the reservation, held by
+    # a single-flight lock from build through submit-accept.
+    tip_mgr: PoolTipManager | None = None
+    # Per-build context stashed at /build-surrender, consumed at
+    # /submit-surrender so the tip advance can run the datum guard against the
+    # exact pool output the tx carries. Keyed by build tx_hash.
+    #   {build_token, delivered_cmatra, built_pool_output}
+    build_ctx: dict[str, dict[str, Any]] = {}
+    # Background watchdog handle (eviction + stuck-build sweep).
+    watchdog_task: Any = None
 
 
 state = AppState()
@@ -225,6 +263,11 @@ class PoolStatusResponse(BaseModel):
     pool_remaining_base: int
     utxo_count: int
     window_open: bool
+    # In-memory pool-tip chain state (mirrors anchor-worker /status.chainState).
+    # {utxo_ref, balance, status, depth} — None before the first build seeds it.
+    # Lets the operator watch chaining live during the canary + 95-chunk drain.
+    chainState: dict[str, Any] | None = None
+    depthCap: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +313,7 @@ async def verify_api_secret(request: Request, call_next):
 
 
 @app.on_event("startup")
-def startup():
+async def startup():
     """Load config, rate table, script, and admin key on startup."""
     state.bf = BlockfrostClient()
 
@@ -328,6 +371,75 @@ def startup():
             ADMIN_SKEY_PATH,
         )
 
+    # Pool-tip chainer. Seeds lazily on the first build (so startup never
+    # fails when the chain is briefly unreachable), then chains in memory.
+    if SCRIPT_ADDRESS and CMATRA_POLICY_HEX and CMATRA_ASSET_HEX:
+        state.tip_mgr = PoolTipManager(
+            seed_fn=_seed_pool_utxos,
+            script_address=SCRIPT_ADDRESS,
+            depth_cap=POOL_TIP_DEPTH_CAP,
+            signing_timeout_s=POOL_TIP_SIGNING_TIMEOUT_S,
+            eviction_window_s=POOL_TIP_EVICTION_WINDOW_S,
+        )
+        state.watchdog_task = asyncio.create_task(_pool_tip_watchdog())
+        logger.info(
+            "Pool-tip chainer armed (depth_cap=%d, eviction=%.0fs, "
+            "signing_timeout=%.0fs)",
+            POOL_TIP_DEPTH_CAP, POOL_TIP_EVICTION_WINDOW_S,
+            POOL_TIP_SIGNING_TIMEOUT_S,
+        )
+    else:
+        logger.warning(
+            "Pool-tip chainer NOT armed — script/policy/asset not configured"
+        )
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Cancel the background watchdog cleanly."""
+    if state.watchdog_task is not None:
+        state.watchdog_task.cancel()
+        try:
+            await state.watchdog_task
+        except asyncio.CancelledError:
+            pass
+
+
+def _seed_pool_utxos() -> list[dict[str, Any]]:
+    """Confirmed pool-UTxO list for the tip manager (largest-first, all
+    carrying the Void datum — find_pool_utxos already enforces both)."""
+    return find_pool_utxos(
+        state.bf, SCRIPT_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
+    )
+
+
+def _tx_is_confirmed(tx_hash: str) -> bool:
+    """True once Blockfrost has the tx in a block. Used by the eviction
+    watchdog. ``get_tx_utxos`` 404s (raises) until the tx confirms."""
+    try:
+        state.bf.get_tx_utxos(tx_hash)
+        return True
+    except Exception:
+        return False
+
+
+async def _pool_tip_watchdog() -> None:
+    """Independent background loop (guard 3 + signing-timeout sweep). Rolls a
+    stalled pending tip back to Blockfrost-confirmed state and reclaims a
+    build lock held past the signing timeout. The tip's correctness is checked
+    against L1 here — never self-asserted."""
+    mgr = state.tip_mgr
+    assert mgr is not None
+    while True:
+        try:
+            await asyncio.sleep(POOL_TIP_WATCHDOG_INTERVAL_S)
+            await mgr.sweep_stuck_build()
+            await mgr.evict_if_stale(_tx_is_confirmed)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("pool-tip watchdog tick failed")
+
 
 # ---------------------------------------------------------------------------
 # Build surrender — two-party co-signing
@@ -373,17 +485,47 @@ def _resolve_legacy_assets(
         return result
 
 
-@app.post("/build-surrender", response_model=BuildSurrenderResponse)
-def build_surrender(req: BuildSurrenderRequest):
-    """Build a partially-signed surrender transaction.
+def _build_tx_blocking(
+    user_address: str,
+    total_cmatra: int,
+    legacy_assets: list[dict[str, Any]],
+    pool_utxo: dict[str, Any],
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Build + preflight a surrender tx (blocking pycardano + Blockfrost work).
+    Runs inside ``asyncio.to_thread`` so it never blocks the event loop or the
+    single-flight lock holder. Raises on build/preflight failure; the async
+    caller translates to HTTP and releases the lock."""
+    tx_cbor_hex, tx_hash, built_pool_output = _build_cosigned_surrender_tx(
+        user_address=user_address,
+        total_cmatra=total_cmatra,
+        legacy_assets=legacy_assets,
+        pool_utxo=pool_utxo,
+    )
+    # Mandatory preflight: evaluate_tx against the live ledger before returning
+    # to the user. Catches script errors before any collateral is at risk.
+    preflight_ctx = BlockFrostChainContext(
+        project_id=state.bf.project_id,
+        base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
+    )
+    preflight_ctx.evaluate_tx_cbor(bytes.fromhex(tx_cbor_hex))
+    logger.info("Preflight OK for tx %s", tx_hash[:16])
+    return tx_cbor_hex, tx_hash, built_pool_output
 
-    The server builds the full transaction and signs with the admin key.
-    The returned CBOR hex needs the user's wallet signature added before
-    submission.
+
+@app.post("/build-surrender", response_model=BuildSurrenderResponse)
+async def build_surrender(req: BuildSurrenderRequest):
+    """Build a partially-signed surrender transaction against the pool TIP.
+
+    The server reads the in-memory pool tip (chained off the prior surrender's
+    pending change output — no Blockfrost re-query, so chunk N+1 sees chunk N
+    immediately), builds the full transaction, signs with the admin key, and
+    returns the CBOR for the wallet to co-sign. The single-flight lock is held
+    from here through /submit-surrender so two surrenders never target the same
+    tip; the tip advances ONLY after submit returns mempool-accept.
     """
     # Validate user address format
-    if not req.user_address.startswith("addr1"):
-        raise HTTPException(400, "Invalid Cardano mainnet address")
+    if not req.user_address.startswith("addr1") and not req.user_address.startswith("addr_test1"):
+        raise HTTPException(400, "Invalid Cardano address")
 
     # Reject script-payment addresses — cMATRA must go to a key-controlled
     # wallet, not another script.  Prevents sending funds to an address the
@@ -400,8 +542,8 @@ def build_surrender(req: BuildSurrenderRequest):
     # Closed-beta whitelist gate. If ALLOWED_USER_ADDRESSES is non-empty, only
     # those exact bech32 addresses may build a surrender tx. Empty = open
     # window (production behavior). Enforced before any chain query, key load,
-    # or pool reservation, so a non-allowed caller can never observe state or
-    # consume a pool slot.
+    # or tip acquisition, so a non-allowed caller can never observe state or
+    # consume the single-flight lock.
     if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
         raise HTTPException(403, "Surrender window not yet open")
 
@@ -418,6 +560,8 @@ def build_surrender(req: BuildSurrenderRequest):
         raise HTTPException(503, "cMATRA policy/asset not configured")
     if not QUARANTINE_ADDRESS:
         raise HTTPException(503, "Quarantine address not configured")
+    if state.tip_mgr is None:
+        raise HTTPException(503, "Pool-tip chainer not initialized")
 
     asset_lookup = _build_asset_lookup()
 
@@ -446,45 +590,46 @@ def build_surrender(req: BuildSurrenderRequest):
         )
         all_legacy_assets.extend(legacy)
 
-    # Find pool UTxO with sufficient balance (skip reserved ones)
-    pool_utxos = find_pool_utxos(
-        state.bf, SCRIPT_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
-    )
-    if not pool_utxos:
-        raise HTTPException(503, "No pool UTxOs available")
-
-    _prune_expired_reservations()
-    selected_pool = None
-    for pu in pool_utxos:
-        utxo_key = f"{pu['tx_hash']}#{pu['output_index']}"
-        if utxo_key in state.reserved_pool_utxos:
-            continue  # skip — another build is in-flight for this UTxO
-        if pu["cmatra_amount"] >= total_cmatra:
-            selected_pool = pu
-            break
-
-    if selected_pool is None:
+    # Acquire the single-flight lock and read the pool tip. Cold-start seeds
+    # from Blockfrost (largest confirmed UTxO); thereafter the tip is the prior
+    # surrender's pending change output. Held until /submit-surrender accepts
+    # (advance) or a failure/timeout releases it.
+    build_token = uuid.uuid4().hex
+    try:
+        tip = await state.tip_mgr.acquire_for_build(build_token)
+    except PoolSettlingError:
+        # Depth cap reached — lock already released by the manager. The wallet
+        # should retry after the pending root confirms.
         raise HTTPException(
             503,
-            "No available pool UTxO with sufficient balance. "
-            "Another surrender may be in progress — please retry shortly.",
+            detail={
+                "code": "POOL_SETTLING",
+                "message": "Pool settling, retry in ~20s",
+            },
+        )
+    except PoolTipError as e:
+        # Could not seed the tip from chain (no confirmed pool UTxO).
+        logger.error("Tip acquisition failed: %s", e)
+        raise HTTPException(503, "No pool UTxOs available")
+
+    # From here the lock is HELD — every exit path must advance or release it.
+    pool_utxo = tip.as_pool_utxo_dict()
+    if pool_utxo["cmatra_amount"] < total_cmatra:
+        state.tip_mgr.release_build(build_token)
+        raise HTTPException(
+            503,
+            "Pool tip has insufficient cMATRA for this surrender. "
+            "It may be settling — please retry shortly.",
         )
 
-    # Reserve this pool UTxO so concurrent builds don't target it
-    pool_utxo_key = f"{selected_pool['tx_hash']}#{selected_pool['output_index']}"
-    state.reserved_pool_utxos[pool_utxo_key] = time.time()
-
-    # Build the transaction
+    # Build + preflight off the event loop (blocking pycardano + Blockfrost).
     try:
-        tx_cbor_hex, tx_hash = _build_cosigned_surrender_tx(
-            user_address=req.user_address,
-            total_cmatra=total_cmatra,
-            legacy_assets=all_legacy_assets,
-            pool_utxo=selected_pool,
+        tx_cbor_hex, tx_hash, built_pool_output = await asyncio.to_thread(
+            _build_tx_blocking,
+            req.user_address, total_cmatra, all_legacy_assets, pool_utxo,
         )
     except InvalidTransactionException as e:
-        # Release reservation on build failure
-        state.reserved_pool_utxos.pop(pool_utxo_key, None)
+        state.tip_mgr.release_build(build_token)
         size_exc = _tx_too_large_http_exception(
             e, user_address=req.user_address,
             assets_count=len(all_legacy_assets),
@@ -494,41 +639,29 @@ def build_surrender(req: BuildSurrenderRequest):
         logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed. Please try again.")
     except Exception:
-        # Release reservation on build failure
-        state.reserved_pool_utxos.pop(pool_utxo_key, None)
-        logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
-        raise HTTPException(500, "Transaction build failed. Please try again.")
-
-    # Mandatory preflight: evaluate_tx against live ledger before returning
-    # to user.  Catches script errors before any collateral is at risk.
-    try:
-        preflight_ctx = BlockFrostChainContext(
-            project_id=state.bf.project_id,
-            base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
-        )
-        # evaluate_tx_cbor accepts raw CBOR bytes; evaluate_tx wants a
-        # Transaction object. Use the cbor variant since we already have hex.
-        preflight_ctx.evaluate_tx_cbor(bytes.fromhex(tx_cbor_hex))
-        logger.info("Preflight OK for tx %s", tx_hash[:16])
-    except Exception as e:
-        state.reserved_pool_utxos.pop(pool_utxo_key, None)
-        logger.error("Preflight FAILED for tx %s: %s", tx_hash[:16], e)
+        state.tip_mgr.release_build(build_token)
+        logger.exception("Failed to build/preflight surrender tx for %s", req.user_address[:24])
         raise HTTPException(422, "Transaction preflight failed. Please retry.")
 
-    # Register this tx hash so submit-surrender will accept it, and stash
-    # the exact admin-signed CBOR so we can merge the wallet's partial
-    # witness set into it without re-encoding the body (which would
-    # invalidate the user's signature).
+    # Register the tx hash so submit-surrender will accept it, stash the exact
+    # admin-signed CBOR (so the wallet's witness merge preserves the body), and
+    # stash the tip-advance context (delivered amount + the pool output the
+    # datum guard will check at submit time).
     _prune_expired_tx_hashes()
     state.pending_tx_hashes[tx_hash] = time.time()
     state.pending_tx_cbor[tx_hash] = bytes.fromhex(tx_cbor_hex)
+    state.build_ctx[tx_hash] = {
+        "build_token": build_token,
+        "delivered_cmatra": total_cmatra,
+        "built_pool_output": built_pool_output,
+    }
 
     return BuildSurrenderResponse(
         tx_cbor_hex=tx_cbor_hex,
         tx_hash=tx_hash,
         redemption_summary=redemption_summary,
         total_cmatra_display=total_cmatra / (10 ** FLUX_DECIMALS),
-        pool_utxo_used=f"{selected_pool['tx_hash']}#{selected_pool['output_index']}",
+        pool_utxo_used=tip.utxo_ref,
     )
 
 
@@ -636,7 +769,7 @@ def _build_cosigned_surrender_tx(
     total_cmatra: int,
     legacy_assets: list[dict[str, Any]],
     pool_utxo: dict[str, Any],
-) -> tuple[str, str]:
+) -> tuple[str, str, dict[str, Any] | None]:
     """Build a surrender tx and partially sign with admin key(s).
 
     Transaction structure:
@@ -652,7 +785,10 @@ def _build_cosigned_surrender_tx(
     The builder auto-selects user UTxOs for the legacy assets + fees.
     Admin signs the script spend. User must add their signature via wallet.
 
-    Returns (tx_cbor_hex, tx_hash_hex).
+    Returns (tx_cbor_hex, tx_hash_hex, built_pool_output). The third element is
+    output[1] read back from the assembled tx body — {address, datum_hex,
+    cmatra_amount, ada_amount} — or None if no pool-change output exists
+    (full drain). The tip-advance datum guard runs against it.
     """
     # NOTE: state.bf is our custom BlockfrostClient (tools/api_clients.py)
     # which stores base_url WITH '/v0' (e.g. ".../api/v0") because it builds
@@ -796,14 +932,21 @@ def _build_cosigned_surrender_tx(
     tx = Transaction(tx_body, witness_set)
     tx_cbor_hex = tx.to_cbor().hex()
 
+    # Read back output[1] (pool-change->script) for the tip-advance datum
+    # guard. Reading the assembled body — not trusting the build inputs — is
+    # what makes a future refactor that reorders outputs FAIL the guard rather
+    # than silently poison the chained tip.
+    built_pool_output = extract_pool_output(tx)
+
     logger.info(
-        "Built co-signed surrender tx: %d cMATRA → %s (tx: %s)",
+        "Built co-signed surrender tx: %d cMATRA → %s (tx: %s, pool_out=%s)",
         total_cmatra,
         user_address[:24] + "...",
         tx_hash_hex[:16] + "...",
+        (built_pool_output or {}).get("datum_hex"),
     )
 
-    return tx_cbor_hex, tx_hash_hex
+    return tx_cbor_hex, tx_hash_hex, built_pool_output
 
 
 # ---------------------------------------------------------------------------
@@ -819,15 +962,6 @@ def _prune_expired_tx_hashes() -> None:
     for h in expired:
         state.pending_tx_hashes.pop(h, None)
         state.pending_tx_cbor.pop(h, None)
-
-
-def _prune_expired_reservations() -> None:
-    """Remove expired pool UTxO reservations."""
-    now = time.time()
-    expired = [k for k, t in state.reserved_pool_utxos.items()
-               if now - t > state.POOL_RESERVE_TTL]
-    for k in expired:
-        del state.reserved_pool_utxos[k]
 
 
 def _merge_wallet_witnesses(
@@ -901,8 +1035,8 @@ def _merge_wallet_witnesses(
 
 
 @app.post("/submit-surrender", response_model=SubmitResponse)
-def submit_surrender(req: SubmitRequest):
-    """Submit a surrender transaction.
+async def submit_surrender(req: SubmitRequest):
+    """Submit a surrender transaction and advance the pool tip.
 
     CIP-30 `signTx(cbor, partialSign=true)` returns only the wallet's
     partial witness set (typically `{0: [[pk, sig]]}`), not the full
@@ -914,6 +1048,10 @@ def submit_surrender(req: SubmitRequest):
     The tx_body bytes are preserved byte-for-byte (we only rewrite the
     witness_set element of the outer CBOR array) so the wallet's
     signature over the body remains valid.
+
+    The pool tip advances ONLY here, after Blockfrost returns a mempool-accept
+    hash — never at build time. The datum guard runs against the pool output[1]
+    captured at build time before the tip is allowed to chain forward.
     """
     if not state.bf:
         raise HTTPException(503, "Blockfrost client not available")
@@ -930,6 +1068,8 @@ def submit_surrender(req: SubmitRequest):
         logger.warning("Rejected submit for unknown tx hash: %s", tx_hash_hex[:16])
         raise HTTPException(403, "Transaction was not built by this service")
 
+    ctx = state.build_ctx.get(tx_hash_hex)
+
     try:
         merged_tx_bytes = _merge_wallet_witnesses(original_cbor, wallet_ws_bytes)
     except Exception as e:
@@ -937,15 +1077,53 @@ def submit_surrender(req: SubmitRequest):
         raise HTTPException(400, "Malformed witness set CBOR")
 
     try:
-        submitted_hash = state.bf.submit_tx(merged_tx_bytes)
+        submitted_hash = await asyncio.to_thread(state.bf.submit_tx, merged_tx_bytes)
+    except Exception as e:
+        # Submit rejected — tip unchanged, release the single-flight lock so
+        # the next surrender can proceed off the still-confirmed tip.
+        logger.error("Submit failed for tx %s: %s", tx_hash_hex[:16], e)
+        if ctx and state.tip_mgr is not None:
+            state.tip_mgr.release_build(ctx["build_token"])
         state.pending_tx_hashes.pop(tx_hash_hex, None)
         state.pending_tx_cbor.pop(tx_hash_hex, None)
-        _prune_expired_reservations()
-        logger.info("Submitted surrender tx: %s", submitted_hash)
-        return SubmitResponse(tx_hash=submitted_hash)
-    except Exception as e:
-        logger.error("Submit failed for tx %s: %s", tx_hash_hex[:16], e)
+        state.build_ctx.pop(tx_hash_hex, None)
         raise HTTPException(400, "Transaction submission failed")
+
+    # Mempool-accept. Advance the tip, running the datum + balance guards
+    # against the pool output[1] captured at build time. This is the single
+    # point where the tip moves forward.
+    state.pending_tx_hashes.pop(tx_hash_hex, None)
+    state.pending_tx_cbor.pop(tx_hash_hex, None)
+    state.build_ctx.pop(tx_hash_hex, None)
+    logger.info("Submitted surrender tx: %s", submitted_hash)
+
+    if ctx and state.tip_mgr is not None:
+        try:
+            state.tip_mgr.advance_on_submit(
+                build_token=ctx["build_token"],
+                submitted_tx_hash=submitted_hash,
+                delivered_cmatra=ctx["delivered_cmatra"],
+                built_pool_output=ctx["built_pool_output"],
+            )
+        except PoolTipError as e:
+            # The tx LANDED (the user's money moved), but the pool output we
+            # built failed a guard (e.g. missing datum). Do NOT chain off it.
+            # Flush the tip back to Blockfrost-confirmed state — the watchdog
+            # would catch this anyway, but flush eagerly so the next build
+            # re-seeds rather than chaining off an unverified output. The user
+            # still gets their success.
+            # advance_on_submit already released the lock in its finally; just
+            # re-seed the tip from confirmed chain state.
+            logger.error(
+                "Tip advance guard rejected post-submit for %s: %s — flushing "
+                "tip to confirmed (tx already landed)", submitted_hash[:16], e,
+            )
+            try:
+                state.tip_mgr.seed_from_chain()
+            except Exception:
+                logger.exception("Tip flush after guard rejection failed")
+
+    return SubmitResponse(tx_hash=submitted_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -1022,9 +1200,11 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     if selected_pool is None:
         raise HTTPException(503, "No pool UTxO with sufficient balance")
 
-    # Build the tx (same as build-surrender)
+    # Build the tx (same as build-surrender). evaluate-surrender is a
+    # diagnostic that never submits, so it reads the pool directly (not the
+    # chained tip) and discards the built pool output.
     try:
-        tx_cbor_hex, tx_hash_hex = _build_cosigned_surrender_tx(
+        tx_cbor_hex, tx_hash_hex, _ = _build_cosigned_surrender_tx(
             user_address=req.user_address,
             total_cmatra=total_cmatra,
             legacy_assets=all_legacy_assets,
@@ -1106,11 +1286,16 @@ def pool_status():
 
     total_base = sum(u["cmatra_amount"] for u in pool_utxos)
 
+    chain_state = state.tip_mgr.chain_state() if state.tip_mgr else None
+    depth_cap = state.tip_mgr.depth_cap if state.tip_mgr else None
+
     return PoolStatusResponse(
         pool_remaining_display=total_base / (10 ** FLUX_DECIMALS),
         pool_remaining_base=total_base,
         utxo_count=len(pool_utxos),
         window_open=len(pool_utxos) > 0,  # Simple heuristic: pool funded = window open
+        chainState=chain_state,
+        depthCap=depth_cap,
     )
 
 
