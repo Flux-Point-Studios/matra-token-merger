@@ -68,6 +68,11 @@ from pycardano import (
 )
 from pycardano.exception import InvalidTransactionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
+from pycardano.plutus import (
+    RedeemerKey,
+    RedeemerMap,
+    RedeemerTag,
+)
 
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada
@@ -764,6 +769,59 @@ def _tx_too_large_http_exception(
     )
 
 
+def _reindex_spend_redeemer_to_serialized_inputs(
+    tx_body: TransactionBody,
+    witness_set: TransactionWitnessSet,
+    script_input: TransactionInput,
+) -> None:
+    """Pin the ProcessSurrender SPEND redeemer's index to the script input's
+    position in the SERIALIZED tx body inputs — the order the ledger sorts and
+    evaluates against — and mutate ``witness_set`` in place.
+
+    pycardano < 0.19 collapses the inputs ``OrderedSet`` through a ``frozenset``
+    in ``to_shallow_primitive`` (serialization.py:_dfs), so the on-wire input
+    order is hash-seed-dependent and does NOT match the ``str(tx_id)``-sorted
+    order that ``TransactionBuilder._set_redeemer_index`` used. The redeemer
+    then points at the wrong input and the node rejects the tx with
+    ``extraRedeemers=['spend:<n>']`` (and the real script input has no
+    redeemer). On the chained surrender path the script input's hash changes
+    every tx, so it lands at a different serialized position roughly a third of
+    the time. We re-derive the index from the exact bytes that go on the wire.
+
+    The redeemer lives in the witness set, not the body, so this never changes
+    ``tx_body.hash()`` — admin/co-signer signatures over the body and the
+    wallet's CIP-30 signature stay valid. Only the SPEND redeemer is touched
+    (there is exactly one script input on the surrender tx).
+    """
+    redeemers = witness_set.redeemer
+    if redeemers is None:
+        raise ValueError("Surrender tx has no redeemers — script spend is missing")
+
+    body_inputs = cbor2.loads(tx_body.to_cbor())[0]
+    if isinstance(body_inputs, CBORTag):  # set-tagged (#6.258)
+        body_inputs = body_inputs.value
+    serialized = [(bytes(e[0]), e[1]) for e in body_inputs]
+    target_index = serialized.index((bytes(script_input.transaction_id), script_input.index))
+
+    if isinstance(redeemers, RedeemerMap):
+        spend_keys = [k for k in redeemers if k.tag == RedeemerTag.SPEND]
+        if len(spend_keys) != 1:
+            raise ValueError(
+                f"Expected exactly 1 SPEND redeemer, found {len(spend_keys)}"
+            )
+        old_key = spend_keys[0]
+        if old_key.index != target_index:
+            value = redeemers.data.pop(old_key)
+            redeemers.data[RedeemerKey(RedeemerTag.SPEND, target_index)] = value
+    else:  # legacy list[Redeemer] (use_redeemer_map=False)
+        spend = [r for r in redeemers if r.tag == RedeemerTag.SPEND]
+        if len(spend) != 1:
+            raise ValueError(
+                f"Expected exactly 1 SPEND redeemer, found {len(spend)}"
+            )
+        spend[0].index = target_index
+
+
 def _build_cosigned_surrender_tx(
     user_address: str,
     total_cmatra: int,
@@ -916,6 +974,14 @@ def _build_cosigned_surrender_tx(
 
     # Build witness set with admin 1 signature + script + redeemer
     witness_set = builder.build_witness_set()
+
+    # Pin the SPEND redeemer to the script input's serialized position. On
+    # pycardano < 0.19 the body inputs serialize in a hash-seed-dependent order
+    # that the builder's redeemer index does not track, which the node rejects
+    # as extraRedeemers. The redeemer is not part of the body, so this is
+    # signature-safe. See _reindex_spend_redeemer_to_serialized_inputs.
+    _reindex_spend_redeemer_to_serialized_inputs(tx_body, witness_set, tx_in)
+
     if witness_set.vkey_witnesses is None:
         witness_set.vkey_witnesses = []
     witness_set.vkey_witnesses.append(admin_vk_witness)
