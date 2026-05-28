@@ -1,22 +1,27 @@
 """Regression guard for the ProcessSurrender SPEND-redeemer index.
 
-The surrender tx spends the pool script UTxO + the user's own UTxOs. Cardano
-sorts tx inputs canonically, so the pool (script) input's position depends on
-its tx_hash relative to the user UTxO hashes. The SPEND redeemer MUST be
-indexed to the script input's position in the SERIALIZED tx body — the order
-the ledger evaluates against — or the node rejects the tx with
-``extraRedeemers=['spend:<n>']``.
+The surrender tx spends the pool script UTxO + the user's own UTxOs. The
+Conway ledger sorts tx inputs canonically — ascending by (tx_id bytes, output
+index) — and evaluates the SPEND redeemer against the script input's position
+in THAT order. So the SPEND redeemer index MUST equal the script (pool) input's
+position in ``sorted(inputs, key=lambda i: (i.tx_id_bytes, i.index))`` or the
+node rejects the tx with ``extraRedeemers=['spend:<n>']``.
 
 This drives the REAL ``_build_cosigned_surrender_tx`` (not the mocked
 ``_build_tx_blocking`` used by the chaining tests) against synthetic user
 UTxOs whose tx_hashes bracket the pool hash so the script input lands at
-serialized positions 0, 1, and 2. For each, it decodes the assembled tx CBOR
-and asserts the SPEND redeemer index equals the script input's actual
-serialized position.
+canonical positions 0, 1, and 2. For each, it decodes the assembled tx CBOR
+and asserts the SPEND redeemer index equals the script input's true
+ledger-canonical position — computed by re-sorting the inputs ourselves, NOT
+by trusting cbor2's decode order.
 
-The bug it guards against is hash-seed-dependent on pycardano < 0.19 (the CI-
-pinned version), so the parametrization also forces multiple PYTHONHASHSEED
-values via subprocess to exercise both orderings of the inputs set.
+That distinction is load-bearing. The bug (and the broken PR #20 fix) aligned
+the redeemer to cbor2's decode order, which on the pinned pycardano (< 0.19)
+is hash-seed-dependent and diverges from the ledger's canonical sort. Asserting
+against the decode order is self-consistent but tests nothing real — it passes
+on broken and fixed code alike. We assert against the canonical sort instead,
+and force multiple PYTHONHASHSEED values via subprocess so the guard holds
+regardless of which order cbor2 happened to decode the inputs in.
 """
 
 from __future__ import annotations
@@ -160,18 +165,31 @@ def _user_utxos_for(prefix: str, user_addr: Address):
 
 
 def _decode_positions(tx_cbor_hex: str):
-    """Return (script_input_serialized_pos, spend_redeemer_index) decoded from
-    the assembled tx CBOR — exactly what the node sorts and evaluates."""
+    """Return (script_input_canonical_pos, spend_redeemer_index, onwire_matches_canonical)
+    decoded from the assembled tx CBOR.
+
+    ``script_input_canonical_pos`` is the pool input's index in the inputs
+    re-sorted by (tx_id bytes, output index) — the Conway ledger's canonical
+    order, which is what the node evaluates the redeemer against. It is computed
+    by re-sorting ourselves, NEVER by trusting the order cbor2 decoded the
+    inputs in (that order is hash-seed-dependent on the pinned pycardano and is
+    exactly the wrong proxy the broken #20 fix asserted against).
+
+    ``onwire_matches_canonical`` reports whether the bytes cbor2 actually
+    decoded are already in canonical order — the fix re-emits inputs as a bare
+    array so the on-wire order IS canonical, which keeps the redeemer index the
+    node derives equal to the one in the witness set.
+    """
     arr = cbor2.loads(bytes.fromhex(tx_cbor_hex))
     body, ws = arr[0], arr[1]
     raw_inputs = body[0]
     if isinstance(raw_inputs, CBORTag):
         raw_inputs = raw_inputs.value
-    script_pos = None
-    for i, e in enumerate(raw_inputs):
-        if bytes(e[0]).hex() == _POOL_HASH and e[1] == 1:
-            script_pos = i
-            break
+    onwire = [(bytes(e[0]), e[1]) for e in raw_inputs]
+    canonical = sorted(onwire, key=lambda p: (p[0], p[1]))
+    pool = (bytes.fromhex(_POOL_HASH), 1)
+    script_pos = canonical.index(pool) if pool in canonical else None
+    onwire_matches_canonical = onwire == canonical
     redeemers = ws.get(5)
     spend_idx = None
     if isinstance(redeemers, dict):  # RedeemerMap: {(tag, index): [...]}
@@ -182,7 +200,7 @@ def _decode_positions(tx_cbor_hex: str):
         for r in redeemers:
             if r[0] == 0:
                 spend_idx = r[1]
-    return script_pos, spend_idx
+    return script_pos, spend_idx, onwire_matches_canonical
 
 
 def _build_with_user_prefix(prefix: str):
@@ -241,35 +259,43 @@ def _build_with_user_prefix(prefix: str):
 
 
 @pytest.mark.parametrize("prefix", ["ff", "00"])
-def test_spend_redeemer_index_matches_serialized_script_input_position(prefix):
-    """The SPEND redeemer must index the script input's actual position in the
-    SERIALIZED tx body — whatever that position turns out to be — or the node
-    rejects extraRedeemers. (Which serialized position the script input lands at
-    is hash-seed-dependent on pycardano < 0.19; the multi-seed test below pins
-    positions 0/1/2 explicitly. This one asserts the alignment invariant under
-    the ambient interpreter seed.)"""
+def test_spend_redeemer_index_matches_canonical_script_input_position(prefix):
+    """The SPEND redeemer must index the script input's true ledger-canonical
+    position — its index in inputs sorted by (tx_id, output index) — or the node
+    rejects extraRedeemers. We also assert the on-wire input bytes are in that
+    canonical order (the fix re-emits inputs as a bare array), so the redeemer
+    index the node derives equals the one in the witness set."""
     tx_cbor_hex = _build_with_user_prefix(prefix)
-    script_pos, spend_idx = _decode_positions(tx_cbor_hex)
+    script_pos, spend_idx, onwire_canonical = _decode_positions(tx_cbor_hex)
     assert script_pos is not None, "pool script input missing from serialized tx"
     assert spend_idx is not None, "SPEND redeemer missing from witness set"
+    assert onwire_canonical, (
+        "tx body inputs are NOT in ledger-canonical order on the wire — cbor2's "
+        "tag-258 encoder re-ordered them, so the node would derive a different "
+        "redeemer index than the one in the witness set"
+    )
     assert spend_idx == script_pos, (
-        f"SPEND redeemer index {spend_idx} != script input's serialized "
+        f"SPEND redeemer index {spend_idx} != script input's canonical "
         f"position {script_pos} — node would reject extraRedeemers=['spend:{spend_idx}']"
     )
 
 
-@pytest.mark.parametrize("seed", ["0", "1", "2", "3", "4", "5", "6", "7"])
+@pytest.mark.parametrize("seed", ["0", "1", "2", "3", "7", "42", "99", "999"])
 def test_redeemer_index_correct_under_any_hash_seed(seed):
-    """pycardano < 0.19 serializes the inputs set in hash-seed-dependent order.
-    Re-run the alignment check in a subprocess with a fixed PYTHONHASHSEED so
-    the guard holds regardless of which input ordering the interpreter
-    produces, and record which serialized position the script input landed at.
+    """The pinned pycardano (< 0.19) lets cbor2 decode/encode the inputs set in
+    hash-seed-dependent order. Re-run the alignment check in a subprocess with a
+    fixed PYTHONHASHSEED so the guard holds regardless of which order the
+    interpreter produces, and record which canonical position the script input
+    landed at.
 
-    Across all seeds the suite must observe the pool script input at positions
-    0, 1, AND 2 (the bracketing the canary exposed). 'ff' puts both user UTxOs
-    after the pool (pool at 0), '00' puts both before (pool at 2), and 'cc'
-    splits them around the pool hash (pool at 1) — so each run prints the
-    observed positions and the aggregate assertion below proves full coverage.
+    The seed set includes the values the investigation used to prove the fix
+    deterministic (0/1/7/42/999) plus a few neighbours. Across all seeds the
+    suite must observe the pool script input at canonical positions 0, 1, AND 2.
+    'ff' puts both user UTxOs after the pool (pool at 0), '00' puts both before
+    (pool at 2), and 'cc' splits them around the pool hash (pool at 1). Each run
+    also asserts the on-wire inputs are canonically ordered, which is what keeps
+    the node's derived redeemer index equal to the witness-set one under every
+    seed.
     """
     script = (
         "import os,sys;"
@@ -279,9 +305,10 @@ def test_redeemer_index_correct_under_any_hash_seed(seed):
         "seen=set()\n"
         "for pfx in ('ff','cc','00'):\n"
         "    h=t._build_with_user_prefix(pfx)\n"
-        "    sp,ri=t._decode_positions(h)\n"
+        "    sp,ri,canon=t._decode_positions(h)\n"
         "    assert sp is not None and ri is not None, (pfx,sp,ri)\n"
-        "    assert ri==sp, f'seed-dependent mismatch pfx={pfx} script_pos={sp} redeemer_idx={ri}'\n"
+        "    assert canon, f'on-wire inputs not canonical pfx={pfx}'\n"
+        "    assert ri==sp, f'seed-dependent mismatch pfx={pfx} canonical_pos={sp} redeemer_idx={ri}'\n"
         "    seen.add(sp)\n"
         "print('POSITIONS', sorted(seen))"
     )
@@ -296,13 +323,13 @@ def test_redeemer_index_correct_under_any_hash_seed(seed):
     assert "POSITIONS" in proc.stdout
 
 
-def test_all_three_serialized_positions_are_exercised():
-    """Prove the regression guard actually covers the script input at
-    serialized positions 0, 1, AND 2 (the bracketing the live canary exposed).
-    Sweep hash seeds until every position has been observed at least once with
-    the redeemer correctly aligned — this is the multi-position proof the fix
-    must hold for, not just whichever ordering the default seed happens to
-    produce."""
+def test_all_three_canonical_positions_are_exercised():
+    """Prove the regression guard actually covers the script input at canonical
+    positions 0, 1, AND 2 (the bracketing the live canary exposed). Sweep hash
+    seeds until every position has been observed at least once with the redeemer
+    correctly aligned AND the on-wire inputs canonically ordered — this is the
+    multi-position proof the fix must hold for, not just whichever ordering the
+    default seed happens to produce."""
     seen_positions: set[int] = set()
     for seed in range(24):
         script = (
@@ -313,9 +340,10 @@ def test_all_three_serialized_positions_are_exercised():
             "out=[]\n"
             "for pfx in ('ff','cc','00'):\n"
             "    h=t._build_with_user_prefix(pfx)\n"
-            "    sp,ri=t._decode_positions(h)\n"
+            "    sp,ri,canon=t._decode_positions(h)\n"
             "    assert sp is not None and ri is not None\n"
-            "    assert ri==sp, f'mismatch pfx={pfx} sp={sp} ri={ri}'\n"
+            "    assert canon, f'on-wire inputs not canonical pfx={pfx}'\n"
+            "    assert ri==sp, f'mismatch pfx={pfx} canonical_pos={sp} redeemer_idx={ri}'\n"
             "    out.append(sp)\n"
             "print('POS', out)"
         )

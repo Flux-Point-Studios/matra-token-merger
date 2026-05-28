@@ -769,39 +769,57 @@ def _tx_too_large_http_exception(
     )
 
 
-def _reindex_spend_redeemer_to_serialized_inputs(
+def _canonicalize_body_and_index_redeemer(
     tx_body: TransactionBody,
     witness_set: TransactionWitnessSet,
     script_input: TransactionInput,
-) -> None:
-    """Pin the ProcessSurrender SPEND redeemer's index to the script input's
-    position in the SERIALIZED tx body inputs — the order the ledger sorts and
-    evaluates against — and mutate ``witness_set`` in place.
+) -> TransactionBody:
+    """Rewrite the built tx body so its ``inputs`` are in the ledger's canonical
+    order, emitted as a bare definite-length CBOR array, and point the
+    ProcessSurrender SPEND redeemer at the script input's position in that
+    order. Returns the rebuilt (canonical) ``TransactionBody``; mutates
+    ``witness_set`` in place for the redeemer index.
 
-    pycardano < 0.19 collapses the inputs ``OrderedSet`` through a ``frozenset``
-    in ``to_shallow_primitive`` (serialization.py:_dfs), so the on-wire input
-    order is hash-seed-dependent and does NOT match the ``str(tx_id)``-sorted
-    order that ``TransactionBuilder._set_redeemer_index`` used. The redeemer
-    then points at the wrong input and the node rejects the tx with
-    ``extraRedeemers=['spend:<n>']`` (and the real script input has no
-    redeemer). On the chained surrender path the script input's hash changes
-    every tx, so it lands at a different serialized position roughly a third of
-    the time. We re-derive the index from the exact bytes that go on the wire.
+    cbor2's C-encoder re-orders a tag-258 ("set") value by element hash at
+    ``dumps()`` time, so the on-wire input order pycardano produces is
+    hash-seed-dependent and does NOT match the canonical sort the ledger
+    evaluates against. The builder assigns the redeemer index against its own
+    pre-encode order, so on the chained surrender path — where the script
+    input's tx_id changes every tx — the redeemer lands on the wrong input
+    roughly a third of the time and the node rejects the tx with
+    ``extraRedeemers=['spend:<n>']``.
 
-    The redeemer lives in the witness set, not the body, so this never changes
-    ``tx_body.hash()`` — admin/co-signer signatures over the body and the
-    wallet's CIP-30 signature stay valid. Only the SPEND redeemer is touched
-    (there is exactly one script input on the surrender tx).
+    The fix sorts the inputs ourselves and re-emits them as a bare array (not a
+    tag-258 set): a plain list is left untouched by cbor2's encoder, so the
+    bytes that go on the wire stay in the order we computed, and the redeemer
+    index matches the position the ledger derives. A bare inputs array is
+    Conway-legal (the ledger canonicalizes inputs regardless of wire framing)
+    and ``TransactionBody.from_cbor`` round-trips it.
+
+    MUST run before any signature is computed: the admin sign, the co-signer
+    sign, and the wallet's CIP-30 witness all cover ``tx_body.hash()`` over
+    THIS canonical body. Outputs (including the pool-change Void datum on
+    output[1]), fee, and every other body field are preserved verbatim — only
+    the input ordering and the redeemer index change.
     """
     redeemers = witness_set.redeemer
     if redeemers is None:
         raise ValueError("Surrender tx has no redeemers — script spend is missing")
 
-    body_inputs = cbor2.loads(tx_body.to_cbor())[0]
-    if isinstance(body_inputs, CBORTag):  # set-tagged (#6.258)
-        body_inputs = body_inputs.value
-    serialized = [(bytes(e[0]), e[1]) for e in body_inputs]
-    target_index = serialized.index((bytes(script_input.transaction_id), script_input.index))
+    body = cbor2.loads(tx_body.to_cbor())
+    raw_inputs = body[0]
+    if isinstance(raw_inputs, CBORTag):  # set-tagged (#6.258)
+        raw_inputs = raw_inputs.value
+    # Conway's canonical input order: ascending by (tx_id bytes, output index).
+    canonical = sorted(
+        ((bytes(e[0]), e[1]) for e in raw_inputs), key=lambda p: (p[0], p[1])
+    )
+    body[0] = [list(p) for p in canonical]
+    canonical_body = TransactionBody.from_cbor(cbor2.dumps(body))
+
+    target_index = canonical.index(
+        (bytes(script_input.transaction_id), script_input.index)
+    )
 
     if isinstance(redeemers, RedeemerMap):
         spend_keys = [k for k in redeemers if k.tag == RedeemerTag.SPEND]
@@ -820,6 +838,8 @@ def _reindex_spend_redeemer_to_serialized_inputs(
                 f"Expected exactly 1 SPEND redeemer, found {len(spend)}"
             )
         spend[0].index = target_index
+
+    return canonical_body
 
 
 def _build_cosigned_surrender_tx(
@@ -964,23 +984,25 @@ def _build_cosigned_surrender_tx(
     # Build the transaction — change goes to user
     tx_body = builder.build(change_address=user_addr)
 
-    # Create admin 1 witness (Server A — local key)
+    # Build witness set (script + redeemer) before signing so the redeemer
+    # index can be aligned to the canonical body below.
+    witness_set = builder.build_witness_set()
+
+    # Canonicalize the tx body's inputs to the ledger's sort order (emitted as a
+    # bare array, immune to cbor2's tag-258 re-ordering) and point the SPEND
+    # redeemer at the script input's position in that order. This MUST happen
+    # before any signature: admin, co-signer, and the wallet's CIP-30 witness
+    # all sign tx_body.hash() over this canonical body. Without it the on-wire
+    # input order is hash-seed-dependent and the node rejects extraRedeemers.
+    tx_body = _canonicalize_body_and_index_redeemer(tx_body, witness_set, tx_in)
+
+    # Create admin 1 witness (Server A — local key) over the canonical body
     tx_hash = tx_body.hash()
     admin_signature = state.admin_sk.sign(tx_hash)
     admin_vk_witness = VerificationKeyWitness(
         VerificationKey.from_signing_key(state.admin_sk),
         admin_signature,
     )
-
-    # Build witness set with admin 1 signature + script + redeemer
-    witness_set = builder.build_witness_set()
-
-    # Pin the SPEND redeemer to the script input's serialized position. On
-    # pycardano < 0.19 the body inputs serialize in a hash-seed-dependent order
-    # that the builder's redeemer index does not track, which the node rejects
-    # as extraRedeemers. The redeemer is not part of the body, so this is
-    # signature-safe. See _reindex_spend_redeemer_to_serialized_inputs.
-    _reindex_spend_redeemer_to_serialized_inputs(tx_body, witness_set, tx_in)
 
     if witness_set.vkey_witnesses is None:
         witness_set.vkey_witnesses = []
