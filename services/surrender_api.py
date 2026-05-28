@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -64,6 +65,7 @@ from pycardano import (
     VerificationKey,
     VerificationKeyWitness,
 )
+from pycardano.exception import InvalidTransactionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
 
 from tools.api_clients import BlockfrostClient
@@ -155,6 +157,11 @@ class AppState:
     # Tracks tx hashes built by this service.  submit-surrender only allows
     # submitting txs whose hash is in this set.  Entries expire after 10 min.
     pending_tx_hashes: dict[str, float] = {}  # tx_hash_hex -> created_at
+    # Mirror map keyed by the same tx_hash, holding the admin-signed CBOR
+    # bytes verbatim. At submit time we merge the wallet's partial witness
+    # set into THIS exact byte sequence (preserving the body bytes the
+    # wallet signed), then forward to Blockfrost.
+    pending_tx_cbor: dict[str, bytes] = {}
     TX_HASH_TTL: float = 600.0  # 10 minutes
 
     # Pool UTxO reservation: prevents concurrent builds from targeting the
@@ -194,9 +201,18 @@ class BuildSurrenderResponse(BaseModel):
 
 
 class SubmitRequest(BaseModel):
+    # Wallet-side partial witness set CBOR hex (what CIP-30 signTx with
+    # partialSign=true returns). Holds the user's vkey witness only. The
+    # server merges it into the admin-signed tx body stashed at build time.
     tx_cbor_hex: str = Field(
-        ..., description="Fully-signed transaction CBOR hex",
-        min_length=64, max_length=32_768, pattern=r"^[0-9a-fA-F]+$",
+        ..., description="Wallet partial witness set CBOR hex",
+        min_length=8, max_length=32_768, pattern=r"^[0-9a-fA-F]+$",
+    )
+    # tx_hash returned by /build-surrender. Required so the server can
+    # locate the matching admin-signed tx body to merge into.
+    tx_hash: str = Field(
+        ..., description="tx_hash from the build-surrender response",
+        min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]+$",
     )
 
 
@@ -466,7 +482,18 @@ def build_surrender(req: BuildSurrenderRequest):
             legacy_assets=all_legacy_assets,
             pool_utxo=selected_pool,
         )
-    except Exception as e:
+    except InvalidTransactionException as e:
+        # Release reservation on build failure
+        state.reserved_pool_utxos.pop(pool_utxo_key, None)
+        size_exc = _tx_too_large_http_exception(
+            e, user_address=req.user_address,
+            assets_count=len(all_legacy_assets),
+        )
+        if size_exc is not None:
+            raise size_exc
+        logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
+        raise HTTPException(500, "Transaction build failed. Please try again.")
+    except Exception:
         # Release reservation on build failure
         state.reserved_pool_utxos.pop(pool_utxo_key, None)
         logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
@@ -488,9 +515,13 @@ def build_surrender(req: BuildSurrenderRequest):
         logger.error("Preflight FAILED for tx %s: %s", tx_hash[:16], e)
         raise HTTPException(422, "Transaction preflight failed. Please retry.")
 
-    # Register this tx hash so submit-surrender will accept it
+    # Register this tx hash so submit-surrender will accept it, and stash
+    # the exact admin-signed CBOR so we can merge the wallet's partial
+    # witness set into it without re-encoding the body (which would
+    # invalidate the user's signature).
     _prune_expired_tx_hashes()
     state.pending_tx_hashes[tx_hash] = time.time()
+    state.pending_tx_cbor[tx_hash] = bytes.fromhex(tx_cbor_hex)
 
     return BuildSurrenderResponse(
         tx_cbor_hex=tx_cbor_hex,
@@ -551,6 +582,53 @@ def _get_cosigner_witness(tx_hash_hex: str) -> VerificationKeyWitness:
     except Exception as e:
         logger.error("Co-signer call failed: %s", e)
         raise HTTPException(503, "Co-signer service unavailable")
+
+
+_TX_SIZE_RE = re.compile(
+    r"Transaction size \((\d+)\) exceeds the max limit \((\d+)\)"
+)
+
+
+def _tx_too_large_http_exception(
+    exc: InvalidTransactionException,
+    *,
+    user_address: str,
+    assets_count: int,
+) -> HTTPException | None:
+    """If `exc` is the protocol-size case, return an actionable 413 the
+    frontend can parse for auto-chunking. Other invalidity reasons
+    (insufficient ADA, datum-mismatch, missing collateral, ...) are NOT
+    matched — the caller should re-raise so they surface as a 500 and we
+    can investigate.
+    """
+    msg = str(exc)
+    match = _TX_SIZE_RE.search(msg)
+    if not match:
+        return None
+    tx_size_bytes = int(match.group(1))
+    max_tx_size_bytes = int(match.group(2))
+    logger.warning(
+        "Surrender tx too large: user_address=%s assets_count=%d "
+        "tx_size_bytes=%d max_tx_size_bytes=%d",
+        user_address[:24] + "...",
+        assets_count,
+        tx_size_bytes,
+        max_tx_size_bytes,
+    )
+    return HTTPException(
+        status_code=413,
+        detail={
+            "code": "TX_TOO_LARGE",
+            "message": (
+                "Surrender request too large for one transaction. "
+                "Please surrender fewer assets at a time and try again — "
+                "the portal will guide you through batching."
+            ),
+            "tx_size_bytes": tx_size_bytes,
+            "max_tx_size_bytes": max_tx_size_bytes,
+            "suggested_batch_size": 4,
+        },
+    )
 
 
 def _build_cosigned_surrender_tx(
@@ -734,12 +812,13 @@ def _build_cosigned_surrender_tx(
 
 
 def _prune_expired_tx_hashes() -> None:
-    """Remove expired pending tx hashes."""
+    """Remove expired pending tx hashes (and their stashed CBOR)."""
     now = time.time()
     expired = [h for h, t in state.pending_tx_hashes.items()
                if now - t > state.TX_HASH_TTL]
     for h in expired:
-        del state.pending_tx_hashes[h]
+        state.pending_tx_hashes.pop(h, None)
+        state.pending_tx_cbor.pop(h, None)
 
 
 def _prune_expired_reservations() -> None:
@@ -751,38 +830,116 @@ def _prune_expired_reservations() -> None:
         del state.reserved_pool_utxos[k]
 
 
+def _merge_wallet_witnesses(
+    original_tx_cbor: bytes, wallet_witness_cbor: bytes,
+) -> bytes:
+    """Merge the wallet's partial witness set (CIP-30 signTx partialSign
+    output, typically `{0: [[pk, sig]]}`) into the admin-signed tx CBOR
+    produced by /build-surrender, and return the assembled tx bytes
+    ready for submission.
+
+    The outer tx is a CBOR array of 4: `[tx_body, witness_set, is_valid,
+    aux]`. We walk the original CBOR stream to capture the exact byte
+    range of each element, decode-merge-re-encode ONLY the witness_set,
+    and reassemble. tx_body bytes are preserved verbatim so the wallet's
+    Ed25519 signature over blake2b-256(tx_body) remains valid.
+
+    Vkey witnesses are deduplicated by public key (some wallets re-emit
+    the admin keys they observed in the original witness set; we keep
+    one instance each).
+    """
+    import io
+    if not original_tx_cbor or original_tx_cbor[0] != 0x84:
+        raise ValueError("Original tx CBOR header is not array(4)")
+
+    # Walk the original tx CBOR, capturing byte ranges for each element.
+    stream = io.BytesIO(original_tx_cbor)
+    stream.read(1)  # consume 0x84
+    body_start = stream.tell()
+    cbor2.CBORDecoder(stream).decode()
+    body_end = stream.tell()
+    ws_start = body_end
+    cbor2.CBORDecoder(stream).decode()
+    ws_end = stream.tell()
+    tail_bytes = original_tx_cbor[ws_end:]  # is_valid + aux + (optional set tag)
+    body_bytes = original_tx_cbor[body_start:body_end]
+    original_ws = cbor2.loads(original_tx_cbor[ws_start:ws_end])
+    if not isinstance(original_ws, dict):
+        raise ValueError("Original witness_set is not a CBOR map")
+
+    wallet_ws = cbor2.loads(wallet_witness_cbor)
+    if not isinstance(wallet_ws, dict):
+        raise ValueError("Wallet partial witness set is not a CBOR map")
+
+    # Extract vkey witnesses from both. Conway encodes the vkey list as
+    # either a plain list `[[pk, sig], ...]` or a tagged set
+    # `cbor2.CBORTag(258, [...])`. Treat them uniformly.
+    def _unwrap_vkey_list(value):
+        if isinstance(value, CBORTag):
+            return list(value.value), value.tag
+        return list(value) if value else [], None
+
+    orig_vkeys, orig_tag = _unwrap_vkey_list(original_ws.get(0))
+    wallet_vkeys, wallet_tag = _unwrap_vkey_list(wallet_ws.get(0))
+    set_tag = orig_tag or wallet_tag  # preserve set tag if either side used it
+
+    seen: set[bytes] = set()
+    merged_vkeys: list = []
+    for vw in (*orig_vkeys, *wallet_vkeys):
+        if not (isinstance(vw, list) and len(vw) == 2):
+            continue
+        pk = bytes(vw[0])
+        if pk in seen:
+            continue
+        seen.add(pk)
+        merged_vkeys.append(vw)
+
+    original_ws[0] = CBORTag(set_tag, merged_vkeys) if set_tag else merged_vkeys
+    merged_ws_bytes = cbor2.dumps(original_ws)
+
+    return b"\x84" + body_bytes + merged_ws_bytes + tail_bytes
+
+
 @app.post("/submit-surrender", response_model=SubmitResponse)
 def submit_surrender(req: SubmitRequest):
-    """Submit a fully-signed surrender transaction.
+    """Submit a surrender transaction.
 
-    Only accepts transactions that were previously built by this service
-    (tx hash must be in the pending registry).
+    CIP-30 `signTx(cbor, partialSign=true)` returns only the wallet's
+    partial witness set (typically `{0: [[pk, sig]]}`), not the full
+    signed transaction. This endpoint takes that partial witness set
+    plus the build-time `tx_hash`, looks up the admin-signed tx CBOR
+    stashed at build time, merges the wallet's vkey witnesses into the
+    existing witness set, and forwards the assembled tx to Blockfrost.
+
+    The tx_body bytes are preserved byte-for-byte (we only rewrite the
+    witness_set element of the outer CBOR array) so the wallet's
+    signature over the body remains valid.
     """
     if not state.bf:
         raise HTTPException(503, "Blockfrost client not available")
 
-    # Validate hex format and size (max 16 KB for a Cardano tx)
-    if len(req.tx_cbor_hex) > 32_768:
-        raise HTTPException(400, "Transaction CBOR too large")
-
     try:
-        tx_bytes = bytes.fromhex(req.tx_cbor_hex)
+        wallet_ws_bytes = bytes.fromhex(req.tx_cbor_hex)
     except ValueError:
         raise HTTPException(400, "Invalid hex encoding")
 
-    # Compute the tx hash from the submitted CBOR and check the registry
-    tx = Transaction.from_cbor(req.tx_cbor_hex)
-    tx_hash_hex = tx.transaction_body.hash().payload.hex()
-
+    tx_hash_hex = req.tx_hash.lower()
     _prune_expired_tx_hashes()
-    if tx_hash_hex not in state.pending_tx_hashes:
+    original_cbor = state.pending_tx_cbor.get(tx_hash_hex)
+    if original_cbor is None or tx_hash_hex not in state.pending_tx_hashes:
         logger.warning("Rejected submit for unknown tx hash: %s", tx_hash_hex[:16])
         raise HTTPException(403, "Transaction was not built by this service")
 
     try:
-        submitted_hash = state.bf.submit_tx(tx_bytes)
-        # Remove from pending + release UTxO reservation after success
+        merged_tx_bytes = _merge_wallet_witnesses(original_cbor, wallet_ws_bytes)
+    except Exception as e:
+        logger.warning("Witness merge failed for tx %s: %s", tx_hash_hex[:16], e)
+        raise HTTPException(400, "Malformed witness set CBOR")
+
+    try:
+        submitted_hash = state.bf.submit_tx(merged_tx_bytes)
         state.pending_tx_hashes.pop(tx_hash_hex, None)
+        state.pending_tx_cbor.pop(tx_hash_hex, None)
         _prune_expired_reservations()
         logger.info("Submitted surrender tx: %s", submitted_hash)
         return SubmitResponse(tx_hash=submitted_hash)
@@ -873,7 +1030,16 @@ def evaluate_surrender(req: BuildSurrenderRequest):
             legacy_assets=all_legacy_assets,
             pool_utxo=selected_pool,
         )
-    except Exception as e:
+    except InvalidTransactionException as e:
+        size_exc = _tx_too_large_http_exception(
+            e, user_address=req.user_address,
+            assets_count=len(all_legacy_assets),
+        )
+        if size_exc is not None:
+            raise size_exc
+        logger.exception("Evaluate: build failed for %s", req.user_address[:24])
+        raise HTTPException(500, "Transaction build failed during evaluation")
+    except Exception:
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")
 
