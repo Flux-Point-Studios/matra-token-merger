@@ -100,14 +100,17 @@ def wired(monkeypatch):
             return f"{_Sub.n:064x}"
     api.state.bf = _Sub()
 
-    def good_build(user_address, total_cmatra, legacy_assets, pool_utxo):
+    def good_build(user_address, total_cmatra, legacy_assets, pool_utxo,
+                   pool_tip_pending=False, user_inputs=None):
         good_build.n = getattr(good_build, "n", 0) + 1
         rem = pool_utxo["cmatra_amount"] - total_cmatra
         pool_out = None
         if rem > 0:
             pool_out = {"address": SCRIPT_ADDR, "datum_hex": VOID_DATUM_HEX,
                         "cmatra_amount": rem, "ada_amount": 1_500_000}
-        return "8400", f"dead{good_build.n:060x}", pool_out
+        # user_change: the surrendering wallet's pending change to feed the next
+        # chained chunk (empty here — the tip-advance plumbing is what's tested).
+        return "8400", f"dead{good_build.n:060x}", pool_out, []
     monkeypatch.setattr(api, "_build_tx_blocking", good_build)
     monkeypatch.setattr(api, "_merge_wallet_witnesses",
                         lambda orig, wallet: b"\x84merged")
@@ -186,12 +189,13 @@ def test_depth_cap_returns_503_pool_settling(wired):
 
 def test_datum_guard_rejects_post_submit_but_user_still_succeeds(wired, monkeypatch):
     async def run():
-        def bad_build(user_address, total_cmatra, legacy_assets, pool_utxo):
+        def bad_build(user_address, total_cmatra, legacy_assets, pool_utxo,
+                      pool_tip_pending=False, user_inputs=None):
             rem = pool_utxo["cmatra_amount"] - total_cmatra
             return "8400", "badbad" + "0" * 58, {
                 "address": SCRIPT_ADDR, "datum_hex": "",  # MISSING datum
                 "cmatra_amount": rem, "ada_amount": 1_500_000,
-            }
+            }, []
         monkeypatch.setattr(api, "_build_tx_blocking", bad_build)
 
         b = await api.build_surrender(_req())

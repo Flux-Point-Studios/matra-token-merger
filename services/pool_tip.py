@@ -406,6 +406,51 @@ class PoolTipManager:
         now = time.time() if now is None else now
         return (now - tip.pending_since) >= self._eviction_window_s
 
+    async def promote_if_confirmed(self, is_confirmed_fn: Callable[[str], bool]) -> bool:
+        """Re-seed the tip from confirmed chain state when the current pending
+        tip's own tx has landed on-chain — resetting depth to 0.
+
+        Without this the depth cap is a one-way latch: once the chain reaches
+        depth ``depth_cap`` every build 503s POOL_SETTLING, and when the pending
+        chain confirms *healthily* (rather than stalling past the eviction
+        window) nothing resets the depth, so the cap never clears. Promoting a
+        confirmed pending tip is the "then re-seed" the design's depth-cap
+        recovery calls for: a wallet needing more than ``depth_cap`` chunks
+        proceeds in waves, each wave clearing as its chain confirms.
+
+        Cheap to call every tick: it only does a network check when the tip is
+        pending AND at/над the cap (the only state where depth must be reset to
+        make progress). Skips if a build holds the lock. Returns True on re-seed.
+        """
+        tip = self._tip
+        if tip is None or tip.status != "pending" or tip.depth < self._depth_cap:
+            return False
+        try:
+            confirmed = await asyncio.to_thread(is_confirmed_fn, tip.tx_hash)
+        except Exception as e:
+            logger.warning("Promote confirm-check failed for %s: %s",
+                           tip.tx_hash[:16], e)
+            return False
+        if not confirmed:
+            return False
+        if self._lock.locked():
+            return False
+        await self._lock.acquire()
+        try:
+            cur = self._tip
+            if cur is None or cur.status != "pending" or cur.depth < self._depth_cap:
+                return False
+            logger.info(
+                "Pending tip %s confirmed at depth %d (>= cap %d); re-seeding to "
+                "reset depth and clear POOL_SETTLING",
+                cur.tx_hash[:16], cur.depth, self._depth_cap,
+            )
+            self.seed_from_chain()
+            return True
+        finally:
+            if self._lock.locked():
+                self._lock.release()
+
     async def evict_if_stale(self, is_confirmed_fn: Callable[[str], bool]) -> bool:
         """Independent watchdog step (guard 3). If the pending tip's root tx
         has not confirmed on Blockfrost within the eviction window, roll the

@@ -48,3 +48,9 @@ aiken_err.txt
 aiken_out.txt
 .env.example
 onchain/quarantine_validator/build/
+
+# Preprod chained-surrender rehearsal scratch (task #400)
+.venv-preprod/
+onchain/**/*.applied-*.json
+audit_pack/preprod_chain_rehearsal/
+scripts/_*
