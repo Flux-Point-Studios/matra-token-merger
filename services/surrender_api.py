@@ -69,7 +69,7 @@ from pycardano import (
 )
 from pycardano.exception import InvalidTransactionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
-from pycardano.plutus import RedeemerTag
+from pycardano.plutus import RedeemerKey, RedeemerMap, RedeemerTag
 
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada
@@ -127,6 +127,23 @@ CORS_ORIGINS: list[str] = json.loads(
 )
 
 API_PORT: int = int(os.environ.get("SURRENDER_API_PORT", "8420"))
+
+# Redeemer-canonicalization strategy (0.18.0 re-validation, task #400).
+#   "hybrid" — seed redeemer ex_units (so builder.build() SKIPS its internal
+#             evaluate_tx, which on the chained path indexes the SPEND redeemer
+#             to insertion order and 503s with extraRedeemers) THEN run the
+#             Path-B CBOR surgery (canonical bare-list inputs + redeemer
+#             re-index). The ONLY strategy that both builds the chained chunk
+#             AND submits on pycardano 0.18.0. THIS IS THE MAINNET PATH.
+#   "pathB" — _canonicalize_body_and_index_redeemer WITHOUT the seed: correct
+#             body serialization, but builder.build()'s internal evaluate fires
+#             on the chained path and rejects (extraRedeemers) before the
+#             surgery runs. Confirmed-tip chunk works; chained chunk fails.
+#   "pathA" — _canonicalize_via_builder: skips the internal evaluate via the
+#             seed, but pycardano 0.18.0's _build_tx_body() re-emits inputs as a
+#             hash-ordered tag-258 SET, so the wallet signature fails with
+#             InvalidWitnessesUTXOW. Broken on 0.18.0 (written for 0.19.x).
+CANON_STRATEGY: str = os.environ.get("CANON_STRATEGY", "hybrid").strip().lower()
 
 # Dedicated collateral UTxO — bounds max collateral loss on phase-2 failure.
 # Format: "txhash#index" (e.g. "abc123...#0"). If unset, pycardano auto-selects.
@@ -826,6 +843,79 @@ def _tx_too_large_http_exception(
     )
 
 
+def _canonicalize_body_and_index_redeemer(
+    tx_body: TransactionBody,
+    witness_set: TransactionWitnessSet,
+    script_input: TransactionInput,
+) -> TransactionBody:
+    """Rewrite the built tx body so its ``inputs`` are in the ledger's canonical
+    order, emitted as a bare definite-length CBOR array, and point the
+    ProcessSurrender SPEND redeemer at the script input's position in that
+    order. Returns the rebuilt (canonical) ``TransactionBody``; mutates
+    ``witness_set`` in place for the redeemer index.
+
+    cbor2's C-encoder re-orders a tag-258 ("set") value by element hash at
+    ``dumps()`` time, so the on-wire input order pycardano produces is
+    hash-seed-dependent and does NOT match the canonical sort the ledger
+    evaluates against. The builder assigns the redeemer index against its own
+    pre-encode order, so on the chained surrender path — where the script
+    input's tx_id changes every tx — the redeemer lands on the wrong input
+    roughly a third of the time and the node rejects the tx with
+    ``extraRedeemers=['spend:<n>']``.
+
+    The fix sorts the inputs ourselves and re-emits them as a bare array (not a
+    tag-258 set): a plain list is left untouched by cbor2's encoder, so the
+    bytes that go on the wire stay in the order we computed, and the redeemer
+    index matches the position the ledger derives. A bare inputs array is
+    Conway-legal (the ledger canonicalizes inputs regardless of wire framing)
+    and ``TransactionBody.from_cbor`` round-trips it.
+
+    MUST run before any signature is computed: the admin sign, the co-signer
+    sign, and the wallet's CIP-30 witness all cover ``tx_body.hash()`` over
+    THIS canonical body. Outputs (including the pool-change Void datum on
+    output[1]), fee, and every other body field are preserved verbatim — only
+    the input ordering and the redeemer index change.
+    """
+    redeemers = witness_set.redeemer
+    if redeemers is None:
+        raise ValueError("Surrender tx has no redeemers — script spend is missing")
+
+    body = cbor2.loads(tx_body.to_cbor())
+    raw_inputs = body[0]
+    if isinstance(raw_inputs, CBORTag):  # set-tagged (#6.258)
+        raw_inputs = raw_inputs.value
+    # Conway's canonical input order: ascending by (tx_id bytes, output index).
+    canonical = sorted(
+        ((bytes(e[0]), e[1]) for e in raw_inputs), key=lambda p: (p[0], p[1])
+    )
+    body[0] = [list(p) for p in canonical]
+    canonical_body = TransactionBody.from_cbor(cbor2.dumps(body))
+
+    target_index = canonical.index(
+        (bytes(script_input.transaction_id), script_input.index)
+    )
+
+    if isinstance(redeemers, RedeemerMap):
+        spend_keys = [k for k in redeemers if k.tag == RedeemerTag.SPEND]
+        if len(spend_keys) != 1:
+            raise ValueError(
+                f"Expected exactly 1 SPEND redeemer, found {len(spend_keys)}"
+            )
+        old_key = spend_keys[0]
+        if old_key.index != target_index:
+            value = redeemers.data.pop(old_key)
+            redeemers.data[RedeemerKey(RedeemerTag.SPEND, target_index)] = value
+    else:  # legacy list[Redeemer] (use_redeemer_map=False)
+        spend = [r for r in redeemers if r.tag == RedeemerTag.SPEND]
+        if len(spend) != 1:
+            raise ValueError(
+                f"Expected exactly 1 SPEND redeemer, found {len(spend)}"
+            )
+        spend[0].index = target_index
+
+    return canonical_body
+
+
 def _canonicalize_via_builder(
     builder: TransactionBuilder,
     context: BlockFrostChainContext,
@@ -1034,19 +1124,21 @@ def _build_cosigned_surrender_tx(
     )
 
     redeemer = Redeemer(RawPlutusData(cbor2.loads(_PROCESS_SURRENDER_REDEEMER_CBOR)))
-    # Seed the redeemer with generous execution units so pycardano's builder
-    # SKIPS its internal evaluate_tx (it sets _should_estimate_execution_units
-    # False when a redeemer already carries ex_units). That internal evaluate
-    # indexes the SPEND redeemer to pycardano's INSERTION order, but the ledger
-    # (and Blockfrost's evaluate) sort inputs canonically — on the chained
-    # surrender path the script input's tx_id sorts AFTER a wallet input, so the
-    # internal evaluate rejects the tx with extraRedeemers BEFORE our canonical
-    # fix can run. We instead canonicalize first, then evaluate the canonical
-    # body ourselves and patch the exact units in (see below). The seed is an
-    # upper bound for the trivial `expect Some(_)` + dual-sig validator; the
-    # real units are re-measured against the canonical body and patched before
-    # signing, so the seed only governs the fee buffer (negligibly generous).
-    redeemer.ex_units = ExecutionUnits(2_000_000, 900_000_000)
+    if CANON_STRATEGY in ("patha", "hybrid"):
+        # Seed the redeemer with generous execution units so pycardano's builder
+        # SKIPS its internal evaluate_tx (it sets _should_estimate_execution_units
+        # False when a redeemer already carries ex_units). That internal evaluate
+        # indexes the SPEND redeemer to pycardano's INSERTION order, but the ledger
+        # (and Blockfrost's evaluate) sort inputs canonically — on the chained
+        # surrender path the script input's tx_id sorts AFTER a wallet input, so the
+        # internal evaluate rejects the tx with extraRedeemers BEFORE our canonical
+        # fix can run. Seeding lets build() succeed; the canonical fix then runs.
+        # The seed (2M mem / 900M steps) is a safe upper bound for the trivial
+        # `expect Some(_)` + dual-sig validator (measured units are ~60k mem /
+        # 19.5M steps; protocol max is 16.5M mem / 10B steps), so it is always a
+        # valid over-estimate. hybrid keeps this seed on the final tx (it only
+        # inflates the fee buffer); pathA re-measures and patches exact units.
+        redeemer.ex_units = ExecutionUnits(2_000_000, 900_000_000)
 
     builder = TransactionBuilder(context)
 
@@ -1183,22 +1275,28 @@ def _build_cosigned_surrender_tx(
         if state.cosigner_pkh:
             builder.required_signers.append(state.cosigner_pkh)
 
-    # Build the transaction — change goes to user. The redeemer carries seed
-    # ex_units (above) so the builder SKIPS its internal evaluate_tx, which on
-    # the chained path would index the SPEND redeemer to pycardano's INSERTION
-    # order and be rejected by the ledger's canonical-order evaluate with
-    # extraRedeemers. We canonicalize and measure units ourselves below.
+    # Build the transaction — change goes to user.
     tx_body = builder.build(change_address=user_addr)
 
     # Canonicalize inputs to the ledger's sort order and re-index the SPEND
-    # redeemer + recompute script_data_hash + measure real execution units —
-    # all through pycardano's own builder machinery so every committed field
-    # (input order, redeemer index, ex_units, script_data_hash) is mutually
-    # consistent and matches what the ledger derives. MUST run before any
-    # signature: admin, co-signer, and the wallet's CIP-30 witness all sign
-    # tx_body.hash() over this canonical body.
-    tx_body = _canonicalize_via_builder(builder, context, script)
-    witness_set = builder.build_witness_set()
+    # redeemer. Strategy selected by CANON_STRATEGY (0.18.0 re-validation):
+    if CANON_STRATEGY == "patha":
+        # Path A: re-emit through pycardano's builder machinery. On 0.18.0
+        # _build_tx_body() serializes inputs as a hash-ordered tag-258 SET, so
+        # the wallet signature fails InvalidWitnessesUTXOW — broken on 0.18.0.
+        tx_body = _canonicalize_via_builder(builder, context, script)
+        witness_set = builder.build_witness_set()
+    else:
+        # hybrid (mainnet) / pathB: rewrite the built body's inputs to the
+        # ledger's canonical sort order, emitted as a bare definite-length array
+        # (immune to cbor2's tag-258 re-ordering, so the wallet/admin signatures
+        # cover the bytes the node hashes), and point the SPEND redeemer at the
+        # script input's post-sort position. With CANON_STRATEGY=hybrid the seed
+        # ex_units above made build() skip its internal evaluate, so this also
+        # works on the chained (pending-tip) path; pathB without the seed fails
+        # the chained build (extraRedeemers) before reaching here.
+        witness_set = builder.build_witness_set()
+        tx_body = _canonicalize_body_and_index_redeemer(tx_body, witness_set, tx_in)
 
     # Create admin 1 witness (Server A — local key) over the canonical body
     tx_hash = tx_body.hash()
