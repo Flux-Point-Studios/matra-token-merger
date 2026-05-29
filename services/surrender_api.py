@@ -49,6 +49,7 @@ from pycardano import (
     Asset,
     AssetName,
     BlockFrostChainContext,
+    ExecutionUnits,
     MultiAsset,
     PaymentSigningKey,
     PaymentVerificationKey,
@@ -68,11 +69,7 @@ from pycardano import (
 )
 from pycardano.exception import InvalidTransactionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
-from pycardano.plutus import (
-    RedeemerKey,
-    RedeemerMap,
-    RedeemerTag,
-)
+from pycardano.plutus import RedeemerTag
 
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada
@@ -211,6 +208,25 @@ class AppState:
     build_ctx: dict[str, dict[str, Any]] = {}
     # Background watchdog handle (eviction + stuck-build sweep).
     watchdog_task: Any = None
+    # Collateral UTxOs ("txhash#idx") handed out to in-flight chained surrenders.
+    # Blockfrost lags the mempool, so while the pool tip is pending each chained
+    # chunk would otherwise re-pick the SAME confirmed ADA-only collateral the
+    # prior chunk already spent (double-spend -> ledger rejects). We exclude
+    # reserved refs here and clear the set whenever the tip re-seeds to a
+    # confirmed depth-0 state (the prior chain has settled). Mirrors the pool-tip
+    # reservation discipline, applied to collateral.
+    reserved_collateral: set[str] = set()
+    # The surrendering user's pending change UTxOs, carried forward across a
+    # chained surrender. Keyed by bech32 user address -> list of UTxO dicts
+    # ({tx_hash, output_index, lovelace, multi_asset}) reconstructed from the
+    # previous chunk's outputs that pay back to the user (their NFT/ADA change).
+    # Blockfrost lags the mempool, so without this the next chunk re-selects the
+    # already-spent NFT UTxO and the ledger rejects it (BadInputsUTxO). This is
+    # the user-input analogue of the pool tip. Set after each chained build,
+    # cleared per user when the tip re-seeds to confirmed. On the real frontend
+    # the CIP-30 wallet supplies these; the backend tracks them so a single
+    # wallet's multi-chunk surrender chains without per-chunk confirmation waits.
+    user_pending: dict[str, list[dict[str, Any]]] = {}
 
 
 state = AppState()
@@ -412,7 +428,14 @@ async def shutdown():
 
 def _seed_pool_utxos() -> list[dict[str, Any]]:
     """Confirmed pool-UTxO list for the tip manager (largest-first, all
-    carrying the Void datum — find_pool_utxos already enforces both)."""
+    carrying the Void datum — find_pool_utxos already enforces both).
+
+    A re-seed means the prior chain has settled (or rolled back), so the
+    in-flight collateral reservations and the user's carried-forward pending
+    change no longer apply — clear them. Spent refs won't reappear from
+    Blockfrost anyway; the next build re-selects from the confirmed chain."""
+    state.reserved_collateral.clear()
+    state.user_pending.clear()
     return find_pool_utxos(
         state.bf, SCRIPT_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
     )
@@ -439,6 +462,9 @@ async def _pool_tip_watchdog() -> None:
         try:
             await asyncio.sleep(POOL_TIP_WATCHDOG_INTERVAL_S)
             await mgr.sweep_stuck_build()
+            # Clear the depth cap when a maxed-out pending chain has confirmed
+            # (resets depth -> POOL_SETTLING lifts; the next wave proceeds).
+            await mgr.promote_if_confirmed(_tx_is_confirmed)
             await mgr.evict_if_stale(_tx_is_confirmed)
         except asyncio.CancelledError:
             raise
@@ -495,26 +521,45 @@ def _build_tx_blocking(
     total_cmatra: int,
     legacy_assets: list[dict[str, Any]],
     pool_utxo: dict[str, Any],
-) -> tuple[str, str, dict[str, Any] | None]:
+    pool_tip_pending: bool = False,
+    user_inputs: list[dict[str, Any]] | None = None,
+) -> tuple[str, str, dict[str, Any] | None, list[dict[str, Any]]]:
     """Build + preflight a surrender tx (blocking pycardano + Blockfrost work).
     Runs inside ``asyncio.to_thread`` so it never blocks the event loop or the
     single-flight lock holder. Raises on build/preflight failure; the async
-    caller translates to HTTP and releases the lock."""
-    tx_cbor_hex, tx_hash, built_pool_output = _build_cosigned_surrender_tx(
+    caller translates to HTTP and releases the lock.
+
+    ``pool_tip_pending`` is True when this surrender chains off a still-
+    unconfirmed pool-change output (depth > 0). Blockfrost's evaluate_tx only
+    resolves CONFIRMED UTxOs, so it cannot evaluate a tx whose pool input is in
+    the mempool — it spuriously reports the (correctly indexed) SPEND redeemer
+    as ``extraRedeemers``. On that path the mandatory ledger preflight is
+    skipped: the generous seed execution units (set in the builder) cover the
+    trivial validator, and the script was already proven valid by the confirmed
+    root of the same chain. The submit itself is the authoritative check."""
+    tx_cbor_hex, tx_hash, built_pool_output, user_change = _build_cosigned_surrender_tx(
         user_address=user_address,
         total_cmatra=total_cmatra,
         legacy_assets=legacy_assets,
         pool_utxo=pool_utxo,
+        user_inputs=user_inputs,
     )
-    # Mandatory preflight: evaluate_tx against the live ledger before returning
-    # to the user. Catches script errors before any collateral is at risk.
+    if pool_tip_pending:
+        logger.info(
+            "Preflight SKIPPED for tx %s (chained off unconfirmed tip; "
+            "Blockfrost evaluate cannot resolve mempool inputs)", tx_hash[:16]
+        )
+        return tx_cbor_hex, tx_hash, built_pool_output, user_change
+    # Mandatory preflight (confirmed-tip path): evaluate_tx against the live
+    # ledger before returning to the user. Catches script errors before any
+    # collateral is at risk.
     preflight_ctx = BlockFrostChainContext(
         project_id=state.bf.project_id,
         base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
     )
     preflight_ctx.evaluate_tx_cbor(bytes.fromhex(tx_cbor_hex))
     logger.info("Preflight OK for tx %s", tx_hash[:16])
-    return tx_cbor_hex, tx_hash, built_pool_output
+    return tx_cbor_hex, tx_hash, built_pool_output, user_change
 
 
 @app.post("/build-surrender", response_model=BuildSurrenderResponse)
@@ -628,10 +673,20 @@ async def build_surrender(req: BuildSurrenderRequest):
         )
 
     # Build + preflight off the event loop (blocking pycardano + Blockfrost).
+    # A pending tip (depth > 0) chains off an unconfirmed mempool output, which
+    # Blockfrost evaluate cannot resolve — the build path skips the hard
+    # preflight in that case (see _build_tx_blocking). On that path we also feed
+    # the user's pending change UTxOs forward as explicit inputs (Blockfrost
+    # can't yet see them), the user-input analogue of the pool tip.
+    user_inputs = (
+        state.user_pending.get(req.user_address)
+        if tip.status == "pending" else None
+    )
     try:
-        tx_cbor_hex, tx_hash, built_pool_output = await asyncio.to_thread(
+        tx_cbor_hex, tx_hash, built_pool_output, user_change = await asyncio.to_thread(
             _build_tx_blocking,
             req.user_address, total_cmatra, all_legacy_assets, pool_utxo,
+            tip.status == "pending", user_inputs,
         )
     except InvalidTransactionException as e:
         state.tip_mgr.release_build(build_token)
@@ -659,6 +714,8 @@ async def build_surrender(req: BuildSurrenderRequest):
         "build_token": build_token,
         "delivered_cmatra": total_cmatra,
         "built_pool_output": built_pool_output,
+        "user_address": req.user_address,
+        "user_change": user_change,
     }
 
     return BuildSurrenderResponse(
@@ -769,77 +826,142 @@ def _tx_too_large_http_exception(
     )
 
 
-def _canonicalize_body_and_index_redeemer(
-    tx_body: TransactionBody,
-    witness_set: TransactionWitnessSet,
-    script_input: TransactionInput,
+def _canonicalize_via_builder(
+    builder: TransactionBuilder,
+    context: BlockFrostChainContext,
+    script: PlutusV3Script,
 ) -> TransactionBody:
-    """Rewrite the built tx body so its ``inputs`` are in the ledger's canonical
-    order, emitted as a bare definite-length CBOR array, and point the
-    ProcessSurrender SPEND redeemer at the script input's position in that
-    order. Returns the rebuilt (canonical) ``TransactionBody``; mutates
-    ``witness_set`` in place for the redeemer index.
+    """Re-emit the built tx with inputs in the ledger's canonical order, the
+    SPEND redeemer indexed to the script input's position in that order, real
+    execution units, and a matching ``script_data_hash`` — all via pycardano's
+    own builder machinery so every committed field is mutually consistent.
 
-    cbor2's C-encoder re-orders a tag-258 ("set") value by element hash at
-    ``dumps()`` time, so the on-wire input order pycardano produces is
-    hash-seed-dependent and does NOT match the canonical sort the ledger
-    evaluates against. The builder assigns the redeemer index against its own
-    pre-encode order, so on the chained surrender path — where the script
-    input's tx_id changes every tx — the redeemer lands on the wrong input
-    roughly a third of the time and the node rejects the tx with
-    ``extraRedeemers=['spend:<n>']``.
+    Why this is needed (the bug this rehearsal exposed on a real chain):
+    pycardano 0.19.x emits inputs in INSERTION order on the wire and indexes the
+    SPEND redeemer to that order, but the ledger sorts inputs canonically
+    (ascending by tx_id, index) and re-derives the redeemer position from the
+    sorted set. On the pool-tip chained path the script (pool) input's tx_id
+    changes every surrender, so insertion order diverges from canonical roughly
+    a third of the time and the node rejects the tx with
+    ``extraRedeemers=['spend:<n>']`` — at submit AND inside the builder's own
+    execution-unit estimate. The earlier CBOR-surgery fix rewrote only the final
+    body and ran after that estimate, so it could not save the chained path.
 
-    The fix sorts the inputs ourselves and re-emits them as a bare array (not a
-    tag-258 set): a plain list is left untouched by cbor2's encoder, so the
-    bytes that go on the wire stay in the order we computed, and the redeemer
-    index matches the position the ledger derives. A bare inputs array is
-    Conway-legal (the ledger canonicalizes inputs regardless of wire framing)
-    and ``TransactionBody.from_cbor`` round-trips it.
-
-    MUST run before any signature is computed: the admin sign, the co-signer
-    sign, and the wallet's CIP-30 witness all cover ``tx_body.hash()`` over
-    THIS canonical body. Outputs (including the pool-change Void datum on
-    output[1]), fee, and every other body field are preserved verbatim — only
-    the input ordering and the redeemer index change.
+    The fix: after ``builder.build()`` (which skipped its broken internal
+    evaluate because the redeemer carried seed ex_units), sort ``builder.inputs``
+    canonically, let the builder re-index the redeemer (``_set_redeemer_index``)
+    and rebuild the body (``_build_tx_body``) — now inputs and redeemer index
+    agree with the ledger. Evaluate that canonical body to get real units, set
+    them on the builder's redeemer, then rebuild once more and stamp the
+    builder-computed ``script_data_hash`` (which uses pycardano's exact cost-model
+    encoding, so it matches the ledger's PPViewHash). MUST run before any
+    signature; the body hash covers input order, redeemer index, and
+    script_data_hash.
     """
-    redeemers = witness_set.redeemer
-    if redeemers is None:
-        raise ValueError("Surrender tx has no redeemers — script spend is missing")
+    # 1) Canonical input order (ascending by tx_id bytes, then index).
+    builder.inputs.sort(key=lambda u: (bytes(u.input.transaction_id), u.input.index))
+    builder._set_redeemer_index()
 
-    body = cbor2.loads(tx_body.to_cbor())
-    raw_inputs = body[0]
-    if isinstance(raw_inputs, CBORTag):  # set-tagged (#6.258)
-        raw_inputs = raw_inputs.value
-    # Conway's canonical input order: ascending by (tx_id bytes, output index).
-    canonical = sorted(
-        ((bytes(e[0]), e[1]) for e in raw_inputs), key=lambda p: (p[0], p[1])
-    )
-    body[0] = [list(p) for p in canonical]
-    canonical_body = TransactionBody.from_cbor(cbor2.dumps(body))
+    # 2) Measure real execution units against the canonical body. Build with the
+    #    builder's fake witnesses (vkey witnesses do not affect Plutus cost).
+    canonical_body = builder._build_tx_body()
+    fake_ws = builder._build_fake_witness_set()
+    try:
+        result = context.evaluate_tx_cbor(
+            Transaction(canonical_body, fake_ws).to_cbor()
+        )
+        for key, units in (result.items() if hasattr(result, "items")
+                           else vars(result).items()):
+            tagname, _, idx = str(key).partition(":")
+            if tagname.lower() != "spend":
+                continue
+            try:
+                target = int(idx)
+            except ValueError:
+                continue
+            mem = getattr(units, "mem", None)
+            steps = getattr(units, "steps", None)
+            if mem is None and isinstance(units, dict):
+                mem, steps = units.get("mem"), units.get("steps")
+            for r in builder._redeemer_list:
+                if r.tag == RedeemerTag.SPEND and r.index == target and mem is not None:
+                    r.ex_units = ExecutionUnits(
+                        int(mem * (1 + builder.execution_memory_buffer)),
+                        int(steps * (1 + builder.execution_step_buffer)),
+                    )
+        logger.info("Measured canonical execution units from ledger evaluate")
+    except Exception as e:
+        logger.warning("Canonical ex-unit evaluate failed (%s); keeping seed units", e)
 
-    target_index = canonical.index(
-        (bytes(script_input.transaction_id), script_input.index)
-    )
-
-    if isinstance(redeemers, RedeemerMap):
-        spend_keys = [k for k in redeemers if k.tag == RedeemerTag.SPEND]
-        if len(spend_keys) != 1:
-            raise ValueError(
-                f"Expected exactly 1 SPEND redeemer, found {len(spend_keys)}"
-            )
-        old_key = spend_keys[0]
-        if old_key.index != target_index:
-            value = redeemers.data.pop(old_key)
-            redeemers.data[RedeemerKey(RedeemerTag.SPEND, target_index)] = value
-    else:  # legacy list[Redeemer] (use_redeemer_map=False)
-        spend = [r for r in redeemers if r.tag == RedeemerTag.SPEND]
-        if len(spend) != 1:
-            raise ValueError(
-                f"Expected exactly 1 SPEND redeemer, found {len(spend)}"
-            )
-        spend[0].index = target_index
-
+    # 3) Rebuild the body with final units and stamp the builder-computed
+    #    script_data_hash so the body commits to the patched redeemers exactly
+    #    as the ledger recomputes it.
+    canonical_body = builder._build_tx_body()
+    canonical_body.script_data_hash = builder.script_data_hash
     return canonical_body
+
+
+
+def _select_ada_only_collateral(
+    context: BlockFrostChainContext, user_addr: Address,
+    min_lovelace: int = 5_000_000,
+) -> "UTxO | None":
+    """Return the smallest ADA-only UTxO at ``user_addr`` with at least
+    ``min_lovelace`` (a valid Plutus collateral — token-bearing UTxOs are
+    rejected by the ledger with CollateralContainsNonADA), excluding any
+    collateral ref already reserved for an in-flight chained surrender.
+
+    The reservation is what makes collateral selection correct on the chained
+    path: Blockfrost still lists a confirmed ADA-only UTxO as available after a
+    pending chunk has spent it, so without the exclusion every chained chunk
+    would re-pick — and double-spend — the same collateral. None if the wallet
+    has no eligible pure-ADA UTxO (a token-only wallet must supply collateral via
+    its CIP-30 wallet on the real frontend)."""
+    try:
+        utxos = context.utxos(user_addr)
+    except Exception as e:
+        logger.warning("Collateral scan failed for %s: %s", str(user_addr)[:24], e)
+        return None
+    candidates = [
+        u for u in utxos
+        if (u.output.amount.multi_asset is None
+            or len(u.output.amount.multi_asset) == 0)
+        and u.output.amount.coin >= min_lovelace
+        and f"{u.input.transaction_id}#{u.input.index}" not in state.reserved_collateral
+    ]
+    if not candidates:
+        return None
+    # Smallest qualifying UTxO — keeps large ADA free for fees/outputs and
+    # bounds the collateral at risk.
+    return min(candidates, key=lambda u: u.output.amount.coin)
+
+
+def _confirmed_ada_only_utxos(
+    context: BlockFrostChainContext, user_addr: Address,
+    exclude_reserved: bool = False, min_lovelace: int = 2_000_000,
+) -> list["UTxO"]:
+    """Confirmed pure-ADA UTxOs at ``user_addr`` (>= ``min_lovelace``), optionally
+    excluding refs reserved as in-flight collateral. Offered as
+    ``potential_inputs`` on the chained path so pycardano has fee/change ADA
+    beyond the forced pending change without re-selecting the already-spent
+    NFT UTxO from Blockfrost's lagged view."""
+    try:
+        utxos = context.utxos(user_addr)
+    except Exception as e:
+        logger.warning("ADA-only scan failed for %s: %s", str(user_addr)[:24], e)
+        return []
+    out = []
+    for u in utxos:
+        if u.output.amount.multi_asset and len(u.output.amount.multi_asset) > 0:
+            continue
+        if u.output.amount.coin < min_lovelace:
+            continue
+        if exclude_reserved and (
+            f"{u.input.transaction_id}#{u.input.index}" in state.reserved_collateral
+        ):
+            continue
+        out.append(u)
+    return out
 
 
 def _build_cosigned_surrender_tx(
@@ -847,7 +969,8 @@ def _build_cosigned_surrender_tx(
     total_cmatra: int,
     legacy_assets: list[dict[str, Any]],
     pool_utxo: dict[str, Any],
-) -> tuple[str, str, dict[str, Any] | None]:
+    user_inputs: list[dict[str, Any]] | None = None,
+) -> tuple[str, str, dict[str, Any] | None, list[dict[str, Any]]]:
     """Build a surrender tx and partially sign with admin key(s).
 
     Transaction structure:
@@ -863,10 +986,21 @@ def _build_cosigned_surrender_tx(
     The builder auto-selects user UTxOs for the legacy assets + fees.
     Admin signs the script spend. User must add their signature via wallet.
 
-    Returns (tx_cbor_hex, tx_hash_hex, built_pool_output). The third element is
-    output[1] read back from the assembled tx body — {address, datum_hex,
-    cmatra_amount, ada_amount} — or None if no pool-change output exists
-    (full drain). The tip-advance datum guard runs against it.
+    ``user_inputs`` (chained path): the user's pending change UTxOs from the
+    prior chunk, added as EXPLICIT inputs instead of Blockfrost address
+    selection. Blockfrost lags the mempool, so on a chained surrender it still
+    lists the prior chunk's now-spent NFT UTxO as available; selecting it yields
+    BadInputsUTxO. Feeding the known pending change forward (the user-input
+    analogue of the pool tip) lets a single wallet chain chunks without waiting
+    for each to confirm. None on the first (confirmed-tip) chunk -> normal
+    address selection.
+
+    Returns (tx_cbor_hex, tx_hash_hex, built_pool_output, user_change_utxos).
+    The third element is output[1] read back from the assembled tx body —
+    {address, datum_hex, cmatra_amount, ada_amount} — or None if no pool-change
+    output exists (full drain). The fourth is the list of this tx's outputs that
+    pay back to the user ({tx_hash, output_index, lovelace, multi_asset}) — the
+    pending change to feed the next chained chunk.
     """
     # NOTE: state.bf is our custom BlockfrostClient (tools/api_clients.py)
     # which stores base_url WITH '/v0' (e.g. ".../api/v0") because it builds
@@ -900,23 +1034,42 @@ def _build_cosigned_surrender_tx(
     )
 
     redeemer = Redeemer(RawPlutusData(cbor2.loads(_PROCESS_SURRENDER_REDEEMER_CBOR)))
+    # Seed the redeemer with generous execution units so pycardano's builder
+    # SKIPS its internal evaluate_tx (it sets _should_estimate_execution_units
+    # False when a redeemer already carries ex_units). That internal evaluate
+    # indexes the SPEND redeemer to pycardano's INSERTION order, but the ledger
+    # (and Blockfrost's evaluate) sort inputs canonically — on the chained
+    # surrender path the script input's tx_id sorts AFTER a wallet input, so the
+    # internal evaluate rejects the tx with extraRedeemers BEFORE our canonical
+    # fix can run. We instead canonicalize first, then evaluate the canonical
+    # body ourselves and patch the exact units in (see below). The seed is an
+    # upper bound for the trivial `expect Some(_)` + dual-sig validator; the
+    # real units are re-measured against the canonical body and patched before
+    # signing, so the seed only governs the fee buffer (negligibly generous).
+    redeemer.ex_units = ExecutionUnits(2_000_000, 900_000_000)
 
     builder = TransactionBuilder(context)
 
     # Script input: pool UTxO
     builder.add_script_input(utxo, script=script, redeemer=redeemer)
 
-    # User's address for UTxO selection (legacy assets + fee contribution).
-    # IMPORTANT: ONLY the user's address. Earlier code also called
-    # `add_input_address(state.admin_addr)` which let pycardano pick up
-    # admin_1's cMATRA reserve UTxO and route its value through to the user
-    # as change. Admin must NOT be a fee/UTxO source — only a script-spend
-    # co-signer. The pool UTxO is added explicitly via add_script_input above.
+    # User's inputs (legacy assets being surrendered + fee contribution).
+    # IMPORTANT: never add admin_addr as an input source — admin is only a
+    # script-spend co-signer; the pool UTxO is added explicitly above.
     user_addr = Address.from_primitive(user_address)
-    builder.add_input_address(user_addr)
 
-    # Use dedicated collateral UTxO if configured (limits max collateral loss)
+    # Collateral selection FIRST (so it can be excluded from the regular
+    # fee/change candidates below). Plutus collateral MUST be ADA-only — if
+    # pycardano auto-selects it from the tx inputs it can pick a token-bearing
+    # UTxO and the ledger rejects the tx with CollateralContainsNonADA. On the
+    # chained surrender path this is the common case: the user's only large UTxO
+    # is the accumulated pool-surrender change bundling the remaining NFTs with
+    # the ADA, so we set an explicit ADA-only collateral.
     if COLLATERAL_UTXO and "#" in COLLATERAL_UTXO:
+        # Operator-pinned dedicated collateral (bounds max collateral loss).
+        # NOTE: the builder field is `collaterals` (a NonEmptyOrderedSet) — a
+        # singular `builder.collateral = [...]` is silently ignored, leaving
+        # pycardano to auto-select a (possibly token-bearing) input.
         col_hash, col_idx = COLLATERAL_UTXO.rsplit("#", 1)
         col_input = TransactionInput(
             TransactionId(bytes.fromhex(col_hash)), int(col_idx),
@@ -925,7 +1078,56 @@ def _build_cosigned_surrender_tx(
             col_input,
             TransactionOutput(state.admin_addr, Value(5_000_000)),  # 5 ADA
         )
-        builder.collateral = [col_utxo]
+        builder.collaterals.append(col_utxo)
+    else:
+        # Pick a small ADA-only UTxO from the user's address for collateral,
+        # excluding any reserved for an in-flight chained chunk, then reserve it
+        # so the next chained chunk does not re-pick (and double-spend) it.
+        ada_only = _select_ada_only_collateral(context, user_addr)
+        if ada_only is not None:
+            builder.collaterals.append(ada_only)
+            col_ref = f"{ada_only.input.transaction_id}#{ada_only.input.index}"
+            state.reserved_collateral.add(col_ref)
+            logger.info("Collateral set: %s (%d lovelace, ADA-only); reserved=%d",
+                        col_ref[:18], ada_only.output.amount.coin,
+                        len(state.reserved_collateral))
+        else:
+            logger.warning("No unreserved ADA-only collateral UTxO at user "
+                           "address — pycardano will auto-select (may pick a "
+                           "token UTxO; a chained run can exhaust pure-ADA UTxOs)")
+
+    # User's inputs (legacy assets being surrendered + fee contribution).
+    # IMPORTANT: never add admin_addr as an input source — admin is only a
+    # script-spend co-signer; the pool UTxO is added explicitly above.
+    if user_inputs:
+        # Chained path: spend the user's known pending change UTxOs explicitly
+        # (Blockfrost can't yet see them as spent/created), so the NFTs being
+        # surrendered — which live in the prior chunk's mempool change — are
+        # actually present. pycardano still appends change back to user_addr.
+        for ui in user_inputs:
+            ui_multi = MultiAsset()
+            for pol_hex, assets in ui.get("multi_asset", {}).items():
+                pol = PycScriptHash(bytes.fromhex(pol_hex))
+                ui_multi[pol] = Asset({
+                    AssetName(bytes.fromhex(an_hex)): qty
+                    for an_hex, qty in assets.items()
+                })
+            ui_val = Value(ui["lovelace"], ui_multi) if ui_multi else Value(ui["lovelace"])
+            builder.add_input(UTxO(
+                TransactionInput(TransactionId(bytes.fromhex(ui["tx_hash"])),
+                                 ui["output_index"]),
+                TransactionOutput(user_addr, ui_val),
+            ))
+        # Give pycardano confirmed ADA-only UTxOs to draw extra fee/change from
+        # if the pending change alone can't balance the tx. add_input_address
+        # would re-introduce the already-spent NFT UTxO from Blockfrost's lagged
+        # view, so we offer pure-ADA candidates only (never the reserved
+        # collateral, selected above). Without this the selector can deplete and
+        # the chained build fails with InputUTxODepleted.
+        for c in _confirmed_ada_only_utxos(context, user_addr, exclude_reserved=True):
+            builder.potential_inputs.append(c)
+    else:
+        builder.add_input_address(user_addr)
 
     # Output 1: cMATRA to user
     user_multi = MultiAsset()
@@ -981,20 +1183,22 @@ def _build_cosigned_surrender_tx(
         if state.cosigner_pkh:
             builder.required_signers.append(state.cosigner_pkh)
 
-    # Build the transaction — change goes to user
+    # Build the transaction — change goes to user. The redeemer carries seed
+    # ex_units (above) so the builder SKIPS its internal evaluate_tx, which on
+    # the chained path would index the SPEND redeemer to pycardano's INSERTION
+    # order and be rejected by the ledger's canonical-order evaluate with
+    # extraRedeemers. We canonicalize and measure units ourselves below.
     tx_body = builder.build(change_address=user_addr)
 
-    # Build witness set (script + redeemer) before signing so the redeemer
-    # index can be aligned to the canonical body below.
+    # Canonicalize inputs to the ledger's sort order and re-index the SPEND
+    # redeemer + recompute script_data_hash + measure real execution units —
+    # all through pycardano's own builder machinery so every committed field
+    # (input order, redeemer index, ex_units, script_data_hash) is mutually
+    # consistent and matches what the ledger derives. MUST run before any
+    # signature: admin, co-signer, and the wallet's CIP-30 witness all sign
+    # tx_body.hash() over this canonical body.
+    tx_body = _canonicalize_via_builder(builder, context, script)
     witness_set = builder.build_witness_set()
-
-    # Canonicalize the tx body's inputs to the ledger's sort order (emitted as a
-    # bare array, immune to cbor2's tag-258 re-ordering) and point the SPEND
-    # redeemer at the script input's position in that order. This MUST happen
-    # before any signature: admin, co-signer, and the wallet's CIP-30 witness
-    # all sign tx_body.hash() over this canonical body. Without it the on-wire
-    # input order is hash-seed-dependent and the node rejects extraRedeemers.
-    tx_body = _canonicalize_body_and_index_redeemer(tx_body, witness_set, tx_in)
 
     # Create admin 1 witness (Server A — local key) over the canonical body
     tx_hash = tx_body.hash()
@@ -1026,15 +1230,40 @@ def _build_cosigned_surrender_tx(
     # than silently poison the chained tip.
     built_pool_output = extract_pool_output(tx)
 
+    # Collect this tx's outputs that pay back to the user — their pending change
+    # (NFT/ADA leftovers) to feed the next chained chunk's user inputs. Reading
+    # the canonical body (post input-sort) keeps the output indices correct.
+    user_change_utxos: list[dict[str, Any]] = []
+    for idx, out in enumerate(tx_body.outputs):
+        if str(out.address) != user_address:
+            continue
+        amt = out.amount
+        lovelace = amt if isinstance(amt, int) else amt.coin
+        ma: dict[str, dict[str, int]] = {}
+        mi = None if isinstance(amt, int) else getattr(amt, "multi_asset", None)
+        if mi:
+            for pol, assets in (mi.data.items() if hasattr(mi, "data") else mi.items()):
+                pol_hex = pol.payload.hex() if hasattr(pol, "payload") else bytes(pol).hex()
+                ma[pol_hex] = {}
+                for an, qty in (assets.data.items() if hasattr(assets, "data") else assets.items()):
+                    an_hex = an.payload.hex() if hasattr(an, "payload") else bytes(an).hex()
+                    ma[pol_hex][an_hex] = int(qty)
+        user_change_utxos.append({
+            "tx_hash": tx_hash_hex, "output_index": idx,
+            "lovelace": int(lovelace), "multi_asset": ma,
+        })
+
     logger.info(
-        "Built co-signed surrender tx: %d cMATRA → %s (tx: %s, pool_out=%s)",
+        "Built co-signed surrender tx: %d cMATRA → %s (tx: %s, pool_out=%s, "
+        "user_change_outs=%d)",
         total_cmatra,
         user_address[:24] + "...",
         tx_hash_hex[:16] + "...",
         (built_pool_output or {}).get("datum_hex"),
+        len(user_change_utxos),
     )
 
-    return tx_cbor_hex, tx_hash_hex, built_pool_output
+    return tx_cbor_hex, tx_hash_hex, built_pool_output, user_change_utxos
 
 
 # ---------------------------------------------------------------------------
@@ -1193,6 +1422,12 @@ async def submit_surrender(req: SubmitRequest):
                 delivered_cmatra=ctx["delivered_cmatra"],
                 built_pool_output=ctx["built_pool_output"],
             )
+            # Promote the user's change outputs to the pending set so the next
+            # chained chunk spends them explicitly (Blockfrost can't see them
+            # yet). Only after mempool-accept — mirrors the pool-tip advance.
+            ua = ctx.get("user_address")
+            if ua and ctx.get("user_change") is not None:
+                state.user_pending[ua] = ctx["user_change"]
         except PoolTipError as e:
             # The tx LANDED (the user's money moved), but the pool output we
             # built failed a guard (e.g. missing datum). Do NOT chain off it.
@@ -1292,7 +1527,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     # diagnostic that never submits, so it reads the pool directly (not the
     # chained tip) and discards the built pool output.
     try:
-        tx_cbor_hex, tx_hash_hex, _ = _build_cosigned_surrender_tx(
+        tx_cbor_hex, tx_hash_hex, _, _ = _build_cosigned_surrender_tx(
             user_address=req.user_address,
             total_cmatra=total_cmatra,
             legacy_assets=all_legacy_assets,

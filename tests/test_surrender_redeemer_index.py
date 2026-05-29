@@ -16,12 +16,22 @@ ledger-canonical position — computed by re-sorting the inputs ourselves, NOT
 by trusting cbor2's decode order.
 
 That distinction is load-bearing. The bug (and the broken PR #20 fix) aligned
-the redeemer to cbor2's decode order, which on the pinned pycardano (< 0.19)
-is hash-seed-dependent and diverges from the ledger's canonical sort. Asserting
-against the decode order is self-consistent but tests nothing real — it passes
-on broken and fixed code alike. We assert against the canonical sort instead,
-and force multiple PYTHONHASHSEED values via subprocess so the guard holds
-regardless of which order cbor2 happened to decode the inputs in.
+the redeemer to cbor2's decode order, which is hash-seed-dependent and diverges
+from the ledger's canonical sort. Asserting against the decode order is self-
+consistent but tests nothing real — it passes on broken and fixed code alike.
+We assert against the canonical sort instead, and force multiple PYTHONHASHSEED
+values via subprocess so the guard holds regardless of which order cbor2
+decoded the inputs in.
+
+The fix (``_canonicalize_via_builder``) sorts ``builder.inputs`` into canonical
+order and lets pycardano's own ``_set_redeemer_index`` index the SPEND redeemer
+to the script input's position in that order. The Conway ledger canonicalizes
+inputs internally regardless of the on-wire framing (pycardano 0.19.x emits
+them as a tag-258 set that cbor2 may re-order on the wire), so the only
+invariant that must hold — and that the node enforces — is redeemer index ==
+script input's canonical position. That is what this guard asserts, proven on
+preprod by chained surrenders landing with ``valid_contract=True`` and exactly
+one redeemer.
 """
 
 from __future__ import annotations
@@ -122,6 +132,11 @@ class _FakeContext:
         return list(self._user_utxos)
 
     def evaluate_tx(self, tx):
+        return {f"spend:{i}": ExecutionUnits(500000, 200000000) for i in range(8)}
+
+    def evaluate_tx_cbor(self, cbor):
+        # The canonicalization re-measures units against the canonical body via
+        # evaluate_tx_cbor; serve units for any spend index the builder asks.
         return {f"spend:{i}": ExecutionUnits(500000, 200000000) for i in range(8)}
 
 
@@ -252,7 +267,7 @@ def _build_with_user_prefix(prefix: str):
         legacy = [
             {"policy_hex": _LEGACY_POLICY, "asset_hex": _LEGACY_ASSET, "quantity": 1}
         ]
-        tx_cbor_hex, _tx_hash, _pool_out = api._build_cosigned_surrender_tx(
+        tx_cbor_hex, _tx_hash, _pool_out, _user_change = api._build_cosigned_surrender_tx(
             user_addr_bech, 100, legacy, pool_utxo
         )
     return tx_cbor_hex
@@ -262,18 +277,13 @@ def _build_with_user_prefix(prefix: str):
 def test_spend_redeemer_index_matches_canonical_script_input_position(prefix):
     """The SPEND redeemer must index the script input's true ledger-canonical
     position — its index in inputs sorted by (tx_id, output index) — or the node
-    rejects extraRedeemers. We also assert the on-wire input bytes are in that
-    canonical order (the fix re-emits inputs as a bare array), so the redeemer
-    index the node derives equals the one in the witness set."""
+    rejects extraRedeemers. The ledger canonicalizes inputs internally, so the
+    on-wire framing is irrelevant; the only invariant is redeemer index ==
+    script input's canonical position."""
     tx_cbor_hex = _build_with_user_prefix(prefix)
-    script_pos, spend_idx, onwire_canonical = _decode_positions(tx_cbor_hex)
+    script_pos, spend_idx, _onwire_canonical = _decode_positions(tx_cbor_hex)
     assert script_pos is not None, "pool script input missing from serialized tx"
     assert spend_idx is not None, "SPEND redeemer missing from witness set"
-    assert onwire_canonical, (
-        "tx body inputs are NOT in ledger-canonical order on the wire — cbor2's "
-        "tag-258 encoder re-ordered them, so the node would derive a different "
-        "redeemer index than the one in the witness set"
-    )
     assert spend_idx == script_pos, (
         f"SPEND redeemer index {spend_idx} != script input's canonical "
         f"position {script_pos} — node would reject extraRedeemers=['spend:{spend_idx}']"
@@ -305,9 +315,8 @@ def test_redeemer_index_correct_under_any_hash_seed(seed):
         "seen=set()\n"
         "for pfx in ('ff','cc','00'):\n"
         "    h=t._build_with_user_prefix(pfx)\n"
-        "    sp,ri,canon=t._decode_positions(h)\n"
+        "    sp,ri,_canon=t._decode_positions(h)\n"
         "    assert sp is not None and ri is not None, (pfx,sp,ri)\n"
-        "    assert canon, f'on-wire inputs not canonical pfx={pfx}'\n"
         "    assert ri==sp, f'seed-dependent mismatch pfx={pfx} canonical_pos={sp} redeemer_idx={ri}'\n"
         "    seen.add(sp)\n"
         "print('POSITIONS', sorted(seen))"
@@ -340,9 +349,8 @@ def test_all_three_canonical_positions_are_exercised():
             "out=[]\n"
             "for pfx in ('ff','cc','00'):\n"
             "    h=t._build_with_user_prefix(pfx)\n"
-            "    sp,ri,canon=t._decode_positions(h)\n"
+            "    sp,ri,_canon=t._decode_positions(h)\n"
             "    assert sp is not None and ri is not None\n"
-            "    assert canon, f'on-wire inputs not canonical pfx={pfx}'\n"
             "    assert ri==sp, f'mismatch pfx={pfx} canonical_pos={sp} redeemer_idx={ri}'\n"
             "    out.append(sp)\n"
             "print('POS', out)"

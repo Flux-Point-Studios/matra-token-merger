@@ -278,6 +278,83 @@ def run(api: SurrenderApi, project_id: str, user_address: str,
     print(json.dumps(evidence, indent=2))
 
 
+def run_depth_cap(api: SurrenderApi, project_id: str, user_address: str,
+                  skey: PaymentSigningKey, nft_units: list[str], per_chunk: int,
+                  depth_cap: int) -> None:
+    """Assertion 4: drive chunks past the depth cap. Expect builds to succeed up
+    to the cap (tip pending at depth==cap), then a 503 {code: POOL_SETTLING},
+    then — once the pending root confirms — recovery (the tip re-seeds and
+    surrenders resume). Proves the wave-of-N behavior for a 95-chunk wallet."""
+    chunks = _chunk_assets(nft_units, per_chunk)
+    logger.info("=== Assertion 4: depth>cap settling-wait + recovery "
+                "(%d chunks, cap %d) ===", len(chunks), depth_cap)
+    if len(chunks) <= depth_cap:
+        raise SystemExit(
+            f"Need > {depth_cap} chunks to exercise the cap; have {len(chunks)} "
+            f"({len(nft_units)} NFTs / {per_chunk} per chunk).")
+
+    submitted: list[str] = []
+    settling_seen = False
+    prev_pool_ref: str | None = None
+    for i, assets in enumerate(chunks):
+        rb = api.build(user_address, assets)
+        if rb.status_code == 503:
+            body = rb.json()
+            code = (body.get("detail") or {})
+            code = code.get("code") if isinstance(code, dict) else body.get("code")
+            cs = api.chain_state()
+            logger.info("  chunk %d -> 503 %s | chainState=%s", i + 1, code, cs)
+            assert code == "POOL_SETTLING", f"expected POOL_SETTLING, got {body}"
+            assert cs and cs["depth"] >= depth_cap, f"503 below cap: {cs}"
+            settling_seen = True
+            # Recovery: once the pending chain confirms, the server-side
+            # watchdog re-seeds the tip (resetting depth) within a tick and the
+            # cap lifts. Poll the build until it recovers (handles the confirm
+            # latency + the watchdog tick).
+            root = cs["utxo_ref"].split("#", 1)[0]
+            logger.info("  waiting for pending tip %s to confirm + watchdog "
+                        "re-seed for recovery...", root[:16])
+            deadline = time.time() + 360
+            rb2 = None
+            while time.time() < deadline:
+                time.sleep(15)
+                rb2 = api.build(user_address, assets)
+                if rb2.status_code == 200:
+                    break
+                logger.info("    still settling (build %s); chainState=%s",
+                            rb2.status_code, api.chain_state())
+            assert rb2 is not None and rb2.status_code == 200, (
+                f"post-settle build did not recover within window: "
+                f"{rb2.status_code if rb2 else 'n/a'}")
+            cs2 = api.chain_state()
+            logger.info("  ✓ recovered after settle: chainState=%s", cs2)
+            # Complete this recovered chunk so the chain is left clean.
+            bd2 = rb2.json()
+            ws = wallet_partial_witness(bd2["tx_cbor_hex"], skey)
+            rs2 = api.submit(ws, bd2["tx_hash"])
+            assert rs2.status_code == 200, f"recovered submit failed: {rs2.text[:200]}"
+            submitted.append(rs2.json()["tx_hash"])
+            break
+        assert rb.status_code == 200, f"chunk {i+1} build failed: {rb.status_code} {rb.text[:200]}"
+        bd = rb.json()
+        if i > 0 and prev_pool_ref is not None:
+            assert bd["pool_utxo_used"] == prev_pool_ref, (
+                f"chunk {i+1} not chained off tip {prev_pool_ref}: {bd['pool_utxo_used']}")
+        cs = api.chain_state()
+        logger.info("  chunk %d/%d built; chainState=%s", i + 1, len(chunks), cs)
+        ws = wallet_partial_witness(bd["tx_cbor_hex"], skey)
+        rs = api.submit(ws, bd["tx_hash"])
+        assert rs.status_code == 200, f"chunk {i+1} submit failed: {rs.text[:200]}"
+        sub = rs.json()["tx_hash"]
+        submitted.append(sub)
+        prev_pool_ref = f"{sub}#1"
+
+    assert settling_seen, "depth cap was never hit — POOL_SETTLING 503 not observed"
+    print("\n===== DEPTH-CAP EVIDENCE (assertion 4) =====")
+    print(json.dumps({"chunks_submitted_before_and_after_settle": submitted,
+                      "settling_503_observed": settling_seen}, indent=2))
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -290,6 +367,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--depth-cap", type=int, default=8)
     p.add_argument("--restart-cmd", default=None,
                    help="Shell command to restart the service for assertion 5")
+    p.add_argument("--max-nfts", type=int, default=0,
+                   help="Cap the NFTs used (0 = all). Bounds the A/B/C chain "
+                        "below the depth cap so the depth-cap run (assertion 4) "
+                        "can be driven separately with the full set.")
+    p.add_argument("--mode", choices=["abce", "depth-cap"], default="abce",
+                   help="abce: assertions 1/2/3 (+5 restart). depth-cap: drive "
+                        "past the cap to prove the 503 POOL_SETTLING + recovery.")
     args = p.parse_args(argv)
 
     project_id = os.environ.get(
@@ -320,9 +404,17 @@ def main(argv: list[str] | None = None) -> None:
             f"for the depth>{args.depth_cap} run). Mint legacy preprod NFTs via "
             f"scripts/preprod_harness.py first — do NOT fake them.")
 
+    if args.max_nfts and args.max_nfts < len(nft_units):
+        nft_units = sorted(nft_units)[:args.max_nfts]
+        logger.info("Capped to %d NFTs for this run", len(nft_units))
+
     api = SurrenderApi(args.api_base, args.api_secret)
-    run(api, project_id, user_address, skey, nft_units, args.per_chunk,
-        args.depth_cap, args.restart_cmd)
+    if args.mode == "depth-cap":
+        run_depth_cap(api, project_id, user_address, skey, nft_units,
+                      args.per_chunk, args.depth_cap)
+    else:
+        run(api, project_id, user_address, skey, nft_units, args.per_chunk,
+            args.depth_cap, args.restart_cmd)
 
 
 if __name__ == "__main__":

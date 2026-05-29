@@ -146,7 +146,12 @@ class BlockfrostClient:
         return self._get(f"/txs/{tx_hash}/utxos")
 
     def submit_tx(self, cbor_bytes: bytes) -> str:
-        """Submit a signed transaction. Returns tx hash."""
+        """Submit a signed transaction. Returns tx hash.
+
+        On rejection, raise with the Blockfrost/ledger response body included —
+        the bare status code hides the actual ledger error (e.g. the precise
+        UTxO/script failure), which is exactly what an operator needs to debug a
+        failed submit."""
         url = f"{self.base_url}/tx/submit"
         resp = requests.post(
             url,
@@ -157,7 +162,10 @@ class BlockfrostClient:
             data=cbor_bytes,
             timeout=60,
         )
-        resp.raise_for_status()
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"tx submit failed [{resp.status_code}]: {resp.text[:1000]}"
+            )
         return resp.json()
 
     # -- addresses -------------------------------------------------------

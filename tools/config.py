@@ -254,7 +254,10 @@ class NftCollectionInfo:
 
 FLUX_PASS = NftCollectionInfo(
     name="FLUX_PASS",
-    policy_id="0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+    policy_id=os.environ.get(
+        "FLUX_PASS_POLICY",
+        "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a",
+    ),
     display_name="Flux Point Team Pass",
 )
 
