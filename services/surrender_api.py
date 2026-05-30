@@ -69,6 +69,7 @@ from pycardano import (
 )
 from pycardano.exception import InvalidTransactionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
+from pycardano.utils import min_lovelace_post_alonzo
 from pycardano.plutus import RedeemerKey, RedeemerMap, RedeemerTag
 
 from tools.api_clients import BlockfrostClient
@@ -144,6 +145,13 @@ API_PORT: int = int(os.environ.get("SURRENDER_API_PORT", "8420"))
 #             hash-ordered tag-258 SET, so the wallet signature fails with
 #             InvalidWitnessesUTXOW. Broken on 0.18.0 (written for 0.19.x).
 CANON_STRATEGY: str = os.environ.get("CANON_STRATEGY", "hybrid").strip().lower()
+
+# Defrag: default max distinct tokens per lean output when splitting a fat UTxO.
+# Lean UTxOs of this size surrender well within the 16KB limit (a 20-token
+# change output is ~1.4KB). Env-overridable per deployment.
+DEFRAG_MAX_TOKENS_PER_OUTPUT: int = int(
+    os.environ.get("DEFRAG_MAX_TOKENS_PER_OUTPUT", "20")
+)
 
 # Dedicated collateral UTxO — bounds max collateral loss on phase-2 failure.
 # Format: "txhash#index" (e.g. "abc123...#0"). If unset, pycardano auto-selects.
@@ -306,6 +314,29 @@ class PoolStatusResponse(BaseModel):
     # Lets the operator watch chaining live during the canary + 95-chunk drain.
     chainState: dict[str, Any] | None = None
     depthCap: int | None = None
+
+
+class PrepareDefragRequest(BaseModel):
+    """Request to build a self-send tx that splits one fat token UTxO into lean
+    outputs so the owner's subsequent surrenders fit under the 16KB tx limit."""
+    user_address: str = Field(..., description="Owner's bech32 address", min_length=40, max_length=120)
+    target_utxo: str | None = Field(
+        None, description="UTxO to split as 'txhash#index'; defaults to the owner's fattest token UTxO",
+        pattern=r"^[0-9a-fA-F]{64}#\d+$",
+    )
+    max_tokens_per_output: int = Field(
+        DEFRAG_MAX_TOKENS_PER_OUTPUT, ge=1, le=60,
+        description="Max distinct tokens per lean output",
+    )
+
+
+class PrepareDefragResponse(BaseModel):
+    tx_cbor_hex: str  # UNSIGNED; the owner signs (CIP-30 full) and submits
+    tx_hash: str
+    target_utxo: str
+    n_tokens: int
+    n_lean_outputs: int
+    tx_size_bytes: int
 
 
 # ---------------------------------------------------------------------------
@@ -1374,6 +1405,138 @@ def _build_cosigned_surrender_tx(
     )
 
     return tx_cbor_hex, tx_hash_hex, built_pool_output, user_change_utxos
+
+
+def _build_defrag_tx_blocking(
+    user_address: str, target_ref: str | None, max_tokens: int,
+) -> tuple[str, str, str, int, int, int]:
+    """Build an UNSIGNED self-send tx that splits one fat UTxO at the owner's
+    address into lean outputs (<= ``max_tokens`` distinct tokens each), all paid
+    back to the owner. No admin co-sign, no script, no pool tip: the owner signs
+    every input (CIP-30 full sign) and submits.
+
+    A fat UTxO makes a surrender exceed the 16KB limit because every *other*
+    token in it must ride along as a change output; once split, each lean UTxO
+    surrenders within the limit. Returns
+    (tx_cbor_hex, tx_hash_hex, target_ref, n_tokens, n_lean_outputs, size_bytes).
+    """
+    context = BlockFrostChainContext(
+        project_id=state.bf.project_id,
+        base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
+    )
+    addr = Address.from_primitive(user_address)
+    utxos = context.utxos(user_address)
+    if not utxos:
+        raise ValueError("No UTxOs found at this address")
+
+    def _ntok(u: UTxO) -> int:
+        ma = u.output.amount.multi_asset
+        return sum(len(a) for a in ma.values()) if ma else 0
+
+    if target_ref:
+        th, _, ix = target_ref.partition("#")
+        target = next(
+            (u for u in utxos
+             if str(u.input.transaction_id) == th and u.input.index == int(ix)),
+            None,
+        )
+        if target is None:
+            raise ValueError("Target UTxO not found at this address")
+    else:
+        target = max(utxos, key=_ntok)
+    ref = f"{target.input.transaction_id}#{target.input.index}"
+
+    if _ntok(target) <= max_tokens:
+        raise ValueError(
+            f"UTxO holds {_ntok(target)} token(s) (<= {max_tokens}); already lean, "
+            "nothing to defrag"
+        )
+
+    assets: dict[str, int] = {}
+    for pol, a in target.output.amount.multi_asset.items():
+        for an, qty in a.items():
+            assets[pol.payload.hex() + an.payload.hex()] = int(qty)
+
+    plan = plan_defrag(
+        assets, max_tokens_per_output=max_tokens,
+        min_ada_for=lambda n: 1_000_000 + n * 100_000,  # planning estimate only
+    )
+
+    builder = TransactionBuilder(context)
+    builder.add_input(target)
+    # Fund min-ADA + fee from the owner's ADA-only UTxOs only, so coin selection
+    # never drags ANOTHER fat token UTxO in (which would re-bloat the tx).
+    for u in utxos:
+        if _ntok(u) == 0 and u.input != target.input:
+            builder.potential_inputs.append(u)
+
+    for lean in plan.outputs:
+        by_policy: dict[str, dict[str, int]] = {}
+        for unit, qty in lean.assets.items():
+            by_policy.setdefault(unit[:56], {})[unit[56:]] = qty
+        multi = MultiAsset()
+        for pol_hex, names in by_policy.items():
+            multi[PycScriptHash(bytes.fromhex(pol_hex))] = Asset(
+                {AssetName(bytes.fromhex(n)): q for n, q in names.items()}
+            )
+        out = TransactionOutput(addr, Value(2_000_000, multi))
+        out.amount.coin = min_lovelace_post_alonzo(out, context)
+        builder.add_output(out)
+
+    body = builder.build(change_address=addr)
+    tx_hash = body.hash()
+    tx_hash_hex = tx_hash.hex() if isinstance(tx_hash, bytes) else tx_hash.payload.hex()
+    tx_cbor_hex = Transaction(body, TransactionWitnessSet()).to_cbor().hex()
+    size = len(tx_cbor_hex) // 2
+    if size > 16_384:
+        raise ValueError(
+            f"Defrag tx is {size} bytes, over the 16384-byte limit; retry with a "
+            "smaller max_tokens_per_output"
+        )
+    return tx_cbor_hex, tx_hash_hex, ref, plan.n_tokens, plan.n_outputs, size
+
+
+@app.post("/prepare-defrag", response_model=PrepareDefragResponse)
+async def prepare_defrag(req: PrepareDefragRequest):
+    """Build an unsigned self-send tx that splits one of the caller's fat token
+    UTxOs into lean outputs, so the caller's subsequent surrenders fit under the
+    16KB tx limit. The wallet signs it in full (CIP-30; all inputs are the
+    owner's) and submits — no admin co-sign, no script, no pool tip involved.
+    """
+    if not req.user_address.startswith(("addr1", "addr_test1")):
+        raise HTTPException(400, "Invalid Cardano address")
+    try:
+        addr_check = Address.from_primitive(req.user_address)
+        if isinstance(addr_check.payment_part, PycScriptHash):
+            raise HTTPException(400, "Address must be a wallet address, not a script address")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Invalid Cardano address encoding")
+
+    # Same closed-beta gate as /build-surrender.
+    if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
+        raise HTTPException(403, "Surrender window not yet open")
+
+    try:
+        (tx_cbor_hex, tx_hash_hex, ref, n_tokens, n_outputs, size) = await asyncio.to_thread(
+            _build_defrag_tx_blocking,
+            req.user_address, req.target_utxo, req.max_tokens_per_output,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        logger.exception("Failed to build defrag tx for %s", req.user_address[:24])
+        raise HTTPException(500, "Defrag build failed. Please try again.")
+
+    logger.info(
+        "Built defrag tx %s for %s: %d tokens -> %d lean outputs (%d bytes)",
+        tx_hash_hex[:16], req.user_address[:24], n_tokens, n_outputs, size,
+    )
+    return PrepareDefragResponse(
+        tx_cbor_hex=tx_cbor_hex, tx_hash=tx_hash_hex, target_utxo=ref,
+        n_tokens=n_tokens, n_lean_outputs=n_outputs, tx_size_bytes=size,
+    )
 
 
 # ---------------------------------------------------------------------------
