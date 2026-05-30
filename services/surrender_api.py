@@ -458,6 +458,16 @@ def _seed_pool_utxos() -> list[dict[str, Any]]:
     )
 
 
+def _read_confirmed_pool_utxos() -> list[dict[str, Any]]:
+    """Side-effect-free read of the confirmed pool UTxOs for tip reconciliation
+    (no reservation clearing — that belongs only to an actual re-seed). The
+    watchdog reads this each tick to test whether the live tip is still unspent
+    on-chain."""
+    return find_pool_utxos(
+        state.bf, SCRIPT_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
+    )
+
+
 def _tx_is_confirmed(tx_hash: str) -> bool:
     """True once Blockfrost has the tx in a block. Used by the eviction
     watchdog. ``get_tx_utxos`` 404s (raises) until the tx confirms."""
@@ -479,9 +489,11 @@ async def _pool_tip_watchdog() -> None:
         try:
             await asyncio.sleep(POOL_TIP_WATCHDOG_INTERVAL_S)
             await mgr.sweep_stuck_build()
-            # Clear the depth cap when a maxed-out pending chain has confirmed
-            # (resets depth -> POOL_SETTLING lifts; the next wave proceeds).
-            await mgr.promote_if_confirmed(_tx_is_confirmed)
+            # Reconcile the tip against L1: re-seed if a confirmed tip's output
+            # was spent (the poisoned-tip class — every build would 422 with
+            # extraRedeemers), or promote a settled pending tip to depth 0
+            # (clears POOL_SETTLING so the next wave proceeds).
+            await mgr.reconcile_with_chain(_tx_is_confirmed, _read_confirmed_pool_utxos)
             await mgr.evict_if_stale(_tx_is_confirmed)
         except asyncio.CancelledError:
             raise

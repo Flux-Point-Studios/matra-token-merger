@@ -526,3 +526,110 @@ def test_advance_accepts_real_built_tx_with_datum():
         assert new_tip.cmatra_balance == 700
         assert new_tip.status == "pending"
     asyncio.run(run())
+
+
+# ---------------------------------------------------------------------------
+# L1 reconciliation — the tip must agree with the live pool UTxO set, not just
+# with "did the tip's tx confirm?". A confirmed tip whose OUTPUT has been spent
+# (the chain moved on without us) must re-seed; a confirmed tip that is still
+# the live pool is promoted to confirmed/depth-0. This is the fix for the
+# poisoned-tip incident: the tip stuck on a spent UTxO, every build 503/422'd
+# with extraRedeemers, and the confirm-only watchdog never re-seeded.
+# ---------------------------------------------------------------------------
+
+
+def test_reconcile_reseeds_when_confirmed_tip_spent():
+    """Incident repro: tip advanced to TX_B#1; TX_B confirmed; but TX_B#1 was
+    then spent and the live pool is now TX_C#1. Reconcile must re-seed."""
+    async def run():
+        utxos = [_utxo(TX_A, 0, 1000)]
+        mgr = _mgr(utxos)
+        await mgr.acquire_for_build("tok1")
+        mgr.advance_on_submit("tok1", TX_B, 100, _pool_output(900))
+        assert mgr.tip.utxo_ref == f"{TX_B}#1"
+        # TX_B's tx is on-chain, but TX_B#1 has been spent; the live pool moved
+        # to a different confirmed UTxO.
+        utxos[:] = [_utxo(TX_C, 1, 850)]
+        reseeded = await mgr.reconcile_with_chain(
+            is_confirmed_fn=lambda h: True, live_pool_fn=lambda: list(utxos),
+        )
+        assert reseeded is True
+        assert mgr.tip.utxo_ref == f"{TX_C}#1"
+        assert mgr.tip.status == "confirmed"
+        assert mgr.tip.depth == 0
+        assert mgr.tip.cmatra_balance == 850
+    asyncio.run(run())
+
+
+def test_reconcile_promotes_confirmed_pending_tip_still_live():
+    """A pending tip whose tx confirmed AND is still the live pool is promoted
+    to confirmed/depth-0 (this clears the depth cap — a wave settled)."""
+    async def run():
+        utxos = [_utxo(TX_A, 0, 1000)]
+        mgr = _mgr(utxos)
+        await mgr.acquire_for_build("tok1")
+        mgr.advance_on_submit("tok1", TX_B, 100, _pool_output(900))
+        assert mgr.tip.status == "pending" and mgr.tip.depth == 1
+        utxos[:] = [_utxo(TX_B, 1, 900)]  # TX_B#1 IS the live pool now
+        promoted = await mgr.reconcile_with_chain(lambda h: True, lambda: list(utxos))
+        assert promoted is True
+        assert mgr.tip.utxo_ref == f"{TX_B}#1"
+        assert mgr.tip.status == "confirmed"
+        assert mgr.tip.depth == 0
+    asyncio.run(run())
+
+
+def test_reconcile_noop_when_tip_tx_unconfirmed():
+    """A pending tip still in the mempool must be left alone — healthy chaining;
+    eviction owns the stalled-unconfirmed case."""
+    async def run():
+        utxos = [_utxo(TX_A, 0, 1000)]
+        mgr = _mgr(utxos)
+        await mgr.acquire_for_build("tok1")
+        mgr.advance_on_submit("tok1", TX_B, 100, _pool_output(900))
+        out = await mgr.reconcile_with_chain(lambda h: False, lambda: list(utxos))
+        assert out is False
+        assert mgr.tip.utxo_ref == f"{TX_B}#1"
+        assert mgr.tip.status == "pending"
+        assert mgr.tip.depth == 1
+    asyncio.run(run())
+
+
+def test_reconcile_noop_when_confirmed_depth0_and_live():
+    async def run():
+        utxos = [_utxo(TX_A, 0, 1000)]
+        mgr = _mgr(utxos)
+        mgr.seed_from_chain()
+        out = await mgr.reconcile_with_chain(lambda h: True, lambda: list(utxos))
+        assert out is False
+        assert mgr.tip.utxo_ref == f"{TX_A}#0"
+        assert mgr.tip.depth == 0
+    asyncio.run(run())
+
+
+def test_reconcile_reseeds_confirmed_depth0_tip_spent_externally():
+    """A confirmed depth-0 resting tip spent out-of-band (admin rotate, another
+    surrender path) must re-seed to the new live pool."""
+    async def run():
+        utxos = [_utxo(TX_A, 0, 1000)]
+        mgr = _mgr(utxos)
+        mgr.seed_from_chain()
+        utxos[:] = [_utxo(TX_C, 1, 1000)]  # TX_A#0 spent; pool now TX_C#1
+        out = await mgr.reconcile_with_chain(lambda h: True, lambda: list(utxos))
+        assert out is True
+        assert mgr.tip.utxo_ref == f"{TX_C}#1"
+    asyncio.run(run())
+
+
+def test_reconcile_deferred_when_build_in_flight():
+    async def run():
+        utxos = [_utxo(TX_A, 0, 1000)]
+        mgr = _mgr(utxos)
+        mgr.seed_from_chain()
+        utxos[:] = [_utxo(TX_C, 1, 1000)]
+        await mgr.acquire_for_build("tok1")  # build holds the lock
+        out = await mgr.reconcile_with_chain(lambda h: True, lambda: list(utxos))
+        assert out is False  # deferred — must not stomp an in-flight build
+        assert mgr.tip.utxo_ref == f"{TX_A}#0"
+        mgr.release_build("tok1")
+    asyncio.run(run())

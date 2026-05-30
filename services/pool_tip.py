@@ -406,46 +406,76 @@ class PoolTipManager:
         now = time.time() if now is None else now
         return (now - tip.pending_since) >= self._eviction_window_s
 
-    async def promote_if_confirmed(self, is_confirmed_fn: Callable[[str], bool]) -> bool:
-        """Re-seed the tip from confirmed chain state when the current pending
-        tip's own tx has landed on-chain — resetting depth to 0.
+    async def reconcile_with_chain(
+        self,
+        is_confirmed_fn: Callable[[str], bool],
+        live_pool_fn: SeedFn,
+    ) -> bool:
+        """L1 reconciliation (the strongest form of guard 3): make the tip agree
+        with the live pool UTxO set, not merely with "did the tip's tx confirm?".
 
-        Without this the depth cap is a one-way latch: once the chain reaches
-        depth ``depth_cap`` every build 503s POOL_SETTLING, and when the pending
-        chain confirms *healthily* (rather than stalling past the eviction
-        window) nothing resets the depth, so the cap never clears. Promoting a
-        confirmed pending tip is the "then re-seed" the design's depth-cap
-        recovery calls for: a wallet needing more than ``depth_cap`` chunks
-        proceeds in waves, each wave clearing as its chain confirms.
+        A confirmed tx does NOT imply its output is unspent. Once a tip's tx is
+        on-chain it is either (a) still the live pool — promote it to confirmed/
+        depth-0, which also clears the depth cap after a settled wave — or (b)
+        already spent (the chain moved on via another surrender, an admin rotate,
+        or an in-memory tip that lagged a chain advance), in which case the tip
+        is poisoned: every build would spend a non-existent UTxO and the node
+        rejects it (``extraRedeemers``). Re-seeding to the live pool is the only
+        recovery, and ``is_confirmed_fn`` alone can never trigger it because a
+        spent tx stays confirmed forever.
 
-        Cheap to call every tick: it only does a network check when the tip is
-        pending AND at/над the cap (the only state where depth must be reset to
-        make progress). Skips if a build holds the lock. Returns True on re-seed.
+        ``live_pool_fn`` returns the current confirmed pool UTxOs (find_pool_utxos
+        shape) WITHOUT side effects — read only to test tip membership;
+        ``seed_from_chain`` (which clears stale reservations) runs only when a
+        re-seed is actually required. Pending tips still in the mempool are left
+        to the normal chaining path / :meth:`evict_if_stale`. Skips while a build
+        holds the lock and re-checks the tip under the lock so it can never stomp
+        a fresh advance. Returns True if the tip was re-seeded or promoted.
         """
         tip = self._tip
-        if tip is None or tip.status != "pending" or tip.depth < self._depth_cap:
+        if tip is None or self._lock.locked():
             return False
+        decided_ref = tip.utxo_ref
+
         try:
             confirmed = await asyncio.to_thread(is_confirmed_fn, tip.tx_hash)
         except Exception as e:
-            logger.warning("Promote confirm-check failed for %s: %s",
+            logger.warning("Reconcile confirm-check failed for %s: %s",
                            tip.tx_hash[:16], e)
             return False
         if not confirmed:
+            return False  # still in mempool — healthy chaining; eviction owns staleness
+
+        try:
+            live = await asyncio.to_thread(live_pool_fn)
+        except Exception as e:
+            logger.warning("Reconcile live-pool fetch failed: %s", e)
             return False
+        live_refs = {f"{u['tx_hash']}#{u['output_index']}" for u in live}
+
+        if decided_ref in live_refs and tip.status == "confirmed" and tip.depth == 0:
+            return False  # already reconciled: confirmed, depth 0, unspent
+
         if self._lock.locked():
             return False
         await self._lock.acquire()
         try:
             cur = self._tip
-            if cur is None or cur.status != "pending" or cur.depth < self._depth_cap:
-                return False
-            logger.info(
-                "Pending tip %s confirmed at depth %d (>= cap %d); re-seeding to "
-                "reset depth and clear POOL_SETTLING",
-                cur.tx_hash[:16], cur.depth, self._depth_cap,
-            )
+            if cur is None or self._build_token is not None or cur.utxo_ref != decided_ref:
+                return False  # tip moved while we checked — reconcile next tick
+            spent = decided_ref not in live_refs
             self.seed_from_chain()
+            if spent:
+                logger.warning(
+                    "Tip reconciled: confirmed tip %s was spent on-chain (pool "
+                    "moved on) — re-seeded to live pool %s",
+                    decided_ref, self._tip.utxo_ref,
+                )
+            else:
+                logger.info(
+                    "Tip %s settled on-chain — promoted to confirmed depth-0",
+                    decided_ref,
+                )
             return True
         finally:
             if self._lock.locked():
