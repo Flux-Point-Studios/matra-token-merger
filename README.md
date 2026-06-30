@@ -18,8 +18,14 @@ parameterized one-shot mint policy.
 |---|---|---|---|
 | **cMATRA** | 6 | 1,000,000,000 (1 × 10¹⁵ base units) | `cMATRA` (hex `634d41545241`) |
 
-cMATRA stays Cardano-side in v0. The Materios partner-chain `MATRA` token
-(same total cap, Substrate-side) is a separate track — see
+**Live on mainnet** — Policy ID `7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66`,
+asset fingerprint `asset14d9q0xd8hf7akhrqr0qxl30q9uphfw5d47l8xk`. Surrender/redeem
+from the seven legacy assets is open; the **claim window closes 2026-11-29 UTC**.
+
+cMATRA is the Cardano-native representation of **MATRA**, the governance and
+application-layer payment token of the Materios partner chain (runtime extrinsic
+fees are paid in **MOTRA**, a separate per-block gas token). The Materios
+Substrate-side `MATRA` (same total cap) is a separate track — see
 [`Flux-Point-Studios/materios`](https://github.com/Flux-Point-Studios/materios).
 
 ---
@@ -28,15 +34,15 @@ cMATRA stays Cardano-side in v0. The Materios partner-chain `MATRA` token
 
 | Component | Status |
 |---|---|
-| `claim_validator` (surrender pool, Aiken Plutus V3) | Audited, preprod-rehearsed |
-| `flux_mint_policy` (one-shot mint, Aiken Plutus V3) | Audited, unit-tested, **mainnet mint pending** |
+| `claim_validator` (surrender pool, Aiken Plutus V3) | Audited; **live on mainnet** (surrender pool active) |
+| `flux_mint_policy` (one-shot mint, Aiken Plutus V3) | Audited, unit-tested, **minted on mainnet** (1B cap, policy `7ff33a55…dc66`) |
 | `services/surrender_api.py` (Server A) | Containerized, preprod-tested |
 | `services/cosigner_api.py` (Server B) | Containerized, preprod-tested |
 | `tools/*` (off-chain pipeline) | ~160 pytest tests passing |
 | Preprod rehearsal | 9 / 9 stages + 8 / 8 red-team tests pass |
-| Mainnet deploy | Pending: admin keys, deadline, deploy ceremony |
+| Mainnet deploy | **Done** — surrender/redeem live; claim window closes 2026-11-29 UTC |
 
-**Pre-mainnet readiness:** see [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md).
+**Mainnet runbook (executed):** see [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md).
 
 ---
 
