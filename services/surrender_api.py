@@ -19,6 +19,8 @@ Two-party co-signing flow:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 import json
 import logging
 import os
@@ -30,6 +32,9 @@ from pathlib import Path
 from typing import Any
 
 import cbor2
+import cbor2._decoder
+import cbor2._encoder
+import cbor2._types
 import httpx
 from cbor2 import CBORTag
 from fastapi import FastAPI, HTTPException, Request
@@ -81,6 +86,7 @@ from tools.process_surrender import (
     load_rate_table,
     load_script_from_blueprint,
 )
+from services.defrag import plan_defrag
 from services.pool_tip import (
     PoolSettlingError,
     PoolTipError,
@@ -146,6 +152,17 @@ API_PORT: int = int(os.environ.get("SURRENDER_API_PORT", "8420"))
 #             InvalidWitnessesUTXOW. Broken on 0.18.0 (written for 0.19.x).
 CANON_STRATEGY: str = os.environ.get("CANON_STRATEGY", "hybrid").strip().lower()
 
+# HW-wallet uniform tag-258 set framing (task #485). "on" re-frames every
+# present set-typed field of the built tx as a tag-258 set BEFORE the first
+# signature, so the CIP-21 canonicalizer every hardware-wallet stack runs
+# (cardano-hw-interop-lib inside Eternl/Lace/Typhon/NuFi) is a no-op and the
+# device signs the same blake2b-256 body hash admin_1/admin_2 signed. Kill
+# switch: TAG_SETS_258=off reverts byte-exactly to the pre-fix mixed framing
+# (software wallets keep working; HW wallets fail with the known tag error).
+TAG_SETS_258: bool = os.environ.get("TAG_SETS_258", "on").strip().lower() not in (
+    "off", "0", "false", "no",
+)
+
 # Defrag: default max distinct tokens per lean output when splitting a fat UTxO.
 # Lean UTxOs of this size surrender well within the 16KB limit (a 20-token
 # change output is ~1.4KB). Env-overridable per deployment.
@@ -191,11 +208,87 @@ POOL_TIP_WATCHDOG_INTERVAL_S: float = float(
 )
 
 # ---------------------------------------------------------------------------
-# CBOR constants
+# CBOR constants + pure-cbor2 helpers
 # ---------------------------------------------------------------------------
 
 _PROCESS_SURRENDER_REDEEMER_CBOR = cbor2.dumps(CBORTag(121, []))
 _VOID_DATUM_CBOR = cbor2.dumps(CBORTag(121, []))
+
+# cbor2's C extension decodes tag 258 to an unordered Python set and re-orders
+# set contents by element hash at dumps() time, so it can neither preserve the
+# canonical input order the SPEND redeemer indexes against nor round-trip the
+# bytes the signatures cover. Every byte-level set-framing path below therefore
+# uses cbor2's pure-Python implementation exclusively:
+#   _pure_loads  — order/tag-preserving decode
+#   _pure_dumps  — the C dumps() cannot serialize pure-class CBORTag at all
+#   _PureCBORTag — isinstance() is False across the C/pure class split
+_pure_loads = cbor2._decoder.loads
+_pure_dumps = cbor2._encoder.dumps
+_PureCBORTag = cbor2._types.CBORTag
+
+# pycardano (<0.19) pops cbor2's pure tag-258 semantic decoder at import time;
+# _pure_loads relies on that to see CBORTag(258, [...]) instead of a set. If a
+# pycardano/cbor2 upgrade restores the decoder, fail at import — loudly, before
+# any signature can cover the wrong bytes.
+assert 258 not in cbor2._decoder.semantic_decoders, (
+    "cbor2's pure decoder registers semantic tag 258 — the tag-258 set-framing "
+    "paths need order-preserving CBORTag decoding (pycardano <0.19 removes the "
+    "decoder at import; check pycardano/cbor2 versions)"
+)
+
+# Conway set-typed tx-body keys (conway.cddl: set<a> = #6.258([* a]) / [* a]):
+# 0 inputs, 4 certificates, 13 collateral inputs, 14 required signers,
+# 18 reference inputs, 20 voting proposals. (22 is treasury donation — an int.)
+_BODY_SET_KEYS = (0, 4, 13, 14, 18, 20)
+
+
+def _tag_258(value):
+    """Wrap ``value`` in CBORTag(258) unless it already is one (idempotent;
+    duck-typed because C-class and pure-class tags don't share isinstance)."""
+    if getattr(value, "tag", None) == 258:
+        return value
+    return _PureCBORTag(258, value)
+
+
+def _wrap_body_sets_258(body_cbor: bytes) -> bytes:
+    """Re-frame every present set-typed tx-body field as a tag-258 set,
+    preserving element order and every other field's exact bytes. Hardware
+    wallets enforce CIP-21 all-or-nothing tag framing across the body;
+    uniformly tagged is the fixed point their canonicalizer
+    (makeSetTagsConsistent) transforms toward."""
+    body = _pure_loads(body_cbor)
+    if not isinstance(body, dict):
+        raise ValueError("Tx body is not a CBOR map")
+    for key in _BODY_SET_KEYS:
+        if key in body:
+            body[key] = _tag_258(body[key])
+    return _pure_dumps(body)
+
+
+def _wrap_witness_vkeys_258(ws_cbor: bytes) -> bytes:
+    """Re-frame witness-set key 0 (vkey witnesses) as a tag-258 set. Keys 4
+    (plutus_data) and 5 (redeemers) pass through the pure decode/encode
+    round-trip byte-identically and are never re-framed — the body's
+    script_data_hash commits to their wire bytes."""
+    ws = _pure_loads(ws_cbor)
+    if not isinstance(ws, dict):
+        raise ValueError("Witness set is not a CBOR map")
+    if 0 in ws:
+        ws[0] = _tag_258(ws[0])
+    return _pure_dumps(ws)
+
+
+def _tx_body_bytes(tx_cbor: bytes) -> bytes:
+    """Slice the body element's exact bytes out of a serialized tx (array(4))
+    by walking the CBOR stream — no re-encoding."""
+    if not tx_cbor or tx_cbor[0] != 0x84:
+        raise ValueError("Tx CBOR header is not array(4)")
+    stream = io.BytesIO(tx_cbor)
+    stream.read(1)
+    start = stream.tell()
+    cbor2._decoder.CBORDecoder(stream).decode()
+    return tx_cbor[start:stream.tell()]
+
 
 # ---------------------------------------------------------------------------
 # App state (loaded once on startup)
@@ -1341,8 +1434,16 @@ def _build_cosigned_surrender_tx(
         witness_set = builder.build_witness_set()
         tx_body = _canonicalize_body_and_index_redeemer(tx_body, witness_set, tx_in)
 
-    # Create admin 1 witness (Server A — local key) over the canonical body
-    tx_hash = tx_body.hash()
+    # Create admin 1 witness (Server A — local key) over the canonical body.
+    # TAG_SETS_258: re-frame the body's set fields uniformly as tag-258 FIRST —
+    # all three signatures (admin_1, the cosigner, and the user's HW/software
+    # wallet) must cover the hash of the exact bytes that go on the wire.
+    if TAG_SETS_258:
+        body_bytes = _wrap_body_sets_258(tx_body.to_cbor())
+        tx_hash = hashlib.blake2b(body_bytes, digest_size=32).digest()
+    else:
+        body_bytes = None
+        tx_hash = tx_body.hash()
     admin_signature = state.admin_sk.sign(tx_hash)
     admin_vk_witness = VerificationKeyWitness(
         VerificationKey.from_signing_key(state.admin_sk),
@@ -1361,9 +1462,20 @@ def _build_cosigned_surrender_tx(
         cosigner_witness = _get_cosigner_witness(tx_hash_hex)
         witness_set.vkey_witnesses.append(cosigner_witness)
 
-    # Assemble the partially-signed transaction
+    # Assemble the partially-signed transaction. The pycardano Transaction is
+    # used for structural reads (outputs) only; the wire bytes come from raw
+    # assembly on the tag-258 path — a pycardano re-serialization would re-emit
+    # the body with mixed framing and desync the signed hash from the wire.
     tx = Transaction(tx_body, witness_set)
-    tx_cbor_hex = tx.to_cbor().hex()
+    if TAG_SETS_258:
+        ws_bytes = _wrap_witness_vkeys_258(witness_set.to_cbor())
+        wire = b"\x84" + body_bytes + ws_bytes + b"\xf5\xf6"
+        assert _tx_body_bytes(wire) == body_bytes, (
+            "assembled wire body bytes != the signed body bytes"
+        )
+        tx_cbor_hex = wire.hex()
+    else:
+        tx_cbor_hex = tx.to_cbor().hex()
 
     # Read back output[1] (pool-change->script) for the tip-advance datum
     # guard. Reading the assembled body — not trusting the build inputs — is
@@ -1568,11 +1680,15 @@ def _merge_wallet_witnesses(
     and reassemble. tx_body bytes are preserved verbatim so the wallet's
     Ed25519 signature over blake2b-256(tx_body) remains valid.
 
+    Pure-cbor2 throughout: the C extension decodes a tag-258 vkey set to a
+    Python set of tuples — which the merge loop would silently skip,
+    dropping witnesses — and its dumps() cannot serialize pure-class
+    CBORTag values at all.
+
     Vkey witnesses are deduplicated by public key (some wallets re-emit
     the admin keys they observed in the original witness set; we keep
     one instance each).
     """
-    import io
     if not original_tx_cbor or original_tx_cbor[0] != 0x84:
         raise ValueError("Original tx CBOR header is not array(4)")
 
@@ -1580,26 +1696,30 @@ def _merge_wallet_witnesses(
     stream = io.BytesIO(original_tx_cbor)
     stream.read(1)  # consume 0x84
     body_start = stream.tell()
-    cbor2.CBORDecoder(stream).decode()
+    cbor2._decoder.CBORDecoder(stream).decode()
     body_end = stream.tell()
     ws_start = body_end
-    cbor2.CBORDecoder(stream).decode()
+    cbor2._decoder.CBORDecoder(stream).decode()
     ws_end = stream.tell()
-    tail_bytes = original_tx_cbor[ws_end:]  # is_valid + aux + (optional set tag)
+    tail_bytes = original_tx_cbor[ws_end:]  # is_valid + aux
     body_bytes = original_tx_cbor[body_start:body_end]
-    original_ws = cbor2.loads(original_tx_cbor[ws_start:ws_end])
+    original_ws = _pure_loads(original_tx_cbor[ws_start:ws_end])
     if not isinstance(original_ws, dict):
         raise ValueError("Original witness_set is not a CBOR map")
 
-    wallet_ws = cbor2.loads(wallet_witness_cbor)
+    wallet_ws = _pure_loads(wallet_witness_cbor)
+    if isinstance(wallet_ws, list) and len(wallet_ws) == 4:
+        # HW-wallet stacks may return the ENTIRE signed tx
+        # [body, witness_set, is_valid, aux] instead of a bare witness set.
+        wallet_ws = wallet_ws[1]
     if not isinstance(wallet_ws, dict):
         raise ValueError("Wallet partial witness set is not a CBOR map")
 
     # Extract vkey witnesses from both. Conway encodes the vkey list as
-    # either a plain list `[[pk, sig], ...]` or a tagged set
-    # `cbor2.CBORTag(258, [...])`. Treat them uniformly.
+    # either a plain list `[[pk, sig], ...]` or a tag-258 set. Duck-type
+    # the tag — isinstance is False across cbor2's C/pure class split.
     def _unwrap_vkey_list(value):
-        if isinstance(value, CBORTag):
+        if getattr(value, "tag", None) is not None:
             return list(value.value), value.tag
         return list(value) if value else [], None
 
@@ -1610,16 +1730,16 @@ def _merge_wallet_witnesses(
     seen: set[bytes] = set()
     merged_vkeys: list = []
     for vw in (*orig_vkeys, *wallet_vkeys):
-        if not (isinstance(vw, list) and len(vw) == 2):
+        if not (isinstance(vw, (list, tuple)) and len(vw) == 2):
             continue
         pk = bytes(vw[0])
         if pk in seen:
             continue
         seen.add(pk)
-        merged_vkeys.append(vw)
+        merged_vkeys.append(list(vw))
 
-    original_ws[0] = CBORTag(set_tag, merged_vkeys) if set_tag else merged_vkeys
-    merged_ws_bytes = cbor2.dumps(original_ws)
+    original_ws[0] = _PureCBORTag(set_tag, merged_vkeys) if set_tag else merged_vkeys
+    merged_ws_bytes = _pure_dumps(original_ws)
 
     return b"\x84" + body_bytes + merged_ws_bytes + tail_bytes
 
