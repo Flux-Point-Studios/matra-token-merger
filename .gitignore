@@ -54,3 +54,6 @@ onchain/quarantine_validator/build/
 onchain/**/*.applied-*.json
 audit_pack/preprod_chain_rehearsal/
 scripts/_*
+
+# HW interop gate vendored deps (scripts/hw-gate/package-lock.json is committed)
+scripts/hw-gate/node_modules/

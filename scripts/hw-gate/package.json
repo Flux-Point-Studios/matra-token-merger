@@ -1,0 +1,9 @@
+{
+  "name": "hw-gate",
+  "private": true,
+  "description": "Vendored cardano-hw-interop-lib for scripts/hw_interop_gate.mjs (CIP-21 HW-wallet acceptance gate)",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "cardano-hw-interop-lib": "^3.1.0"
+  }
+}
