@@ -1,0 +1,50 @@
+# Woodpecker pipeline for Flux-Point-Studios/matra-token-merger.
+# Commit this to the repo root as `.woodpecker.yaml` at go-live.
+# Mirrors the old .github/workflows/{aiken,python}.yml checks 1:1.
+#
+# NOTE: the aiken install line is validated in a throwaway container on Node-2
+# at go-live before this pipeline is trusted (aikup pin = v1.1.21, matching the
+# retired setup-aiken@v1 version).
+when:
+  - event: [push, pull_request]
+    branch: main
+
+steps:
+  - name: aiken-claim_validator
+    image: debian:bookworm-slim
+    commands: &aiken
+      - apt-get update -qq && apt-get install -y -qq curl >/dev/null
+      - curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
+      - export PATH="$HOME/.aiken/bin:$PATH"
+      - aikup install v1.1.21   # installs and switches in one step
+      - aiken --version
+      - cd $${VALIDATOR}
+      - aiken check
+      - cp -f plutus.json plutus.committed.json
+      - aiken build
+      - diff -u plutus.committed.json plutus.json   # drift gate (was the CI "no drift" step)
+      - rm -f plutus.committed.json
+    environment:
+      VALIDATOR: onchain/claim_validator
+
+  - name: aiken-flux_mint_policy
+    image: debian:bookworm-slim
+    commands: *aiken
+    environment:
+      VALIDATOR: onchain/flux_mint_policy
+
+  - name: aiken-quarantine_validator
+    image: debian:bookworm-slim
+    commands: *aiken
+    environment:
+      VALIDATOR: onchain/quarantine_validator
+
+  - name: python
+    image: nikolaik/python-nodejs:python3.11-nodejs20   # python+node so the HW interop gate actually runs (not skipped)
+    commands:
+      - python -m pip install --upgrade pip -q
+      - pip install -q -e ".[dev]"
+      # CI-faithful guard: the broken cbor2pure transitive must NOT be present
+      # (pycardano is pinned <0.19.0 to avoid it). Fail loud if it regresses.
+      - if pip show cbor2pure >/dev/null 2>&1; then echo "ERROR cbor2pure present — pycardano cap regressed" >&2; exit 1; fi
+      - pytest -q
