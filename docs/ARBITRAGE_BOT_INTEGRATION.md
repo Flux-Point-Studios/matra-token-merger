@@ -1,7 +1,7 @@
 # Surrender API — cMATRA Arbitrage Bot Integration
 
 The internal cMATRA arbitrage bot (see
-[`saturnswap-filler/docs/ARBITRAGE_BOT.md`](https://github.com/Flux-Point-Studios/saturnswap-filler/blob/main/docs/ARBITRAGE_BOT.md))
+[`SaturnSwapBackend/tools/cmatra-arb-bot/README.md`](https://github.com/Flux-Point-Studios/SaturnSwapBackend/blob/main/tools/cmatra-arb-bot/README.md))
 uses this repo's surrender API as its **merge leg**: it buys AGENT/SHARDS on the
 SaturnSwap order book when the cMATRA book trades rich, surrenders them here at the
 rate-table-locked prices, and sells the minted cMATRA back into the book — pulling the
@@ -36,7 +36,7 @@ All three mutating calls carry `X-API-Secret` (set `SURRENDER_API_SECRET` on the
 ## What the bot refuses to sign
 
 The bot never blind-signs. Before witnessing a built surrender it decodes the tx body
-and enforces (`saturnswap-filler/src/arb/surrenderGuard.ts`):
+and enforces (`SaturnSwapBackend/tools/cmatra-arb-bot/src/surrenderGuard.ts`):
 
 1. exactly the requested legacy quantities leave its holdings;
 2. at least the quoted cMATRA returns to its address;
