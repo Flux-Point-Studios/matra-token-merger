@@ -76,6 +76,7 @@ from pycardano.exception import InvalidTransactionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
 from pycardano.utils import min_lovelace_post_alonzo
 from pycardano.plutus import RedeemerKey, RedeemerMap, RedeemerTag
+from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenList
 
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada
@@ -235,6 +236,30 @@ assert 258 not in cbor2._decoder.semantic_decoders, (
     "paths need order-preserving CBORTag decoding (pycardano <0.19 removes the "
     "decoder at import; check pycardano/cbor2 versions)"
 )
+
+# pycardano (<0.19) also globally replaces cbor2's array decoder to wrap
+# indefinite-length arrays as IndefiniteFrozenList. Its DEFINITE-length branch
+# re-invokes cbor2's decode_array after `_decode_length` already consumed the
+# length prefix, so a definite array whose length needs a following byte (>=24
+# elements, CBOR minor 24-27) has that prefix read twice: the second read
+# treats the first element's bytes as the count and runs off the buffer end
+# (CBORDecodeEOF). It bites `_pure_loads` and every raw CBORDecoder.decode()
+# below whenever a tx body carries a >=24-element set field — 24+ inputs, which
+# a fragmented wallet's coin-selection routinely produces. Reinstall a drop-in
+# that keeps the IndefiniteFrozenList wrap but reads each length exactly once.
+_STOCK_DECODE_ARRAY = cbor2._decoder.CBORDecoder.decode_array
+_INDEFINITE_MINOR = 31  # CBOR additional-info 31 == indefinite length
+
+
+def _decode_array_len_once(self, subtype):
+    if subtype == _INDEFINITE_MINOR:
+        ret = _IndefiniteFrozenList(_STOCK_DECODE_ARRAY(self, subtype))
+        ret.freeze()
+        return ret
+    return _STOCK_DECODE_ARRAY(self, subtype)
+
+
+cbor2._decoder.major_decoders[4] = _decode_array_len_once
 
 # Conway set-typed tx-body keys (conway.cddl: set<a> = #6.258([* a]) / [* a]):
 # 0 inputs, 4 certificates, 13 collateral inputs, 14 required signers,
