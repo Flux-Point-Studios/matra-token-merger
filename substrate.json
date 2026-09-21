@@ -1,0 +1,57 @@
+{
+  "repo": "matra-token-merger",
+  "primitives": [
+    {
+      "id": "cmatra-mint-policy",
+      "name": "cMATRA mint policy",
+      "desc": "One-shot parameterized mint policy for the 1B cMATRA supply, with an invariant rejecting datum-less script outputs.",
+      "kind": "contract",
+      "paths": [
+        "onchain/flux_mint_policy"
+      ],
+      "consumes": [],
+      "status": "live"
+    },
+    {
+      "id": "cmatra-claim-validator",
+      "name": "cMATRA claim validator",
+      "desc": "Dual-admin surrender pool: seven legacy assets in at TWAP-locked rates, cMATRA out, with a fixed redemption deadline.",
+      "kind": "contract",
+      "paths": [
+        "onchain/claim_validator"
+      ],
+      "consumes": [
+        "cmatra-mint-policy"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "cmatra-quarantine-validator",
+      "name": "cMATRA quarantine validator",
+      "desc": "Quarantine script for surrendered legacy assets.",
+      "kind": "contract",
+      "paths": [
+        "onchain/quarantine_validator"
+      ],
+      "consumes": [],
+      "status": "live"
+    },
+    {
+      "id": "surrender-api",
+      "name": "Surrender API",
+      "desc": "Wallet-driven surrender flow: CIP-30 partial-sign, admin co-sign, pool-tip tracking and UTxO defrag tooling.",
+      "kind": "api",
+      "paths": [
+        "services/surrender_api.py",
+        "services/cosigner_api.py",
+        "services/pool_tip.py",
+        "services/defrag.py",
+        "tools"
+      ],
+      "consumes": [
+        "cmatra-claim-validator"
+      ],
+      "status": "live"
+    }
+  ]
+}
