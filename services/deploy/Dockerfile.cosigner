@@ -13,12 +13,12 @@ RUN pip install --no-cache-dir \
     "uvicorn[standard]==0.34.*"
 
 # The co-signer prices surrenders with the same code and data the surrender
-# API uses: the rational-rate helpers in tools/ and the pinned rate table and
-# NFT list in audit_pack/.
-COPY services/__init__.py services/cosigner_api.py services/cosign_policy.py services/
+# API uses: the rational-rate helpers in tools/, the rate table and the
+# redemption pin in audit_pack/.
+COPY services/__init__.py services/cosigner_api.py services/cosign_policy.py services/redemption_ledger.py services/
 COPY tools/__init__.py tools/config.py tools/api_clients.py tools/cardano_utils.py tools/process_surrender.py tools/
 COPY audit_pack/2026-04-19/rate_table_cmatra.json audit_pack/2026-04-19/
-COPY audit_pack/2026-09-27/redeemable_nft_units.json audit_pack/2026-09-27/
+COPY audit_pack/2026-09-27/redemption_pin.json audit_pack/2026-09-27/
 
 EXPOSE 8421
 

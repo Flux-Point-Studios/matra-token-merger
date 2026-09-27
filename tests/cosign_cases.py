@@ -21,10 +21,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
+import nacl.signing
 from pycardano import Address
 
 from services.cosign_policy import (
     CosignConfig,
+    Simple,
     Tag,
     decode,
     split_tx,
@@ -34,7 +36,7 @@ from tools.config import AGENT, T1_ADAM_PASS
 from tools.process_surrender import (
     compute_redemption,
     load_rate_table,
-    load_redeemable_nfts,
+    load_redemption_pin,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,7 +53,9 @@ ADMIN_2 = bytes.fromhex("77fdb621ad5f926257ce1a2f845fc946ae3d5a683ac89128bad3410
 DEADLINE_SLOT = 1_795_910_400 - 1_591_566_291
 ATTACKER = bytes([0x61]) + b"\xee" * 28
 RATES = load_rate_table(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json")
-REDEEMABLE = load_redeemable_nfts(ROOT / "audit_pack/2026-09-27/redeemable_nft_units.json")
+PIN_PATH = ROOT / "audit_pack/2026-09-27/redemption_pin.json"
+PIN = load_redemption_pin(PIN_PATH)
+REDEEMABLE = PIN.nft_units
 
 MAINNET = CosignConfig(
     network="mainnet",
@@ -63,8 +67,16 @@ MAINNET = CosignConfig(
     deadline_slot=DEADLINE_SLOT,
     rate_table=RATES,
     redeemable_nfts=REDEEMABLE,
+    redemption_limits=PIN.remaining,
     max_payout_per_tx=20_000_000 * 10**6,
 )
+# The pin's limits before any surrender landed (nothing quarantined), so the
+# mainnet surrenders can be replayed through a signer's ledger.
+MAINNET_BEFORE_SURRENDERS = replace(MAINNET, redemption_limits={
+    entry["policy_id"] + name: row["supply"] - row["waiver"]
+    for entry in json.loads(PIN_PATH.read_text())["assets"].values()
+    for name, row in entry["units"].items()
+})
 
 # Output layout surrender_api produces (and every golden surrender has).
 PAYOUT, CONTINUATION, QUARANTINE_OUT, CHANGE = 0, 1, 2, 3
@@ -78,10 +90,27 @@ def blake(data: bytes) -> bytes:
     return hashlib.blake2b(data, digest_size=32).digest()
 
 
+def key_hash(vkey: bytes) -> bytes:
+    return hashlib.blake2b(vkey, digest_size=28).digest()
+
+
+def throwaway_key(seed: int) -> nacl.signing.SigningKey:
+    """A deterministic test-only claimant key."""
+    return nacl.signing.SigningKey(blake(b"cosign-test-claimant-%d" % seed))
+
+
+def key_address(key: nacl.signing.SigningKey) -> bytes:
+    """Mainnet enterprise address paying to ``key``."""
+    return bytes([0x61]) + key_hash(bytes(key.verify_key))
+
+
 @lru_cache(maxsize=1)
 def golden() -> dict[str, Any]:
     with gzip.open(GOLDEN_PATH, "rt") as fh:
         return json.load(fh)
+
+
+SURRENDER_HASHES = [t["tx_hash"] for t in golden()["transactions"] if t["kind"] == "surrender"]
 
 
 @dataclass(frozen=True)
@@ -127,6 +156,13 @@ class Draft:
         self.raw_ws: bytes | None = None
         self.drop_parents: set[bytes] = set()
         self.header = b"\x84"
+        self.signer: nacl.signing.SigningKey | None = None
+
+    def sign_as(self, key: nacl.signing.SigningKey) -> None:
+        """Make ``key`` the claimant: its address takes over every claimant
+        input and output, and ``build`` signs the final body with it."""
+        _retarget_claimant(self, key_address(key))
+        self.signer = key
 
     # -- navigation --------------------------------------------------------
 
@@ -188,10 +224,14 @@ class Draft:
                 (tag, refs.index(pool) if tag == 0 else index): value
                 for (tag, index), value in self.ws[5].items()
             }
-        ws_raw = self.raw_ws if self.raw_ws is not None else encode(self.ws)
         if self.rehash and 5 in self.ws:
             self.body[11] = blake(encode(self.ws[5]) + self.language_views)
         body_raw = self.raw_body if self.raw_body is not None else encode(self.body)
+        if self.signer is not None:
+            vkey = bytes(self.signer.verify_key)
+            witness = [vkey, self.signer.sign(blake(body_raw)).signature]
+            self.ws[0] = Tag(258, [witness]) if isinstance(self.ws.get(0), Tag) else [witness]
+        ws_raw = self.raw_ws if self.raw_ws is not None else encode(self.ws)
         parents = tuple(
             encode(p) for p in self.parents if blake(encode(p)) not in self.drop_parents
         )
@@ -244,6 +284,26 @@ def _retarget_claimant(d: Draft, address: bytes) -> None:
         if _address(out) == claimant:
             out[0] = address
     d.body[16][0] = address
+
+
+def another_pool_utxo(d: Draft) -> None:
+    """Spend a different pool UTxO holding one more lovelace, keeping the
+    lovelace the pool retains, so the surrender is otherwise unchanged."""
+    out = copy.deepcopy(d.parent_output(d.pool_ref()))
+    _add_coin(out, 1)
+    d.replace_parent_output(d.pool_ref(), out)
+    _add_coin(d.body[1][CONTINUATION], 1)
+
+
+def without_claimant_witness(s: Scenario) -> Scenario:
+    """``s`` with the claimant's vkey witness taken out of the witness set."""
+    body_raw, ws_raw, tail = split_tx(s.tx)
+    ws = decode(ws_raw)
+    payout = decode(body_raw)[1][PAYOUT]
+    claimant = (payout[0] if isinstance(payout, list) else payout[0])[1:29]
+    kept = [w for w in _elements(ws[0]) if key_hash(w[0]) != claimant]
+    ws[0] = Tag(258, kept) if isinstance(ws[0], Tag) else kept
+    return replace(s, tx=b"\x84" + body_raw + encode(ws) + tail)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +372,17 @@ def input_reference_is_malformed(d):
     d.reindex = False
 
 
+@case("body_shape")
+def inputs_under_a_tag_other_than_the_set_tag(d):
+    d.body[0] = Tag(259, d.inputs())
+
+
+@case("forbidden_body_field")
+def body_key_is_a_boolean(d):
+    """CBOR true is not the integer 1: the ledger refuses a boolean body key."""
+    d.body = {(True if key == 1 else key): value for key, value in d.body.items()}
+
+
 # -- forbidden body fields ---------------------------------------------------
 
 @case("forbidden_body_field")
@@ -355,6 +426,11 @@ def metadata_hash(d):
 
 
 # -- signers, fee, validity, collateral size ---------------------------------
+
+@case("body_shape")
+def required_signers_are_not_key_hashes(d):
+    d.body[14] = [[1], [2]]
+
 
 @case("required_signers")
 def extra_required_signer(d):
@@ -490,6 +566,21 @@ def claimant_on_another_network(d):
     _retarget_claimant(d, bytes([0x60]) + b"\xab" * 28)
 
 
+@case("claimant_not_key_address")
+def claimant_pays_from_a_script_with_a_key_stake_part(d):
+    _retarget_claimant(d, bytes([0x11]) + b"\xab" * 28 + b"\xcd" * 28)
+
+
+@case("claimant_not_key_address")
+def claimant_pays_from_a_script_with_a_script_stake_part(d):
+    _retarget_claimant(d, bytes([0x31]) + b"\xab" * 28 + b"\xcd" * 28)
+
+
+@case("claimant_not_key_address")
+def claimant_pays_from_a_script_pointer_address(d):
+    _retarget_claimant(d, bytes([0x51]) + b"\xab" * 28 + b"\x01\x01\x01")
+
+
 @case("collateral_not_claimant")
 def collateral_taken_from_the_pool(d):
     d.body[13] = Tag(258, [d.pool_ref()])
@@ -556,6 +647,11 @@ def pool_datum_altered(d):
 @case("pool_datum")
 def pool_datum_by_hash(d):
     d.body[1][CONTINUATION][2] = [0, blake(bytes.fromhex("d87980"))]
+
+
+@case("pool_datum")
+def pool_datum_option_is_a_boolean(d):
+    d.body[1][CONTINUATION][2] = [True, Tag(24, bytes.fromhex("d87980"))]
 
 
 @case("pool_output_assets")
@@ -720,6 +816,40 @@ def redeemer_with_a_mint_purpose(d):
     d.ws[5] = {(1, index): value}
 
 
+@case("redeemer_target", base="60d6bb9c53da2c95d59f128b9e65e46aa73062f61ee68f63329ed4f30097935f")
+def redeemer_indexed_in_insertion_order(d):
+    """The pool input sorts second here; index 0 is the builder's insertion
+    order, not the ledger's sorted order."""
+    d.reindex = False
+    (tag, _), value = next(iter(d.ws[5].items()))
+    d.ws[5] = {(tag, 0): value}
+
+
+@case("script_data_hash")
+def witness_datums_left_out_of_script_data_hash(d):
+    d.ws[4] = [Tag(121, [])]
+
+
+@case("redeemers_shape")
+def redeemer_purpose_is_a_boolean(d):
+    (_, index), value = next(iter(d.ws[5].items()))
+    d.ws[5] = {(False, index): value}
+
+
+@case("redeemers_shape")
+def redeemer_index_is_a_boolean(d):
+    d.reindex = False
+    (tag, index), value = next(iter(d.ws[5].items()))
+    d.ws[5] = {(tag, bool(index)): value}
+
+
+@case("redeemers_shape")
+def redeemer_key_is_a_tag(d):
+    d.reindex = False
+    (tag, index), value = next(iter(d.ws[5].items()))
+    d.ws[5] = {Tag(tag, index): value}
+
+
 @case("redeemers_shape")
 def redeemer_entry_malformed(d):
     key = next(iter(d.ws[5]))
@@ -729,6 +859,53 @@ def redeemer_entry_malformed(d):
 @case("redeemers_shape")
 def redeemers_malformed(d):
     d.ws[5] = [[0, 0]]
+
+
+# ---------------------------------------------------------------------------
+# The claimant's signature: surrenders the policy approves, each with the
+# code require_claimant_signature must refuse it with
+# ---------------------------------------------------------------------------
+
+WITNESS_CASES: list[Case] = []
+
+
+def witness_case(expected: str):
+    def register(edit: Callable[[Scenario], Scenario]) -> Callable[[Scenario], Scenario]:
+        WITNESS_CASES.append(Case(edit.__name__, expected, lambda: edit(golden_scenario(BASE_T1))))
+        return edit
+    return register
+
+
+def _edit_witnesses(s: Scenario, edit: Callable[[list, bytes], list]) -> Scenario:
+    """Replace the vkey witnesses with ``edit(witnesses, claimant key hash)``."""
+    body_raw, ws_raw, tail = split_tx(s.tx)
+    ws = decode(ws_raw)
+    payout = decode(body_raw)[1][PAYOUT]
+    ws[0] = edit(_elements(ws[0]), payout[0][1:29])
+    return replace(s, tx=b"\x84" + body_raw + encode(ws) + tail)
+
+
+@witness_case("claimant_witness")
+def claimant_witness_removed(s):
+    return without_claimant_witness(s)
+
+
+@witness_case("claimant_witness")
+def claimant_signature_altered(s):
+    def edit(witnesses, claimant):
+        return [[vk, sig[:-1] + bytes([sig[-1] ^ 1])] if key_hash(vk) == claimant else [vk, sig]
+                for vk, sig in witnesses]
+    return _edit_witnesses(s, edit)
+
+
+@witness_case("witness_shape")
+def vkey_witness_without_a_signature(s):
+    return _edit_witnesses(s, lambda witnesses, _: [[vk] for vk, _ in witnesses])
+
+
+@witness_case("witness_shape")
+def vkey_witnesses_not_a_set(s):
+    return _edit_witnesses(s, lambda witnesses, _: 5)
 
 
 # ---------------------------------------------------------------------------
@@ -757,7 +934,9 @@ DECODE_ACCEPTED: list[tuple[bytes, Any]] = [
     (b"\x5f\x41\x01\x41\x02\xff", b"\x01\x02"),
     (b"\xd9\x01\x02\x80", Tag(258, [])),
     (b"\x3a\x00\x01\x86\x9f", -100_000),
-    (b"\xf5", True),
+    (b"\xf5", Simple.TRUE),
+    (b"\xf4", Simple.FALSE),
+    (b"\xf6", None),
 ]
 
 # Transactions whose final item is cut short: the decoder must say "cbor"

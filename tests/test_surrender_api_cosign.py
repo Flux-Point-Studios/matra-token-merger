@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import nacl.signing
@@ -33,19 +34,20 @@ from pycardano import (
     Value,
     plutus_script_hash,
 )
-from pycardano.hash import ScriptHash, TransactionId, VerificationKeyHash
+from pycardano.hash import ScriptHash, TransactionId
 
 import services.cosigner_api as cosigner
 import services.surrender_api as api
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
+from services.redemption_ledger import RedemptionLedger
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
-from tools.process_surrender import load_rate_table, load_redeemable_nfts, surrendered_entitlement
+from tools.process_surrender import load_rate_table, load_redemption_pin, surrendered_entitlement
 
 ROOT = Path(__file__).resolve().parent.parent
 RATES = load_rate_table(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json")
-REDEEMABLE = load_redeemable_nfts(ROOT / "audit_pack/2026-09-27/redeemable_nft_units.json")
+REDEEMABLE = load_redemption_pin(ROOT / "audit_pack/2026-09-27/redemption_pin.json").nft_units
 T1_UNITS = sorted(u for u in REDEEMABLE if u.startswith(T1_ADAM_PASS.policy_id))
 FLUX_UNIT = next(u for u in sorted(REDEEMABLE) if u.startswith(FLUX_PASS.policy_id))
 MAINNET_USER = (
@@ -154,8 +156,10 @@ class World:
         script = PlutusV3Script(bytes.fromhex(_SCRIPT_HEX))
         self.pool_addr = Address(plutus_script_hash(script), network=Network.TESTNET)
         self.quarantine_addr = Address(ScriptHash(b"\x55" * 28), network=Network.TESTNET)
-        self.user_addr = Address(VerificationKeyHash(b"\x22" * 28), network=Network.TESTNET)
+        self.user_sk = PaymentSigningKey.generate()
+        self.user_addr = Address(self.user_sk.to_verification_key().hash(), network=Network.TESTNET)
         self.chain: dict[str, bytes] = {}
+        self.submitted: list[bytes] = []
 
         agent = MultiAsset()
         agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 5_000})
@@ -200,6 +204,8 @@ class World:
         self.signed_by_admin: list[bytes] = []
         self.cosign_calls = 0
         self._wire_surrender_api(env)
+        self.primary_ledger = RedemptionLedger(str(tmp_path / "primary.sqlite3"), 10**15)
+        monkeypatch.setattr(api.state, "ledger", self.primary_ledger)
 
     def _produce(self, outputs) -> str:
         body = TransactionBody(
@@ -231,6 +237,10 @@ class World:
                     raise RuntimeError(f"404 {tx_hash}")
                 return b"\x84" + world.chain[tx_hash] + b"\xa0\xf5\xf6"
 
+            def submit_tx(self, tx):
+                world.submitted.append(tx)
+                return hashlib.blake2b(split_tx(tx)[0], digest_size=32).hexdigest()
+
         def post(url, json, headers, timeout):
             assert url == "http://cosigner.test/cosign"
             world.cosign_calls += 1
@@ -255,6 +265,13 @@ class World:
         m.setattr(api.state, "bf", _BF())
         m.setattr(api.state, "built_bodies", {})
         m.setattr(api.state, "cosign_config", load_config(env, [admin_pkh.payload, cosigner_pkh.payload]))
+        m.setattr(api, "ALLOWED_USER_ADDRESSES", frozenset())
+        m.setattr(api.state, "rate_table", RATES)
+        m.setattr(api.state, "redeemable_nfts", REDEEMABLE)
+        m.setattr(api.state, "tip_mgr", PoolTipManager(
+            lambda: [world.pool_utxo], script_address=self.pool_addr.encode(), depth_cap=8))
+        for stash in ("pending_tx_hashes", "pending_tx_cbor", "build_ctx", "cosign_inputs"):
+            m.setattr(api.state, stash, {})
         api.state.reserved_collateral.clear()
         api.state.user_pending.clear()
 
@@ -263,13 +280,32 @@ class World:
 
     def cosigned_rows(self) -> int:
         with sqlite3.connect(self.ledger) as conn:
-            return conn.execute("SELECT COUNT(*) FROM cosigned").fetchone()[0]
+            return conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0]
 
     def build(self, total: int, legacy_qty: int = 1_000, pool_utxo=None, user_inputs=None):
         legacy = [{"policy_hex": AGENT_POLICY, "asset_hex": AGENT_NAME, "quantity": legacy_qty}]
-        return api._build_cosigned_surrender_tx(
+        return api._build_surrender_tx(
             self.user_addr.encode(), total, legacy, pool_utxo or self.pool_utxo, user_inputs,
         )
+
+    def build_route(self, agent: int) -> api.BuildSurrenderResponse:
+        """POST /build-surrender for ``agent`` AGENT from the claimant."""
+        request = api.BuildSurrenderRequest(
+            user_address=self.user_addr.encode(),
+            assets=[api.AssetToSurrender(asset_key="AGENT", quantity_base=agent)],
+        )
+        # A pool tip left locked by an earlier call would hang here, not fail.
+        return asyncio.run(asyncio.wait_for(api.build_surrender(request), timeout=30))
+
+    def wallet_witnesses(self, tx_hash: str, key: PaymentSigningKey | None = None) -> str:
+        """What CIP-30 signTx(partialSign=true) returns for ``tx_hash``."""
+        key = key or self.user_sk
+        signature = key.sign(bytes.fromhex(tx_hash))
+        return api.cbor2.dumps({0: [[key.to_verification_key().payload, signature]]}).hex()
+
+    def submit_route(self, tx_hash: str, witnesses_hex: str) -> api.SubmitResponse:
+        return asyncio.run(api.submit_surrender(
+            api.SubmitRequest(tx_cbor_hex=witnesses_hex, tx_hash=tx_hash)))
 
 
 @pytest.fixture
@@ -289,13 +325,43 @@ def _vkey_witnesses(tx_hex: str) -> list:
     return list(vkeys.value) if hasattr(vkeys, "tag") else vkeys
 
 
-def test_valid_surrender_carries_both_admin_signatures(world):
-    tx_hex, tx_hash, _, _ = world.build(_entitlement(1_000))
-    witnesses = {bytes(vk): bytes(sig) for vk, sig in _vkey_witnesses(tx_hex)}
-    cosigner_vk = bytes(world.cosigner_sk.to_verification_key().payload)
-    nacl.signing.VerifyKey(cosigner_vk).verify(bytes.fromhex(tx_hash), witnesses[cosigner_vk])
-    assert bytes(world.admin_sk.to_verification_key().payload) in witnesses
+def _vk(key: PaymentSigningKey) -> bytes:
+    return bytes(key.to_verification_key().payload)
+
+
+def test_a_build_asks_the_cosigner_for_nothing(world):
+    """/build-surrender needs nothing but an address, so what it returns never
+    carries the second signature and never spends the co-signer's budget."""
+    for _ in range(3):
+        tx_hex, _, _, _ = world.build(_entitlement(1_000))
+        assert {bytes(vk) for vk, _ in _vkey_witnesses(tx_hex)} == {_vk(world.admin_sk)}
+    assert world.cosign_calls == 0
+    assert world.cosigned_rows() == 0
+
+
+def test_submit_cosigns_after_the_claimant_signs(world):
+    built = world.build_route(1_000)
+    assert world.cosign_calls == 0
+    resp = world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert resp.tx_hash == built.tx_hash
+    assert world.cosign_calls == 1
     assert world.cosigned_rows() == 1
+    (tx,) = world.submitted
+    witnesses = {bytes(vk): bytes(sig) for vk, sig in _vkey_witnesses(tx.hex())}
+    assert set(witnesses) == {_vk(world.user_sk), _vk(world.admin_sk), _vk(world.cosigner_sk)}
+    for vkey, signature in witnesses.items():
+        nacl.signing.VerifyKey(vkey).verify(bytes.fromhex(built.tx_hash), signature)
+
+
+def test_submit_signed_by_another_key_is_refused_before_the_cosigner(world):
+    built = world.build_route(1_000)
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash, PaymentSigningKey.generate()))
+    assert err.value.status_code == 400
+    assert world.cosign_calls == 0
+    assert world.cosigned_rows() == 0
+    assert world.submitted == []
+    world.build_route(1_000)  # the refused surrender released the pool tip
 
 
 def test_inflated_payout_is_refused_before_either_admin_signs(world):
@@ -310,21 +376,65 @@ def test_inflated_payout_is_refused_before_either_admin_signs(world):
 def test_cosigner_refuses_even_if_the_primary_skips_its_own_check(world, monkeypatch):
     """The co-signer checks independently: a primary that skips its own check
     still does not obtain the second signature."""
-    monkeypatch.setattr(api, "check_surrender", lambda *a, **k: None)
+    real = api._price_request
+
+    def inflated(assets):
+        total, summary, legacy = real(assets)
+        return total * 100, summary, legacy
+
+    monkeypatch.setattr(api, "_price_request", inflated)
+    monkeypatch.setattr(api, "_check_locally", lambda *a, **k: None)
+    built = world.build_route(1_000)
     with pytest.raises(HTTPException) as err:
-        world.build(_entitlement(1_000) * 100)
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
     assert err.value.status_code == 503
     assert world.cosign_calls == 1
     assert world.cosigned_rows() == 0
+    assert world.submitted == []
 
 
-def test_chained_chunk_resolves_its_unconfirmed_parents_from_built_bodies(world):
-    first_hex, first_hash, pool_out, user_change = world.build(_entitlement(1_000))
-    assert first_hash not in world.chain  # still "in the mempool" for Blockfrost
-    chained_pool = {"tx_hash": first_hash, "output_index": 1,
-                    "cmatra_amount": pool_out["cmatra_amount"], "ada_amount": pool_out["ada_amount"]}
-    _, second_hash, _, _ = world.build(
-        _entitlement(2_000), legacy_qty=2_000, pool_utxo=chained_pool, user_inputs=user_change,
-    )
-    assert second_hash != first_hash
+def test_chained_surrender_is_cosigned_while_its_parent_is_in_the_mempool(world):
+    first = world.build_route(1_000)
+    world.submit_route(first.tx_hash, world.wallet_witnesses(first.tx_hash))
+    second = world.build_route(2_000)
+    assert first.tx_hash not in world.chain  # still "in the mempool" for Blockfrost
+    world.submit_route(second.tx_hash, world.wallet_witnesses(second.tx_hash))
+    assert second.tx_hash != first.tx_hash
     assert world.cosigned_rows() == 2
+    assert len(world.submitted) == 2
+
+
+def test_primary_refuses_a_unit_past_its_limit_before_signing(world, monkeypatch):
+    cfg = api.state.cosign_config
+    limits = {**cfg.redemption_limits, AGENT.unit: 999}
+    monkeypatch.setattr(api.state, "cosign_config", replace(cfg, redemption_limits=limits))
+    with pytest.raises(CosignRejected) as err:
+        world.build(_entitlement(1_000))
+    assert err.value.code == "redemption_limit"
+    assert world.signed_by_admin == []
+    assert world.cosign_calls == 0
+
+
+def test_submit_after_the_build_was_forgotten_asks_for_a_rebuild(world):
+    built = world.build_route(1_000)
+    api.state.cosign_inputs.pop(built.tx_hash)
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 409
+    assert world.cosign_calls == 0
+    assert world.submitted == []
+    world.build_route(1_000)  # the pool tip was released
+
+
+def test_unwritable_primary_ledger_refuses_with_a_code(world):
+    built = world.build_route(1_000)
+    Path(world.primary_ledger.path).chmod(0o400)
+    try:
+        with pytest.raises(HTTPException) as err:
+            world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    finally:
+        Path(world.primary_ledger.path).chmod(0o600)
+    assert err.value.status_code == 503
+    assert err.value.detail["code"] == "ledger_unavailable"
+    assert world.submitted == []
+    world.build_route(1_000)  # the pool tip was released

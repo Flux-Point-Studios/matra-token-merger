@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.cosign_policy import Tag
+from services.cosign_policy import Simple, Tag
 
 
 def _head(major: int, arg: int) -> bytes:
@@ -26,6 +26,8 @@ def encode(value: Any) -> bytes:
         return b"\xf5"
     if value is None:
         return b"\xf6"
+    if isinstance(value, Simple):
+        return bytes([0xE0 | value.value])
     if isinstance(value, Tag):
         return _head(6, value.tag) + encode(value.value)
     if isinstance(value, int):

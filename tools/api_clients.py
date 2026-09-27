@@ -199,6 +199,10 @@ class BlockfrostClient:
         """Return all assets minted under *policy_id* (auto-paged)."""
         return self._get_all_pages(f"/assets/policy/{policy_id}")
 
+    def get_asset_history(self, unit: str) -> list[dict[str, Any]]:
+        """Every mint and burn of *unit*, oldest first (auto-paged)."""
+        return self._get_all_pages(f"/assets/{unit}/history", extra_params={"order": "asc"})
+
     # -- protocol params -------------------------------------------------
 
     def get_protocol_parameters(self) -> dict[str, Any]:

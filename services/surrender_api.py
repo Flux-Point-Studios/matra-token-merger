@@ -7,13 +7,17 @@ Wraps tools/process_surrender.py to provide HTTP endpoints for:
   - Submitting fully-signed transactions
   - Pool status queries
 
-Two-party co-signing flow:
+Signing flow:
   1. Frontend sends user's address + assets to surrender
   2. Server builds tx: pool UTxO (script) + user UTxOs → cMATRA to user + legacy to quarantine
-  3. Server signs with admin key (partial: only admin witness)
-  4. Returns partially-signed CBOR hex to frontend
-  5. Frontend wallet adds user's signature via CIP-30 signTx
-  6. Frontend sends fully-signed CBOR back for submission
+  3. Server checks it with the co-signer's policy and signs with admin key 1
+  4. Returns the partially-signed CBOR hex to the frontend
+  5. Frontend wallet adds the user's signature via CIP-30 signTx
+  6. Frontend sends the wallet's witnesses back; the server checks the user's
+     signature, gets admin key 2's from the co-signer (which checks everything
+     again) and submits
+A build needs nothing but an address, so nothing is counted against the
+co-signer's cap or a unit's redemption limit until the user has signed.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import sys
 import time
 import uuid
@@ -84,19 +89,23 @@ from tools.process_surrender import (
     compute_redemption,
     find_pool_utxos,
     load_rate_table,
-    load_redeemable_nfts,
+    load_redemption_pin,
     load_script_from_blueprint,
     surrendered_entitlement,
 )
 from services.cosign_policy import (
     DEFAULT_RATE_TABLE_PATH,
-    DEFAULT_REDEEMABLE_NFTS_PATH,
+    DEFAULT_REDEMPTION_PIN_PATH,
+    Approval,
     CosignConfig,
+    CosignRejected,
     load_config,
+    require_claimant_signature,
     slot_at,
     split_tx,
 )
 from services.cosign_policy import evaluate_surrender as check_surrender
+from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
 from services.pool_tip import (
     PoolSettlingError,
@@ -114,8 +123,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 ADMIN_SKEY_PATH: str = os.environ.get("ADMIN_SKEY_PATH", "")
 RATE_TABLE_PATH: str = os.environ.get("RATE_TABLE_PATH") or str(DEFAULT_RATE_TABLE_PATH)
-REDEEMABLE_NFTS_PATH: str = (
-    os.environ.get("REDEEMABLE_NFTS_PATH") or str(DEFAULT_REDEEMABLE_NFTS_PATH)
+REDEMPTION_PIN_PATH: str = (
+    os.environ.get("REDEMPTION_PIN_PATH") or str(DEFAULT_REDEMPTION_PIN_PATH)
 )
 BLUEPRINT_PATH: str = os.environ.get(
     "BLUEPRINT_PATH",
@@ -190,10 +199,15 @@ COLLATERAL_UTXO: str = os.environ.get("COLLATERAL_UTXO", "")
 COSIGNER_URL: str = os.environ.get("COSIGNER_URL", "")
 COSIGNER_SECRET: str = os.environ.get("COSIGNER_API_SECRET", "")
 COSIGNER_PKH: str = os.environ.get("COSIGNER_PKH", "")
+# This service's own record of co-signed surrenders, held to the same 24-hour
+# cap and pinned unit limits as the co-signer's.
+SURRENDER_LEDGER_PATH: str = os.environ.get("SURRENDER_LEDGER_PATH", "")
+MAX_CMATRA_PER_DAY: str = os.environ.get("MAX_CMATRA_PER_DAY", "")
 
 # Bodies of the transactions this service built, kept so a chained surrender
 # can hand the co-signer the producing body of an input Blockfrost cannot
-# serve yet. Far above the pool-tip depth cap.
+# serve yet, and what each build needs to be co-signed at submit. Far above
+# the pool-tip depth cap.
 BUILT_BODIES_KEPT = 256
 
 # Shared secret — the Next.js proxy must send this in X-API-Secret header.
@@ -337,7 +351,10 @@ class AppState:
     # The co-signer's own policy, run here first: this service refuses to sign
     # a transaction the co-signer would refuse.
     cosign_config: CosignConfig | None = None
+    ledger: RedemptionLedger | None = None
     built_bodies: dict[str, bytes] = {}
+    # tx hash -> (producing bodies, language views) for the co-signer.
+    cosign_inputs: dict[str, tuple[list[bytes], bytes]] = {}
     bf: BlockfrostClient | None = None
 
     # Tracks tx hashes built by this service.  submit-surrender only allows
@@ -522,7 +539,7 @@ async def startup():
     logger.info(
         "Loaded rate table: %d token(s)", len(state.rate_table.get("tokens", {}))
     )
-    state.redeemable_nfts = load_redeemable_nfts(Path(REDEEMABLE_NFTS_PATH))
+    state.redeemable_nfts = load_redemption_pin(Path(REDEMPTION_PIN_PATH)).nft_units
     logger.info("Loaded %d redeemable NFT unit(s)", len(state.redeemable_nfts))
 
     # Script
@@ -573,14 +590,17 @@ async def startup():
     # Dual-admin mode: the co-signer's key hash is a required signer, and its
     # policy (with both admins) is checked locally before either key signs.
     if COSIGNER_URL:
-        if not COSIGNER_PKH or state.admin_pkh is None:
-            raise RuntimeError("COSIGNER_URL needs COSIGNER_PKH and the admin key")
+        if not (COSIGNER_PKH and SURRENDER_LEDGER_PATH and MAX_CMATRA_PER_DAY) or state.admin_pkh is None:
+            raise RuntimeError(
+                "COSIGNER_URL needs COSIGNER_PKH, SURRENDER_LEDGER_PATH, MAX_CMATRA_PER_DAY and the admin key"
+            )
         state.cosigner_pkh = VerificationKeyHash(bytes.fromhex(COSIGNER_PKH))
         state.cosign_config = load_config(
             {**os.environ, "RATE_TABLE_PATH": RATE_TABLE_PATH,
-             "REDEEMABLE_NFTS_PATH": REDEEMABLE_NFTS_PATH},
+             "REDEMPTION_PIN_PATH": REDEMPTION_PIN_PATH},
             [state.admin_pkh.payload, state.cosigner_pkh.payload],
         )
+        state.ledger = RedemptionLedger(SURRENDER_LEDGER_PATH, int(MAX_CMATRA_PER_DAY))
         logger.info("Co-signer PKH: %s", COSIGNER_PKH[:16])
 
     # Pool-tip chainer. Seeds lazily on the first build (so startup never
@@ -769,7 +789,7 @@ def _build_tx_blocking(
     skipped: the generous seed execution units (set in the builder) cover the
     trivial validator, and the script was already proven valid by the confirmed
     root of the same chain. The submit itself is the authoritative check."""
-    tx_cbor_hex, tx_hash, built_pool_output, user_change = _build_cosigned_surrender_tx(
+    tx_cbor_hex, tx_hash, built_pool_output, user_change = _build_surrender_tx(
         user_address=user_address,
         total_cmatra=total_cmatra,
         legacy_assets=legacy_assets,
@@ -905,6 +925,10 @@ async def build_surrender(req: BuildSurrenderRequest):
             raise size_exc
         logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed. Please try again.")
+    except CosignRejected as e:
+        state.tip_mgr.release_build(build_token)
+        logger.warning("Refused to build a surrender for %s: %s", req.user_address[:24], e)
+        raise HTTPException(422, {"code": e.code, "message": e.detail})
     except Exception:
         state.tip_mgr.release_build(build_token)
         logger.exception("Failed to build/preflight surrender tx for %s", req.user_address[:24])
@@ -937,10 +961,10 @@ async def build_surrender(req: BuildSurrenderRequest):
 def _get_cosigner_witness(
     tx_cbor: bytes, parent_bodies: list[bytes], language_views: bytes,
 ) -> VerificationKeyWitness:
-    """Ask the co-signer to verify and sign the transaction. It re-checks the
-    whole transaction against its own policy, so it gets the transaction, the
-    bodies that produced its inputs and the language views that close its
-    script_data_hash.
+    """Ask the co-signer to verify and sign the claimant-signed transaction.
+    It re-checks the whole transaction against its own policy and ledger, so
+    it gets the transaction, the bodies that produced its inputs and the
+    language views that close its script_data_hash.
 
     Returns a VerificationKeyWitness ready to merge into the witness set.
     """
@@ -1017,10 +1041,47 @@ def _tx_too_large_http_exception(
     )
 
 
-def _remember_body(tx_hash_hex: str, body: bytes) -> None:
-    state.built_bodies[tx_hash_hex] = body
-    while len(state.built_bodies) > BUILT_BODIES_KEPT:
-        del state.built_bodies[next(iter(state.built_bodies))]
+def _keep_recent(store: dict[str, Any], tx_hash_hex: str, value: Any) -> None:
+    store[tx_hash_hex] = value
+    while len(store) > BUILT_BODIES_KEPT:
+        del store[next(iter(store))]
+
+
+def _check_locally(
+    tx: bytes, parent_bodies: list[bytes], language_views: bytes, now: float, signed: bool,
+) -> Approval:
+    """Run the co-signer's checks here first, against this service's own
+    ledger, so it never signs, or asks the co-signer to sign, what the
+    co-signer would refuse. ``signed``: the claimant has signed, so check
+    their signature too."""
+    cfg = state.cosign_config
+    approval = check_surrender(tx, language_views, parent_bodies, slot_at(now, cfg.network), cfg)
+    if signed:
+        require_claimant_signature(tx, approval)
+    state.ledger.check(approval, now, cfg.redemption_limits)
+    return approval
+
+
+def _cosign(tx_hash_hex: str, tx: bytes) -> bytes:
+    """The claimant-signed ``tx`` with the co-signer's witness added, once
+    both this service and the co-signer have checked and recorded it."""
+    inputs = state.cosign_inputs.get(tx_hash_hex)
+    if inputs is None:
+        raise HTTPException(409, {"code": "build_expired", "message": "Please build the surrender again."})
+    parent_bodies, language_views = inputs
+    now = time.time()
+    try:
+        approval = _check_locally(tx, parent_bodies, language_views, now, signed=True)
+        witness = _get_cosigner_witness(tx, parent_bodies, language_views)
+        state.ledger.record(approval, now, state.cosign_config.redemption_limits)
+    except CosignRejected as exc:
+        logger.warning("Refused to co-sign %s: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(400, {"code": exc.code, "message": exc.detail})
+    except sqlite3.Error as exc:
+        logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})
+    witnesses = cbor2.dumps({0: [[witness.vkey.payload, witness.signature]]})
+    return _merge_wallet_witnesses(tx, witnesses)
 
 
 def _producing_bodies(tx_body: TransactionBody) -> list[bytes]:
@@ -1256,14 +1317,14 @@ def _confirmed_ada_only_utxos(
     return out
 
 
-def _build_cosigned_surrender_tx(
+def _build_surrender_tx(
     user_address: str,
     total_cmatra: int,
     legacy_assets: list[dict[str, Any]],
     pool_utxo: dict[str, Any],
     user_inputs: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str, dict[str, Any] | None, list[dict[str, Any]]]:
-    """Build a surrender tx and partially sign with admin key(s).
+    """Build a surrender tx and sign it with admin key 1.
 
     Transaction structure:
       Inputs:
@@ -1273,10 +1334,11 @@ def _build_cosigned_surrender_tx(
         1. cMATRA to user_address
         2. Remaining pool balance back to script_address (void datum)
         3. Legacy assets to quarantine_address
-      Required signer: admin PKH
+      Required signers: both admin PKHs
 
-    The builder auto-selects user UTxOs for the legacy assets + fees.
-    Admin signs the script spend. User must add their signature via wallet.
+    The builder auto-selects user UTxOs for the legacy assets + fees. Admin 1
+    signs the script spend; the user adds their signature via wallet, and
+    /submit-surrender then gets admin 2's from the co-signer.
 
     ``user_inputs`` (chained path): the user's pending change UTxOs from the
     prior chunk, added as EXPLICIT inputs instead of Blockfrost address
@@ -1498,18 +1560,16 @@ def _build_cosigned_surrender_tx(
     # wallet) must cover the hash of the exact bytes that go on the wire.
     body_bytes = _wrap_body_sets_258(tx_body.to_cbor()) if TAG_SETS_258 else tx_body.to_cbor()
     tx_hash = hashlib.blake2b(body_bytes, digest_size=32).digest()
-    _remember_body(tx_hash.hex(), body_bytes)
+    _keep_recent(state.built_bodies, tx_hash.hex(), body_bytes)
 
-    # Check the transaction with the co-signer's own policy before either
-    # admin signs it: the co-signer would refuse it anyway.
+    # Check the transaction with the co-signer's own policy and limits before
+    # admin 1 signs it; the co-signer is asked only once the claimant signs.
     if COSIGNER_URL:
         unsigned_tx = b"\x84" + body_bytes + witness_set.to_cbor() + b"\xf5\xf6"
         parent_bodies = _producing_bodies(tx_body)
         language_views = _language_views(context)
-        check_surrender(
-            unsigned_tx, language_views, parent_bodies,
-            slot_at(time.time(), state.cosign_config.network), state.cosign_config,
-        )
+        _check_locally(unsigned_tx, parent_bodies, language_views, time.time(), signed=False)
+        _keep_recent(state.cosign_inputs, tx_hash.hex(), (parent_bodies, language_views))
 
     # Create admin 1 witness (Server A — local key) over the canonical body.
     admin_signature = state.admin_sk.sign(tx_hash)
@@ -1522,11 +1582,7 @@ def _build_cosigned_surrender_tx(
         witness_set.vkey_witnesses = []
     witness_set.vkey_witnesses.append(admin_vk_witness)
 
-    # Get admin 2 witness from co-signer service (Server B).
     tx_hash_hex = tx_hash.hex()
-    if COSIGNER_URL:
-        cosigner_witness = _get_cosigner_witness(unsigned_tx, parent_bodies, language_views)
-        witness_set.vkey_witnesses.append(cosigner_witness)
 
     # Assemble the partially-signed transaction. The pycardano Transaction is
     # used for structural reads (outputs) only; the wire bytes come from raw
@@ -1833,23 +1889,33 @@ async def submit_surrender(req: SubmitRequest):
 
     ctx = state.build_ctx.get(tx_hash_hex)
 
+    def abandon() -> None:
+        """Tip unchanged: release the single-flight lock so the next
+        surrender can proceed off the still-confirmed tip."""
+        if ctx and state.tip_mgr is not None:
+            state.tip_mgr.release_build(ctx["build_token"])
+        state.pending_tx_hashes.pop(tx_hash_hex, None)
+        state.pending_tx_cbor.pop(tx_hash_hex, None)
+        state.build_ctx.pop(tx_hash_hex, None)
+
     try:
         merged_tx_bytes = _merge_wallet_witnesses(original_cbor, wallet_ws_bytes)
     except Exception as e:
         logger.warning("Witness merge failed for tx %s: %s", tx_hash_hex[:16], e)
         raise HTTPException(400, "Malformed witness set CBOR")
 
+    if COSIGNER_URL:
+        try:
+            merged_tx_bytes = await asyncio.to_thread(_cosign, tx_hash_hex, merged_tx_bytes)
+        except HTTPException:
+            abandon()
+            raise
+
     try:
         submitted_hash = await asyncio.to_thread(state.bf.submit_tx, merged_tx_bytes)
     except Exception as e:
-        # Submit rejected — tip unchanged, release the single-flight lock so
-        # the next surrender can proceed off the still-confirmed tip.
         logger.error("Submit failed for tx %s: %s", tx_hash_hex[:16], e)
-        if ctx and state.tip_mgr is not None:
-            state.tip_mgr.release_build(ctx["build_token"])
-        state.pending_tx_hashes.pop(tx_hash_hex, None)
-        state.pending_tx_cbor.pop(tx_hash_hex, None)
-        state.build_ctx.pop(tx_hash_hex, None)
+        abandon()
         raise HTTPException(400, "Transaction submission failed")
 
     # Mempool-accept. Advance the tip, running the datum + balance guards
@@ -1915,7 +1981,8 @@ def evaluate_surrender(req: BuildSurrenderRequest):
 
     Identical to build-surrender but instead of returning CBOR for signing,
     it runs Blockfrost evaluate_tx to verify the Plutus script executes
-    correctly with real mainnet UTxOs.  Returns execution units and fee.
+    correctly with real mainnet UTxOs.  Returns execution units and fee. The
+    co-signer is never asked: evaluation runs scripts, not signature checks.
 
     Use this to validate the full pipeline before opening the window.
     """
@@ -1951,7 +2018,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     # diagnostic that never submits, so it reads the pool directly (not the
     # chained tip) and discards the built pool output.
     try:
-        tx_cbor_hex, tx_hash_hex, _, _ = _build_cosigned_surrender_tx(
+        tx_cbor_hex, tx_hash_hex, _, _ = _build_surrender_tx(
             user_address=req.user_address,
             total_cmatra=total_cmatra,
             legacy_assets=all_legacy_assets,
@@ -1966,6 +2033,8 @@ def evaluate_surrender(req: BuildSurrenderRequest):
             raise size_exc
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")
+    except CosignRejected as e:
+        raise HTTPException(422, {"code": e.code, "message": e.detail})
     except Exception:
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")

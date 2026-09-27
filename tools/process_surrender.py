@@ -29,6 +29,7 @@ import argparse
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -54,8 +55,14 @@ from pycardano import (
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
 
 from tools.api_clients import BlockfrostClient
-from tools.cardano_utils import estimate_min_ada, payment_key_hash_from_skey
-from tools.config import FLUX_DECIMALS, LEGACY_TOKENS, NFT_COLLECTIONS, PUBLIC_POOL_BASE
+from tools.cardano_utils import estimate_min_ada
+from tools.config import (
+    ALL_MERGE_ASSETS,
+    FLUX_DECIMALS,
+    LEGACY_TOKENS,
+    NFT_COLLECTIONS,
+    PUBLIC_POOL_BASE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,20 +198,40 @@ def compute_redemption(
     return redemption
 
 
-def load_redeemable_nfts(path: Path) -> frozenset[str]:
-    """Load the pinned NFT units (policy hex + asset-name hex) that may be
-    surrendered, checking each collection's policy against tools.config.
+@dataclass(frozen=True)
+class RedemptionPin:
+    """What may still be surrendered, from a pin written by
+    scripts/pin_redemption.py."""
 
-    Raises ValueError if a collection is missing or pinned under another policy.
+    nft_units: frozenset[str]
+    """Every NFT unit (policy hex + asset-name hex) that existed at the pin."""
+    remaining: Mapping[str, int]
+    """Per unit, NFT or fungible: its supply at the pin, less the team waiver,
+    less what the quarantine address already held (never below zero)."""
+
+
+def load_redemption_pin(path: Path) -> RedemptionPin:
+    """Load a redemption pin, checking every merge asset is pinned under its
+    configured policy and a fungible only as its configured token.
+
+    Raises ValueError otherwise.
     """
     doc = json.loads(Path(path).read_text())
-    units: set[str] = set()
-    for nft in NFT_COLLECTIONS:
-        entry = doc["collections"].get(nft.name)
-        if entry is None or entry["policy_id"] != nft.policy_id:
-            raise ValueError(f"{path}: {nft.name} is not pinned under {nft.policy_id}")
-        units.update(nft.policy_id + name for name in entry["asset_names"])
-    return frozenset(units)
+    nft_units: set[str] = set()
+    remaining: dict[str, int] = {}
+    for asset in ALL_MERGE_ASSETS:
+        entry = doc["assets"].get(asset.name)
+        if entry is None or entry["policy_id"] != asset.policy_id:
+            raise ValueError(f"{path}: {asset.name} is not pinned under {asset.policy_id}")
+        fungible = hasattr(asset, "asset_name_hex")
+        if fungible and set(entry["units"]) != {asset.asset_name_hex}:
+            raise ValueError(f"{path}: {asset.name} must pin exactly {asset.asset_name_hex}")
+        for name, row in entry["units"].items():
+            unit = asset.policy_id + name
+            remaining[unit] = max(0, row["supply"] - row["waiver"] - row["quarantined"])
+            if not fungible:
+                nft_units.add(unit)
+    return RedemptionPin(frozenset(nft_units), remaining)
 
 
 def surrendered_entitlement(
@@ -657,7 +684,6 @@ def process_surrender_batch(
         )
 
     # Resolve legacy asset info from config for known assets
-    from tools.config import ALL_MERGE_ASSETS
     asset_lookup: dict[str, Any] = {}
     for asset_info in ALL_MERGE_ASSETS:
         asset_lookup[asset_info.name] = asset_info

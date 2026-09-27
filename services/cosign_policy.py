@@ -23,26 +23,33 @@ policy reads the complete transaction and approves only a surrender:
   * bounded fee, collateral and validity interval, still open when checked and
     closing before the surrender deadline (so an AdminWithdraw spend can never
     validate);
-  * a per-transaction payout cap (the per-day cap is persisted by the
-    co-signer service).
+  * a per-transaction payout cap.
+
+``require_claimant_signature`` then checks that the claimant's payment key
+signed the body. The per-day cap and each unit's remaining redemptions are
+enforced against every signer's own record by services.redemption_ledger.
 
 Decoding is strict and self-contained: a duplicated map key anywhere, trailing
-bytes, floats or undefined simple values are refused, so the policy never
-reads a different value than the ledger would.
+bytes, floats or undefined simple values are refused, and CBOR booleans and
+tags never compare equal to integers or arrays, so the policy never reads a
+different value than the ledger would.
 """
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, NamedTuple
 
+from nacl.exceptions import BadSignatureError
+from nacl.signing import VerifyKey
 from pycardano import Address
 
 from tools.process_surrender import (
     load_rate_table,
-    load_redeemable_nfts,
+    load_redemption_pin,
     surrendered_entitlement,
 )
 
@@ -62,7 +69,7 @@ SLOT_OFFSET_S = {
 
 _ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RATE_TABLE_PATH = _ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"
-DEFAULT_REDEEMABLE_NFTS_PATH = _ROOT / "audit_pack/2026-09-27/redeemable_nft_units.json"
+DEFAULT_REDEMPTION_PIN_PATH = _ROOT / "audit_pack/2026-09-27/redemption_pin.json"
 
 # Conway tx-body keys a surrender uses: inputs, outputs, fee, ttl, validity
 # start, script_data_hash, collateral inputs, required signers, collateral
@@ -80,9 +87,19 @@ class CosignRejected(ValueError):
         self.detail = detail
 
 
-class Tag(NamedTuple):
+@dataclass(frozen=True)
+class Tag:
+    """A tagged item. Not a tuple, so it never equals a CBOR array."""
+
     tag: int
     value: Any
+
+
+class Simple(Enum):
+    """CBOR false and true. Not bool, so they never equal 0 and 1."""
+
+    FALSE = 20
+    TRUE = 21
 
 
 VOID_INLINE_DATUM = [1, Tag(24, bytes.fromhex("d87980"))]
@@ -128,7 +145,7 @@ def _hashable(key: Any) -> Any:
     return key
 
 
-_SIMPLE = {0xF4: False, 0xF5: True, 0xF6: None}
+_SIMPLE = {0xF4: Simple.FALSE, 0xF5: Simple.TRUE, 0xF6: None}
 
 
 def _string(buf: bytes, pos: int, major: int, length: int | None) -> tuple[Any, int]:
@@ -232,6 +249,10 @@ def blake2b_256(data: bytes) -> bytes:
     return hashlib.blake2b(data, digest_size=32).digest()
 
 
+def blake2b_224(data: bytes) -> bytes:
+    return hashlib.blake2b(data, digest_size=28).digest()
+
+
 # ---------------------------------------------------------------------------
 # Ledger shapes
 # ---------------------------------------------------------------------------
@@ -246,14 +267,14 @@ class Output(NamedTuple):
 
 
 def _uint(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    return isinstance(value, int) and value >= 0
 
 
-def _elements(value: Any) -> list:
+def _elements(value: Any, code: str = "body_shape") -> list:
     if isinstance(value, Tag) and value.tag == 258:
         value = value.value
     if not isinstance(value, list):
-        raise CosignRejected("body_shape", "set field is not an array")
+        raise CosignRejected(code, "set field is not an array")
     return value
 
 
@@ -302,13 +323,13 @@ def _redeemer_entries(redeemers: Any) -> list[tuple[Any, Any, Any]]:
     if isinstance(redeemers, dict):
         entries = []
         for key, value in redeemers.items():
-            if not (isinstance(key, tuple) and len(key) == 2
+            if not (isinstance(key, tuple) and len(key) == 2 and _uint(key[0]) and _uint(key[1])
                     and isinstance(value, list) and len(value) == 2):
                 raise CosignRejected("redeemers_shape", "malformed redeemer map entry")
             entries.append((key[0], key[1], value[0]))
         return entries
     if isinstance(redeemers, list) and all(
-        isinstance(r, list) and len(r) == 4 for r in redeemers
+        isinstance(r, list) and len(r) == 4 and _uint(r[0]) and _uint(r[1]) for r in redeemers
     ):
         return [(r[0], r[1], r[2]) for r in redeemers]
     raise CosignRejected("redeemers_shape", "malformed redeemers")
@@ -334,13 +355,14 @@ class CosignConfig:
     deadline_slot: int
     rate_table: Mapping[str, Any]
     redeemable_nfts: frozenset[str]
+    redemption_limits: Mapping[str, int]
     max_payout_per_tx: int
 
 
 def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignConfig:
     """Build the policy from environment variables. Everything that decides
     what gets signed is required; only the two data files default to the
-    committed rate table and NFT pin."""
+    committed rate table and redemption pin."""
 
     def need(key: str) -> str:
         value = env.get(key, "").strip()
@@ -353,6 +375,7 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         raise ValueError("the pool needs two distinct admin key hashes")
     network = need("NETWORK")
     deadline_ms = int(need("SURRENDER_DEADLINE_POSIX_MS"))
+    pin = load_redemption_pin(Path(env.get("REDEMPTION_PIN_PATH") or DEFAULT_REDEMPTION_PIN_PATH))
     return CosignConfig(
         network=network,
         pool_address=Address.from_primitive(need("SURRENDER_SCRIPT_ADDRESS")).to_primitive(),
@@ -362,9 +385,8 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         admin_pkhs=admins,
         deadline_slot=slot_at(deadline_ms // 1000, network),
         rate_table=load_rate_table(Path(env.get("RATE_TABLE_PATH") or DEFAULT_RATE_TABLE_PATH)),
-        redeemable_nfts=load_redeemable_nfts(
-            Path(env.get("REDEEMABLE_NFTS_PATH") or DEFAULT_REDEEMABLE_NFTS_PATH)
-        ),
+        redeemable_nfts=pin.nft_units,
+        redemption_limits=pin.remaining,
         max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
     )
 
@@ -374,6 +396,9 @@ class Approval:
     tx_hash: bytes
     payout: int
     claimant: bytes
+    pool_input: tuple[bytes, int]
+    units: Mapping[str, int]
+    """The legacy units the transaction quarantines (unit hex -> quantity)."""
 
 
 def evaluate_surrender(
@@ -399,6 +424,8 @@ def evaluate_surrender(
         raise CosignRejected("forbidden_body_field", f"keys {sorted(forbidden, key=str)}")
 
     signers = _elements(body.get(14, []))
+    if not all(isinstance(signer, bytes) and len(signer) == 28 for signer in signers):
+        raise CosignRejected("body_shape", "required signers are not key hashes")
     if len(signers) != len(cfg.admin_pkhs) or set(signers) != cfg.admin_pkhs:
         raise CosignRejected("required_signers", "required signers must be exactly the two admins")
 
@@ -527,4 +554,29 @@ def evaluate_surrender(
     if data != PROCESS_SURRENDER:
         raise CosignRejected("redeemer_action", "redeemer is not ProcessSurrender")
 
-    return Approval(tx_hash=blake2b_256(body_raw), payout=payout, claimant=claimant)
+    return Approval(
+        tx_hash=blake2b_256(body_raw), payout=payout, claimant=claimant,
+        pool_input=pool_ref, units=quarantined,
+    )
+
+
+def require_claimant_signature(tx_cbor: bytes, approval: Approval) -> None:
+    """Refuse ``tx_cbor``, a transaction :func:`evaluate_surrender` approved,
+    unless the claimant's payment key signed its body: a vkey witness whose
+    key hashes to the claimant's payment credential and whose signature
+    verifies over the body hash. Only the claimant can produce it, so nothing
+    is signed for a surrender its claimant has not agreed to."""
+    witnesses = decode(split_tx(tx_cbor)[1])
+    for entry in _elements(witnesses.get(0, []), "witness_shape"):
+        if not (isinstance(entry, list) and len(entry) == 2
+                and isinstance(entry[0], bytes) and len(entry[0]) == 32
+                and isinstance(entry[1], bytes) and len(entry[1]) == 64):
+            raise CosignRejected("witness_shape", "malformed vkey witness")
+        vkey, signature = entry
+        if blake2b_224(vkey) == approval.claimant[1:29]:
+            try:
+                VerifyKey(vkey).verify(approval.tx_hash, signature)
+            except BadSignatureError as exc:
+                raise CosignRejected("claimant_witness", "claimant signature does not verify") from exc
+            return
+    raise CosignRejected("claimant_witness", "the claimant has not signed")

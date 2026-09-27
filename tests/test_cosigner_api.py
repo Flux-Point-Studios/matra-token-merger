@@ -17,13 +17,21 @@ from pycardano import PaymentSigningKey
 
 import services.cosigner_api as cosigner
 from services.cosign_policy import SLOT_OFFSET_S, evaluate_surrender
+from services.cosign_policy import split_tx as cosigner_split
 from tests.cosign_cases import (
     ADMIN_1,
     BASE_T1,
     CASES,
+    CHANGE,
     MAINNET,
+    MAINNET_BEFORE_SURRENDERS,
+    Draft,
     Scenario,
+    _add_coin,
+    another_pool_utxo,
     golden_scenario,
+    throwaway_key,
+    without_claimant_witness,
 )
 from tests.test_cosign_policy import ENV as POLICY_ENV
 from tests.test_cosign_policy import SURRENDERS
@@ -74,14 +82,16 @@ def service(tmp_path, monkeypatch):
         def at(self, now_slot: int) -> None:
             self.clock[0] = now_slot
 
-        def start(self, client: TestClient) -> TestClient:
+        def start(self, client: TestClient, pinned: bool = False) -> TestClient:
+            """``pinned``: the committed pin, which counts every landed
+            surrender; otherwise its limits before any surrender landed."""
             client.__enter__()
-            cosigner.state.cfg = MAINNET
+            cosigner.state.cfg = MAINNET if pinned else MAINNET_BEFORE_SURRENDERS
             return client
 
         def rows(self) -> int:
             with sqlite3.connect(self.ledger) as conn:
-                return conn.execute("SELECT COUNT(*) FROM cosigned").fetchone()[0]
+                return conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0]
 
     yield Service()
 
@@ -185,7 +195,7 @@ def test_daily_cap_is_persisted_across_restarts(service, monkeypatch):
 
     # A day later the first payout no longer counts against the cap.
     with sqlite3.connect(service.ledger) as conn:
-        conn.execute("UPDATE cosigned SET signed_at = signed_at - 86401")
+        conn.execute("UPDATE approvals SET signed_at = signed_at - 86401")
     client = service.start(service.client(second.now_slot))
     try:
         assert client.post("/cosign", json=_request(second), headers=HEADERS).status_code == 200
@@ -223,4 +233,116 @@ def test_oversized_requests_are_refused_before_parsing(service):
     request["parent_bodies_hex"] = request["parent_bodies_hex"] * 200
     with service.client(s.now_slot) as client:
         assert client.post("/cosign", json=request, headers=HEADERS).status_code == 422
+    assert service.rows() == 0
+
+
+def _post(service, s: Scenario, pinned: bool = False, raise_server_exceptions: bool = True):
+    client = service.start(service.client(s.now_slot), pinned)
+    try:
+        caller = client if raise_server_exceptions else TestClient(cosigner.app, raise_server_exceptions=False)
+        return caller.post("/cosign", json=_request(s), headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_refuses_a_surrender_the_claimant_has_not_signed(service):
+    """Building a surrender needs nothing but an address, so the co-signer
+    signs, and spends daily budget, only on what the claimant has signed."""
+    resp = _post(service, without_claimant_witness(golden_scenario(BASE_T1)))
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "claimant_witness"
+    assert service.rows() == 0
+
+
+def test_refuses_a_claimant_signature_over_another_body(service):
+    d = Draft(golden_scenario(BASE_T1))
+    d.sign_as(throwaway_key(1))
+    s = d.build()
+    other = Draft(golden_scenario(BASE_T1))
+    other.sign_as(throwaway_key(1))
+    other.body[2] += 1
+    _add_coin(other.body[1][CHANGE], -1)
+    forged = other.build()
+    # The first body with the witness of the second.
+    body, _, tail = cosigner_split(s.tx)
+    _, witnesses, _ = cosigner_split(forged.tx)
+    resp = _post(service, Scenario(b"\x84" + body + witnesses + tail, s.language_views, s.parents, s.now_slot))
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "claimant_witness"
+    assert service.rows() == 0
+
+
+def test_second_redemption_of_a_unit_past_its_editions_is_refused(service):
+    """A pinned name redeems at most as many editions as existed at the pin,
+    so an edition minted later is refused however it reaches the pool."""
+    first = golden_scenario(BASE_T1)
+    d = Draft(first)
+    d.sign_as(throwaway_key(2))
+    another_pool_utxo(d)
+    second = d.build()
+    client = service.start(service.client(first.now_slot))
+    try:
+        assert client.post("/cosign", json=_request(first), headers=HEADERS).status_code == 200
+        refused = client.post("/cosign", json=_request(second), headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["code"] == "redemption_limit"
+    assert service.rows() == 1
+
+
+def test_the_pin_counts_units_already_in_quarantine(service):
+    """Replaying a surrender that already landed asks for a unit the pin
+    records as quarantined."""
+    resp = _post(service, golden_scenario(BASE_T1), pinned=True)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "redemption_limit"
+    assert service.rows() == 0
+
+
+def test_signatures_that_cannot_both_land_count_once_against_the_daily_cap(service, monkeypatch):
+    """Two versions of one surrender spend the same pool output, so at most
+    one lands; re-signing a rebuilt surrender does not use the cap twice."""
+    key = throwaway_key(3)
+    a = Draft(golden_scenario(BASE_T1))
+    a.sign_as(key)
+    first = a.build()
+    b = Draft(golden_scenario(BASE_T1))
+    b.sign_as(key)
+    b.body[2] += 1
+    _add_coin(b.body[1][CHANGE], -1)
+    rebuilt = b.build()
+    monkeypatch.setenv("MAX_CMATRA_PER_DAY", str(2 * _payout(first) - 1))
+    client = service.start(service.client(first.now_slot))
+    try:
+        assert client.post("/cosign", json=_request(first), headers=HEADERS).status_code == 200
+        again = client.post("/cosign", json=_request(rebuilt), headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+    assert again.status_code == 200, again.text
+    assert service.rows() == 2
+
+
+def test_malformed_transaction_is_a_coded_refusal(service):
+    d = Draft(golden_scenario(BASE_T1))
+    d.body[14] = [[1], [2]]
+    resp = _post(service, d.build(), raise_server_exceptions=False)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "body_shape"
+    assert service.rows() == 0
+
+
+def test_unwritable_ledger_is_a_coded_refusal(service):
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    service.ledger.chmod(0o400)
+    try:
+        resp = TestClient(cosigner.app, raise_server_exceptions=False).post(
+            "/cosign", json=_request(s), headers=HEADERS)
+    finally:
+        service.ledger.chmod(0o600)
+        client.__exit__(None, None, None)
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "ledger_unavailable"
+    assert "signature_hex" not in resp.text
     assert service.rows() == 0

@@ -114,7 +114,7 @@ def map_entry_bytes(map_cbor: bytes) -> dict:
 
 
 def build_real_surrender_tx(tag_sets_on: bool) -> tuple[str, str]:
-    """Drive the REAL ``_build_cosigned_surrender_tx`` deterministically
+    """Drive the REAL ``_build_surrender_tx`` deterministically
     (fixed admin key, fixed synthetic UTxOs, offline context) with the
     tag-258 transform forced on/off. Returns (tx_cbor_hex, tx_hash_hex)."""
     script = PlutusV3Script(bytes.fromhex(_SCRIPT_HEX))
@@ -160,7 +160,7 @@ def build_real_surrender_tx(tag_sets_on: bool) -> tuple[str, str]:
         legacy = [
             {"policy_hex": _LEGACY_POLICY, "asset_hex": _LEGACY_ASSET, "quantity": 1}
         ]
-        tx_cbor_hex, tx_hash_hex, _pool_out, _chg = api._build_cosigned_surrender_tx(
+        tx_cbor_hex, tx_hash_hex, _pool_out, _chg = api._build_surrender_tx(
             user_addr.encode(), 100, legacy, pool_utxo
         )
     return tx_cbor_hex, tx_hash_hex
@@ -358,7 +358,7 @@ class TestWireInvariants:
 
 
 # ---------------------------------------------------------------------------
-# Build path integration (real _build_cosigned_surrender_tx)
+# Build path integration (real _build_surrender_tx)
 # ---------------------------------------------------------------------------
 
 

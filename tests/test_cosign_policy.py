@@ -5,11 +5,16 @@ from __future__ import annotations
 
 import pytest
 
+import random
+
 from services.cosign_policy import (
     CosignRejected,
+    Simple,
+    Tag,
     decode,
     evaluate_surrender,
     load_config,
+    require_claimant_signature,
     slot_at,
     split_tx,
 )
@@ -20,10 +25,15 @@ from tests.cosign_cases import (
     DECODE_ACCEPTED,
     DECODE_REFUSED,
     SPLIT_REFUSED,
+    WITNESS_CASES,
     MAINNET,
     POOL_BECH32,
     QUARANTINE_BECH32,
     ROOT,
+    SURRENDER_HASHES,
+    BASE_FUNGIBLE,
+    BASE_T1,
+    Draft,
     Scenario,
     blake,
     golden,
@@ -51,7 +61,7 @@ def _pool_outflow(s: Scenario) -> int:
     return pool_in - pool_out
 
 
-SURRENDERS = [t["tx_hash"] for t in golden()["transactions"] if t["kind"] == "surrender"]
+SURRENDERS = SURRENDER_HASHES
 CEREMONIES = [t["tx_hash"] for t in golden()["transactions"] if t["kind"] == "ceremony"]
 
 
@@ -66,6 +76,81 @@ def test_every_mainnet_surrender_is_approved_at_its_real_payout(tx_hash):
     approval = _evaluate(scenario)
     assert approval.tx_hash.hex() == tx_hash
     assert approval.payout == _pool_outflow(scenario) > 0
+
+
+@pytest.mark.parametrize("tx_hash", SURRENDERS)
+def test_every_mainnet_surrender_carries_its_claimants_signature(tx_hash):
+    scenario = golden_scenario(tx_hash)
+    require_claimant_signature(scenario.tx, _evaluate(scenario))
+
+
+@pytest.mark.parametrize("case", WITNESS_CASES, ids=[c.name for c in WITNESS_CASES])
+def test_unsigned_surrender_is_refused_for_the_right_reason(case):
+    s = case.build()
+    with pytest.raises(CosignRejected) as err:
+        require_claimant_signature(s.tx, _evaluate(s))
+    assert err.value.code == case.expected
+
+
+def test_cbor_booleans_are_not_integers():
+    assert decode(b"\xf5") != 1
+    assert decode(b"\xf4") != 0
+
+
+def _garbage(rng: random.Random, depth: int = 0):
+    choices = [
+        lambda: rng.randrange(-3, 2**40),
+        lambda: bytes(rng.randrange(256) for _ in range(rng.choice([0, 1, 28, 29, 32, 57]))),
+        lambda: rng.choice([Simple.TRUE, Simple.FALSE, None]),
+        lambda: "x",
+        lambda: Tag(rng.choice([0, 24, 121, 258, 259]), rng.randrange(3)),
+        lambda: [],
+    ]
+    if depth < 2:
+        choices += [
+            lambda: [_garbage(rng, depth + 1) for _ in range(rng.randrange(3))],
+            lambda: {rng.randrange(4): _garbage(rng, depth + 1)},
+            lambda: Tag(258, [_garbage(rng, depth + 1)]),
+        ]
+    return rng.choice(choices)()
+
+
+def _slots(value, path=()):
+    """Every (container, key) under ``value`` that a new value can replace."""
+    if isinstance(value, dict):
+        items = value.items()
+    elif isinstance(value, list):
+        items = enumerate(value)
+    elif isinstance(value, Tag):
+        yield from _slots(value.value, path)
+        return
+    else:
+        return
+    for key, child in list(items):
+        yield value, key
+        yield from _slots(child)
+
+
+@pytest.mark.parametrize("base", [BASE_T1, BASE_FUNGIBLE])
+def test_garbage_anywhere_is_refused_with_a_code(base):
+    """Random values dropped anywhere in a surrender's body, witness set or
+    producing bodies are approved or refused with a code, never a crash (the
+    co-signer would answer 500)."""
+    rng = random.Random(base)
+    for _ in range(400):
+        d = Draft(golden_scenario(base))
+        d.reindex = rng.random() < 0.5
+        root = rng.choice([d.body, d.ws, *d.parents])
+        container, key = rng.choice(list(_slots(root)))
+        container[key] = _garbage(rng)
+        try:
+            s = d.build()
+        except (KeyError, IndexError, TypeError, ValueError, StopIteration, AttributeError):
+            continue  # the edit broke the test's own re-encoding, not the policy's input
+        try:
+            require_claimant_signature(s.tx, _evaluate(s))
+        except CosignRejected:
+            pass
 
 
 @pytest.mark.parametrize("tx_hash", CEREMONIES)
@@ -126,7 +211,7 @@ ENV = {
     "CMATRA_POLICY_HEX": MAINNET.cmatra_policy.hex(),
     "CMATRA_ASSET_HEX": MAINNET.cmatra_name.hex(),
     "RATE_TABLE_PATH": str(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"),
-    "REDEEMABLE_NFTS_PATH": str(ROOT / "audit_pack/2026-09-27/redeemable_nft_units.json"),
+    "REDEMPTION_PIN_PATH": str(ROOT / "audit_pack/2026-09-27/redemption_pin.json"),
     "SURRENDER_DEADLINE_POSIX_MS": "1795910400000",
     "MAX_CMATRA_PER_TX": str(MAINNET.max_payout_per_tx),
 }
@@ -137,7 +222,7 @@ def test_config_from_environment_matches_mainnet():
 
 
 def test_config_defaults_to_the_committed_rate_table_and_pin():
-    env = {k: v for k, v in ENV.items() if k not in ("RATE_TABLE_PATH", "REDEEMABLE_NFTS_PATH")}
+    env = {k: v for k, v in ENV.items() if k not in ("RATE_TABLE_PATH", "REDEMPTION_PIN_PATH")}
     assert load_config(env, [ADMIN_1, ADMIN_2]) == MAINNET
 
 

@@ -102,6 +102,16 @@ class TestBlockfrostClient:
         assert all("order=asc" in call.request.url for call in responses.calls)
 
     @responses.activate
+    def test_get_asset_history_pages_oldest_first(self):
+        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/u1/history"
+        responses.add(responses.GET, base, json=[{"tx_hash": f"t{i}"} for i in range(100)])
+        responses.add(responses.GET, base, json=[{"tx_hash": "last", "action": "burned"}])
+        client = BlockfrostClient(project_id="test")
+        rows = client.get_asset_history("u1")
+        assert len(rows) == 101 and rows[-1]["action"] == "burned"
+        assert all("order=asc" in call.request.url for call in responses.calls)
+
+    @responses.activate
     def test_get_epoch_parameters(self):
         responses.add(
             responses.GET,
