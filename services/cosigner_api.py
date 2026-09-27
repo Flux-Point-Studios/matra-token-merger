@@ -72,15 +72,15 @@ class CosignerState:
 
 state = CosignerState()
 
-HexString = Annotated[str, StringConstraints(max_length=65_536, pattern=r"^[0-9a-fA-F]+$")]
+# Whole bytes only: bytes.fromhex refuses an odd digit count.
+_HEX_BYTES = r"^(?:[0-9a-fA-F]{2})+$"
+HexString = Annotated[str, StringConstraints(max_length=65_536, pattern=_HEX_BYTES)]
 
 
 class CosignRequest(BaseModel):
     tx_cbor_hex: HexString = Field(..., min_length=8)
     parent_bodies_hex: list[HexString] = Field(..., min_length=1, max_length=256)
-    language_views_hex: str = Field(
-        ..., min_length=2, max_length=16_384, pattern=r"^[0-9a-fA-F]+$",
-    )
+    language_views_hex: str = Field(..., min_length=2, max_length=16_384, pattern=_HEX_BYTES)
 
 
 class CosignResponse(BaseModel):

@@ -236,6 +236,25 @@ def test_oversized_requests_are_refused_before_parsing(service):
     assert service.rows() == 0
 
 
+@pytest.mark.parametrize("field", ["tx_cbor_hex", "parent_bodies_hex", "language_views_hex"])
+def test_odd_length_hex_is_refused_as_a_malformed_request(service, field):
+    s = golden_scenario(BASE_T1)
+    request = _request(s)
+    if field == "parent_bodies_hex":
+        request[field] = [request[field][0] + "0", *request[field][1:]]
+    else:
+        request[field] += "0"
+    client = service.start(service.client(s.now_slot))
+    try:
+        resp = TestClient(cosigner.app, raise_server_exceptions=False).post(
+            "/cosign", json=request, headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+    assert resp.status_code == 422, resp.text
+    assert "signature_hex" not in resp.text
+    assert service.rows() == 0
+
+
 def _post(service, s: Scenario, pinned: bool = False, raise_server_exceptions: bool = True):
     client = service.start(service.client(s.now_slot), pinned)
     try:
