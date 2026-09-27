@@ -183,7 +183,10 @@ def test_daily_cap_is_persisted_across_restarts(service, monkeypatch):
         client.__exit__(None, None, None)
     assert service.rows() == 1
 
-    client = service.start(service.client(first.now_slot + 86_401))
+    # A day later the first payout no longer counts against the cap.
+    with sqlite3.connect(service.ledger) as conn:
+        conn.execute("UPDATE cosigned SET signed_at = signed_at - 86401")
+    client = service.start(service.client(second.now_slot))
     try:
         assert client.post("/cosign", json=_request(second), headers=HEADERS).status_code == 200
     finally:

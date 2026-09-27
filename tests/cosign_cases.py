@@ -391,6 +391,11 @@ def ttl_missing(d):
     del d.body[3]
 
 
+@case("expired")
+def ttl_already_passed(d):
+    d.now = d.body[3]
+
+
 @case("after_deadline")
 def ttl_after_deadline(d):
     d.cfg = replace(d.cfg, deadline_slot=d.body[3] - 1)
