@@ -365,6 +365,7 @@ class CosignConfig:
     rate_table: Mapping[str, Any]
     redeemable_nfts: frozenset[str]
     redemption_limits: Mapping[str, int]
+    pinned_supply: Mapping[str, int]
     max_payout_per_tx: int
 
 
@@ -396,6 +397,7 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         rate_table=load_rate_table(Path(env.get("RATE_TABLE_PATH") or DEFAULT_RATE_TABLE_PATH)),
         redeemable_nfts=pin.nft_units,
         redemption_limits=pin.remaining,
+        pinned_supply=pin.supply,
         max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
     )
 

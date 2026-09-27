@@ -3,7 +3,12 @@
 import pytest
 import responses
 
-from tools.api_clients import BlockfrostClient, TapToolsClient, _request_with_retry
+from tools.api_clients import (
+    BlockfrostClient,
+    BlockfrostUnavailable,
+    TapToolsClient,
+    _request_with_retry,
+)
 
 
 class TestRetryLogic:
@@ -36,7 +41,7 @@ class TestRetryLogic:
     def test_exhausted_retries_raises(self):
         for _ in range(6):
             responses.add(responses.GET, "https://example.com/api", status=429)
-        with pytest.raises(RuntimeError, match="Exhausted retries"):
+        with pytest.raises(BlockfrostUnavailable, match="Exhausted retries"):
             _request_with_retry(
                 "GET", "https://example.com/api", {}, max_retries=5,
             )

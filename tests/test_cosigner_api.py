@@ -12,6 +12,7 @@ import sqlite3
 
 import nacl.signing
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from pycardano import PaymentSigningKey
 
@@ -26,6 +27,7 @@ from tests.cosign_cases import (
     MAINNET,
     MAINNET_BEFORE_SURRENDERS,
     Draft,
+    FakeChain,
     Scenario,
     _add_coin,
     another_pool_utxo,
@@ -65,6 +67,7 @@ def service(tmp_path, monkeypatch):
         "COSIGNER_PRIMARY_ADMIN_PKH": ADMIN_1.hex(),
         "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
         "MAX_CMATRA_PER_DAY": str(10**18),
+        "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -73,6 +76,7 @@ def service(tmp_path, monkeypatch):
     class Service:
         vkey = bytes(sk.to_verification_key().payload)
         ledger = tmp_path / "cosigned.sqlite3"
+        chain = FakeChain()
 
         clock = [0]
 
@@ -89,6 +93,7 @@ def service(tmp_path, monkeypatch):
             surrender; otherwise its limits before any surrender landed."""
             client.__enter__()
             cosigner.state.cfg = MAINNET if pinned else MAINNET_BEFORE_SURRENDERS
+            cosigner.state.chain = self.chain
             return client
 
         def rows(self) -> int:
@@ -208,7 +213,7 @@ def test_daily_cap_is_persisted_across_restarts(service, monkeypatch):
 
 @pytest.mark.parametrize("missing", ["MAX_CMATRA_PER_DAY", "COSIGNER_PRIMARY_ADMIN_PKH",
                                      "COSIGNER_LEDGER_PATH", "SURRENDER_DEADLINE_POSIX_MS",
-                                     "COSIGNER_SKEY_PATH"])
+                                     "COSIGNER_SKEY_PATH", "BLOCKFROST_PROJECT_ID"])
 def test_refuses_to_start_without_its_configuration(service, monkeypatch, missing):
     monkeypatch.delenv(missing)
     with pytest.raises(ValueError, match=missing):
@@ -377,3 +382,41 @@ def test_unwritable_ledger_is_a_coded_refusal(service):
     assert resp.json()["detail"]["code"] == "ledger_unavailable"
     assert "signature_hex" not in resp.text
     assert service.rows() == 0
+
+
+# ---------------------------------------------------------------------------
+# The co-signer's own view of the chain
+# ---------------------------------------------------------------------------
+
+
+def test_the_chain_view_is_this_hosts_own_blockfrost_project(service):
+    with service.client(0):
+        chain = cosigner.state.chain
+    assert chain.project_id == "mainnet-test-project"
+    assert chain.base_url == "https://cardano-mainnet.blockfrost.io/api/v0"
+
+
+def test_refuses_a_unit_whose_supply_grew_after_the_pin(service):
+    """A pinned pass with a second edition minted later: the co-signer cannot
+    tell the editions apart, so it redeems neither."""
+    s = golden_scenario(BASE_T1)
+    (t1,) = [u for u in _units(s) if u.startswith("b4689145")]
+    service.chain.supply[t1] = 2
+    resp = _post(service, s)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "supply_grown"
+    assert "signature_hex" not in resp.text
+    assert service.rows() == 0
+
+
+def test_an_unreachable_chain_view_is_a_coded_refusal(service):
+    service.chain.failure = requests.ConnectionError("no route to host")
+    resp = _post(service, golden_scenario(BASE_T1), raise_server_exceptions=False)
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["detail"]["code"] == "chain_unavailable"
+    assert "signature_hex" not in resp.text
+    assert service.rows() == 0
+
+
+def _units(s: Scenario) -> dict[str, int]:
+    return dict(evaluate_surrender(s.tx, s.language_views, s.parents, s.now_slot, s.cfg).units)

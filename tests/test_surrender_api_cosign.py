@@ -16,6 +16,7 @@ from pathlib import Path
 
 import nacl.signing
 import pytest
+import requests
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pycardano import (
@@ -41,7 +42,7 @@ import services.surrender_api as api
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger, create_ledger
-from tests.cosign_cases import ledger_refusing_writes
+from tests.cosign_cases import PIN, ledger_refusing_writes, not_found
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
 from tools.process_surrender import load_rate_table, load_redemption_pin, surrendered_entitlement
@@ -160,6 +161,8 @@ class World:
         self.user_sk = PaymentSigningKey.generate()
         self.user_addr = Address(self.user_sk.to_verification_key().hash(), network=Network.TESTNET)
         self.chain: dict[str, bytes] = {}
+        self.supply: dict[str, int] = dict(PIN.supply)
+        self.chain_failure: Exception | None = None
         self.submitted: list[bytes] = []
 
         agent = MultiAsset()
@@ -193,6 +196,7 @@ class World:
             "COSIGNER_PRIMARY_ADMIN_PKH": self.admin_sk.to_verification_key().hash().payload.hex(),
             "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
             "COSIGNER_SKEY_PATH": str(tmp_path / "throwaway.skey"),
+            "BLOCKFROST_PROJECT_ID": "preprod-test-project",
         }
         self.cosigner_sk.save(env["COSIGNER_SKEY_PATH"])
         self.ledger = env["COSIGNER_LEDGER_PATH"]
@@ -244,6 +248,13 @@ class World:
                 world.submitted.append(tx)
                 return hashlib.blake2b(split_tx(tx)[0], digest_size=32).hexdigest()
 
+            def get_asset_info(self, unit):
+                if world.chain_failure is not None:
+                    raise world.chain_failure
+                if unit not in world.supply:
+                    raise not_found()
+                return {"asset": unit, "quantity": str(world.supply[unit])}
+
         def post(url, json, headers, timeout):
             assert url == "http://cosigner.test/cosign"
             world.cosign_calls += 1
@@ -266,6 +277,8 @@ class World:
         m.setattr(api.state, "admin_addr", Address(admin_pkh, network=Network.TESTNET))
         m.setattr(api.state, "cosigner_pkh", cosigner_pkh)
         m.setattr(api.state, "bf", _BF())
+        # Both signers ask the same (fake) chain; each through its own client.
+        m.setattr(cosigner.state, "chain", api.state.bf)
         m.setattr(api.state, "built_bodies", {})
         m.setattr(api.state, "cosign_config", load_config(env, [admin_pkh.payload, cosigner_pkh.payload]))
         m.setattr(api, "ALLOWED_USER_ADDRESSES", frozenset())
@@ -436,4 +449,63 @@ def test_unwritable_primary_ledger_refuses_with_a_code(world):
     assert err.value.status_code == 503
     assert err.value.detail["code"] == "ledger_unavailable"
     assert world.submitted == []
+    world.build_route(1_000)  # the pool tip was released
+
+
+# ---------------------------------------------------------------------------
+# Supply minted after the pin
+# ---------------------------------------------------------------------------
+
+
+def test_a_unit_minted_past_its_pinned_supply_is_refused_before_either_admin_signs(world):
+    world.supply[AGENT.unit] += 1
+    with pytest.raises(CosignRejected) as err:
+        world.build(_entitlement(1_000))
+    assert err.value.code == "supply_grown"
+    assert world.signed_by_admin == []
+    assert world.cosign_calls == 0
+
+
+def test_the_build_route_answers_a_grown_supply_with_its_code(world):
+    world.supply[AGENT.unit] += 1
+    with pytest.raises(HTTPException) as err:
+        world.build_route(1_000)
+    assert err.value.status_code == 422
+    assert err.value.detail["code"] == "supply_grown"
+    assert world.signed_by_admin == []
+    world.supply[AGENT.unit] -= 1
+    world.build_route(1_000)  # the pool tip was released
+
+
+def test_a_mint_between_build_and_submit_is_refused_before_the_cosigner(world):
+    built = world.build_route(1_000)
+    world.supply[AGENT.unit] += 1
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 400
+    assert err.value.detail["code"] == "supply_grown"
+    assert world.cosign_calls == 0
+    assert world.submitted == []
+
+
+def test_cosigner_checks_the_supply_itself_if_the_primary_skips_its_check(world, monkeypatch):
+    built = world.build_route(1_000)
+    world.supply[AGENT.unit] += 1
+    monkeypatch.setattr(api, "_check_locally", lambda *a, **k: None)
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 503
+    assert world.cosign_calls == 1
+    assert world.cosigned_rows() == 0
+    assert world.submitted == []
+
+
+def test_an_unreachable_chain_view_stops_the_build_before_signing(world):
+    world.chain_failure = requests.ConnectionError("no route to host")
+    with pytest.raises(HTTPException) as err:
+        world.build_route(1_000)
+    assert err.value.status_code == 503
+    assert err.value.detail["code"] == "chain_unavailable"
+    assert world.signed_by_admin == []
+    world.chain_failure = None
     world.build_route(1_000)  # the pool tip was released

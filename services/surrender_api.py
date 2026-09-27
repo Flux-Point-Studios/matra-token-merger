@@ -105,6 +105,7 @@ from services.cosign_policy import (
     split_tx,
 )
 from services.cosign_policy import evaluate_surrender as check_surrender
+from services.chain_check import ChainUnavailable, confirm_on_chain
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
 from services.pool_tip import (
@@ -930,6 +931,11 @@ async def build_surrender(req: BuildSurrenderRequest):
         state.tip_mgr.release_build(build_token)
         logger.warning("Refused to build a surrender for %s: %s", req.user_address[:24], e)
         raise HTTPException(422, {"code": e.code, "message": e.detail})
+    except ChainUnavailable as e:
+        state.tip_mgr.release_build(build_token)
+        logger.error("Refused to build a surrender for %s: chain view unavailable: %s",
+                     req.user_address[:24], e)
+        raise HTTPException(503, {"code": "chain_unavailable", "message": "Please retry shortly."})
     except Exception:
         state.tip_mgr.release_build(build_token)
         logger.exception("Failed to build/preflight surrender tx for %s", req.user_address[:24])
@@ -978,7 +984,8 @@ def _get_cosigner_witness(
                 "language_views_hex": language_views.hex(),
             },
             headers={"X-API-Secret": COSIGNER_SECRET},
-            timeout=10.0,
+            # the co-signer asks its own chain view, whose retries alone can take 13 s
+            timeout=30.0,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -1052,14 +1059,15 @@ def _check_locally(
     tx: bytes, parent_bodies: list[bytes], language_views: bytes, now: float, signed: bool,
 ) -> Approval:
     """Run the co-signer's checks here first, against this service's own
-    ledger, so it never signs, or asks the co-signer to sign, what the
-    co-signer would refuse. ``signed``: the claimant has signed, so check
-    their signature too."""
+    ledger and chain view, so it never signs, or asks the co-signer to sign,
+    what the co-signer would refuse. ``signed``: the claimant has signed, so
+    check their signature too."""
     cfg = state.cosign_config
     approval = check_surrender(tx, language_views, parent_bodies, slot_at(now, cfg.network), cfg)
     if signed:
         require_claimant_signature(tx, approval)
     state.ledger.check(approval, now, cfg.redemption_limits)
+    confirm_on_chain(approval, cfg, state.bf)
     return approval
 
 
@@ -1078,6 +1086,9 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> bytes:
     except CosignRejected as exc:
         logger.warning("Refused to co-sign %s: %s", tx_hash_hex[:16], exc)
         raise HTTPException(400, {"code": exc.code, "message": exc.detail})
+    except ChainUnavailable as exc:
+        logger.error("Refused to co-sign %s: chain view unavailable: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(503, {"code": "chain_unavailable", "message": "Please retry shortly."})
     except sqlite3.Error as exc:
         logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
         raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})

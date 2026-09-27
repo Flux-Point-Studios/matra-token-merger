@@ -180,12 +180,12 @@ CLAIM_DEADLINE_POSIX_MS: int = int(os.environ.get("CLAIM_DEADLINE_POSIX_MS", "0"
 # API base URLs (network-aware)
 # ---------------------------------------------------------------------------
 
-_BLOCKFROST_BASE_URLS = {
+BLOCKFROST_BASE_URLS = {
     "mainnet": "https://cardano-mainnet.blockfrost.io/api/v0",
     "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
     "preview": "https://cardano-preview.blockfrost.io/api/v0",
 }
-BLOCKFROST_BASE_URL: str = _BLOCKFROST_BASE_URLS[NETWORK]
+BLOCKFROST_BASE_URL: str = BLOCKFROST_BASE_URLS[NETWORK]
 TAPTOOLS_BASE_URL: str = "https://openapi.taptools.io/api/v1"
 
 _KOIOS_BASE_URLS = {

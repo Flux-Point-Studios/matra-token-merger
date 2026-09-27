@@ -32,6 +32,10 @@ _MAX_RETRIES = 5
 _BACKOFF_BASE = 1.5  # seconds
 
 
+class BlockfrostUnavailable(RuntimeError):
+    """Every retry got a transient error (429 or 5xx)."""
+
+
 def _request_with_retry(
     method: str,
     url: str,
@@ -74,7 +78,7 @@ def _request_with_retry(
                 time.sleep(wait)
             else:
                 raise
-    raise RuntimeError(f"Exhausted retries for {url}")
+    raise BlockfrostUnavailable(f"Exhausted retries for {url}")
 
 
 # ===================================================================

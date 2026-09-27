@@ -21,9 +21,10 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 
 import nacl.signing
+import requests
 from pycardano import Address
 
 from services.cosign_policy import (
@@ -70,6 +71,7 @@ MAINNET = CosignConfig(
     rate_table=RATES,
     redeemable_nfts=REDEEMABLE,
     redemption_limits=PIN.remaining,
+    pinned_supply=PIN.supply,
     max_payout_per_tx=20_000_000 * 10**6,
 )
 # The pin's limits before any surrender landed (nothing quarantined), so the
@@ -298,6 +300,34 @@ def another_pool_utxo(d: Draft) -> None:
     _add_coin(out, 1)
     d.replace_parent_output(d.pool_ref(), out)
     _add_coin(d.body[1][CONTINUATION], 1)
+
+
+def not_found() -> requests.HTTPError:
+    """What BlockfrostClient raises for a 404."""
+    response = requests.Response()
+    response.status_code = 404
+    return requests.HTTPError("404 Client Error: Not Found", response=response)
+
+
+class FakeChain:
+    """A signer's view of the chain: the BlockfrostClient calls
+    services.chain_check makes. Each unit's supply is the pinned one unless
+    ``supply`` says otherwise; ``failure``, when set, is raised by every call."""
+
+    def __init__(self, supply: Mapping[str, int] | None = None,
+                 failure: Exception | None = None) -> None:
+        self.supply = {**PIN.supply, **(supply or {})}
+        self.failure = failure
+
+    def _answer(self) -> None:
+        if self.failure is not None:
+            raise self.failure
+
+    def get_asset_info(self, unit: str) -> dict:
+        self._answer()
+        if unit not in self.supply:
+            raise not_found()
+        return {"asset": unit, "quantity": str(self.supply[unit])}
 
 
 @contextmanager

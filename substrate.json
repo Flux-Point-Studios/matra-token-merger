@@ -39,12 +39,13 @@
     {
       "id": "surrender-api",
       "name": "Surrender API",
-      "desc": "Wallet-driven surrender flow: CIP-30 partial-sign, a co-signer that signs only after the claimant has, re-verifying every transaction against a strict surrender policy (golden-tested on every mainnet surrender) and a per-signer ledger that holds each legacy unit to its pinned remaining supply and the pool to a 24-hour cap, pool-tip tracking and UTxO defrag tooling.",
+      "desc": "Wallet-driven surrender flow: CIP-30 partial-sign, a co-signer that signs only after the claimant has, re-verifying every transaction against a strict surrender policy (golden-tested on every mainnet surrender), its own chain view (no unit above its pinned supply) and a per-signer ledger that holds each legacy unit to its pinned remaining supply and the pool to a 24-hour cap, pool-tip tracking and UTxO defrag tooling.",
       "kind": "api",
       "paths": [
         "services/surrender_api.py",
         "services/cosigner_api.py",
         "services/cosign_policy.py",
+        "services/chain_check.py",
         "services/redemption_ledger.py",
         "services/pool_tip.py",
         "services/defrag.py",

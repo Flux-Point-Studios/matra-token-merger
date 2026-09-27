@@ -14,6 +14,14 @@ surrender it approves after the pin, so a unit is never paid for twice.
 
     NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
         <supply slot> audit_pack/<date>/redemption_pin.json
+
+--check compares the chain tip with a committed pin and exits 1 if any unit
+has more supply now than at the pin, a redeemable name exists that the pin
+lacks, or quarantine holds other amounts than the pin records. Re-pinning at
+the old supply slot cannot show a later mint; this reads current supply.
+
+    NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
+        --check audit_pack/<date>/redemption_pin.json
 """
 
 from __future__ import annotations
@@ -22,7 +30,7 @@ import json
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from tools.api_clients import BlockfrostClient
 from tools.config import (
@@ -64,6 +72,54 @@ def supply_at(history: list[dict], slot_of: Callable[[str], int], slot: int) -> 
     return supply
 
 
+def quarantine_holdings(bf: Any) -> dict[str, int]:
+    """Unit -> quantity the quarantine address holds now."""
+    held: dict[str, int] = {}
+    for utxo in bf.get_address_utxos(QUARANTINE_ADDRESS):
+        for amount in utxo["amount"]:
+            held[amount["unit"]] = held.get(amount["unit"], 0) + int(amount["quantity"])
+    return held
+
+
+def drift(doc: dict, bf: Any) -> list[str]:
+    """Every way the chain tip differs from pin ``doc`` in what may still be
+    redeemed; empty while the pin holds."""
+    fungibles = {token.name for token in LEGACY_TOKENS}
+    held = quarantine_holdings(bf)
+    problems = []
+    for asset, entry in sorted(doc["assets"].items()):
+        policy = entry["policy_id"]
+        listing = bf.get_policy_assets(policy)
+        current = {row["asset"][56:]: int(row["quantity"]) for row in listing}
+        for name, row in sorted(entry["units"].items()):
+            unit = policy + name
+            if current.get(name, 0) > row["supply"]:
+                problems.append(
+                    f"{asset} {unit}: supply {current[name]} on chain, {row['supply']} at the pin")
+            if held.get(unit, 0) != row["quarantined"]:
+                problems.append(
+                    f"{asset} {unit}: quarantine holds {held.get(unit, 0)},"
+                    f" the pin says {row['quarantined']}")
+        if asset not in fungibles:
+            problems += [
+                f"{asset} {policy + name}: redeemable name minted after the pin"
+                for name in redeemable_names(listing) if name not in entry["units"]
+            ]
+    return problems
+
+
+def check(pin: Path, bf: Any) -> int:
+    """Print how the tip differs from ``pin``; 1 if it does, else 0."""
+    problems = drift(json.loads(pin.read_text()), bf)
+    for problem in problems:
+        print(problem)
+    if problems:
+        print(f"PIN NO LONGER HOLDS: {len(problems)} difference(s) from {pin}")
+        return 1
+    print(f"pin holds: no unit above its pinned supply, no new name, quarantine as pinned ({pin})")
+    return 0
+
+
 def main(supply_slot: int, out: Path) -> None:
     bf = BlockfrostClient()
     waivers = load_rate_table(RATE_TABLE)["team_waiver_supplies"]
@@ -91,10 +147,7 @@ def main(supply_slot: int, out: Path) -> None:
         }}
 
     tip = bf.get_latest_block()
-    held: dict[str, int] = {}
-    for utxo in bf.get_address_utxos(QUARANTINE_ADDRESS):
-        for amount in utxo["amount"]:
-            held[amount["unit"]] = held.get(amount["unit"], 0) + int(amount["quantity"])
+    held = quarantine_holdings(bf)
     for entry in assets.values():
         for name, row in entry["units"].items():
             row["quarantined"] = held.get(entry["policy_id"] + name, 0)
@@ -109,4 +162,9 @@ def main(supply_slot: int, out: Path) -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        sys.exit("usage: python -m scripts.pin_redemption <supply slot> <out.json>"
+                 " | --check <pin.json>")
+    if sys.argv[1] == "--check":
+        sys.exit(check(Path(sys.argv[2]), BlockfrostClient()))
     main(int(sys.argv[1]), Path(sys.argv[2]))

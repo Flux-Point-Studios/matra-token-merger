@@ -5,10 +5,11 @@ Co-signer service (Server B) for the dual-admin surrender pool.
 Runs on a separate host from the surrender API and holds the second admin
 key. It signs a transaction only after it has read the whole transaction,
 services.cosign_policy has approved it as a surrender that its claimant has
-signed, and services.redemption_ledger has recorded it within the 24-hour cap
-and each surrendered unit's pinned limit. The check does not depend on
-anything the surrender API asserts: input values come from producing bodies
-hashed against the inputs' transaction ids.
+signed, services.chain_check has confirmed it against this host's own view
+of the chain, and services.redemption_ledger has recorded it within the
+24-hour cap and each surrendered unit's pinned limit. The check does not
+depend on anything the surrender API asserts: input values come from
+producing bodies hashed against the inputs' transaction ids.
 
 POST /cosign takes the full transaction carrying the claimant's witness, the
 bodies of the transactions that produced its inputs (each is checked against
@@ -23,6 +24,7 @@ Environment (all required unless noted):
   COSIGNER_LEDGER_PATH        SQLite file recording every signed surrender, created
                               once with python -m services.redemption_ledger init
   MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
+  BLOCKFROST_PROJECT_ID       this host's Blockfrost project on NETWORK
   plus the policy variables read by services.cosign_policy.load_config
   (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
   CMATRA_ASSET_HEX, SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, and
@@ -46,6 +48,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StringConstraints
 from pycardano import PaymentSigningKey, PaymentVerificationKey
 
+from services.chain_check import ChainUnavailable, confirm_on_chain
 from services.cosign_policy import (
     CosignConfig,
     CosignRejected,
@@ -55,6 +58,8 @@ from services.cosign_policy import (
     slot_at,
 )
 from services.redemption_ledger import RedemptionLedger
+from tools.api_clients import BlockfrostClient
+from tools.config import BLOCKFROST_BASE_URLS
 
 logger = logging.getLogger("cosigner_api")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -69,6 +74,7 @@ class CosignerState:
     secret: bytes = b""
     cfg: CosignConfig | None = None
     ledger: RedemptionLedger | None = None
+    chain: BlockfrostClient | None = None
 
 
 state = CosignerState()
@@ -113,6 +119,7 @@ def startup() -> None:
     primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
     ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")))
     cfg = load_config(os.environ, [primary, vk.hash().payload])
+    chain = BlockfrostClient(_need("BLOCKFROST_PROJECT_ID"), BLOCKFROST_BASE_URLS[cfg.network])
 
     state.sk = sk
     state.vkey_hex = vk.payload.hex()
@@ -120,6 +127,7 @@ def startup() -> None:
     state.secret = secret.encode()
     state.cfg = cfg
     state.ledger = ledger
+    state.chain = chain
     logger.info(
         "Co-signer ready: PKH=%s network=%s per-tx cap=%d per-day cap=%d pinned units=%d",
         state.pkh_hex, cfg.network, cfg.max_payout_per_tx, ledger.max_per_day,
@@ -140,8 +148,9 @@ async def verify_secret(request: Request, call_next):
 
 @app.post("/cosign", response_model=CosignResponse)
 def cosign(req: CosignRequest) -> CosignResponse:
-    """Verify the full transaction and its claimant's signature, record it
-    within the cap and the pinned unit limits, then sign its body hash."""
+    """Verify the full transaction and its claimant's signature, confirm it
+    against the chain, record it within the cap and the pinned unit limits,
+    then sign its body hash."""
     now = time.time()
     tx = bytes.fromhex(req.tx_cbor_hex)
     try:
@@ -153,10 +162,16 @@ def cosign(req: CosignRequest) -> CosignResponse:
             state.cfg,
         )
         require_claimant_signature(tx, approval)
+        confirm_on_chain(approval, state.cfg, state.chain)
         state.ledger.record(approval, now, state.cfg.redemption_limits)
     except CosignRejected as exc:
         logger.warning("Refused to co-sign: %s", exc)
         raise HTTPException(422, {"code": exc.code, "detail": exc.detail})
+    except ChainUnavailable as exc:
+        logger.error("Refused to co-sign: chain view unavailable: %s", exc)
+        raise HTTPException(
+            503, {"code": "chain_unavailable", "detail": "the chain view cannot confirm the transaction"},
+        )
     except sqlite3.Error as exc:
         logger.error("Refused to co-sign: ledger unavailable: %s", exc)
         raise HTTPException(

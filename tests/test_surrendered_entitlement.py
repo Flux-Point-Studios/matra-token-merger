@@ -144,6 +144,14 @@ def test_pinned_file_loads_as_units_under_the_configured_policies():
     assert set(pin.remaining) == pin.nft_units | {token.unit for token in LEGACY_TOKENS}
 
 
+def test_pin_records_each_units_supply_at_the_pin():
+    """What the chain may hold of a unit while it is still redeemed."""
+    pin = load_redemption_pin(PINNED)
+    assert set(pin.supply) == set(pin.remaining)
+    assert pin.supply[AGENT.unit] == 1_000_000_000
+    assert all(pin.supply[unit] >= 1 for unit in pin.nft_units)
+
+
 def _doc() -> dict:
     return json.loads(PINNED.read_text())
 

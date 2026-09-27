@@ -105,7 +105,8 @@ echo "============================================"
 # running this script (values for the deployed pool are in the ceremony
 # record): COSIGNER_PRIMARY_ADMIN_PKH, SURRENDER_SCRIPT_ADDRESS,
 # QUARANTINE_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
-# SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY.
+# SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY, and
+# BLOCKFROST_PROJECT_ID (this host's own view of the chain).
 if [[ ! -f "$SCRIPT_DIR/.env.cosigner" ]]; then
     : "${COSIGNER_PRIMARY_ADMIN_PKH:?export the admin_1 key hash}"
     : "${SURRENDER_SCRIPT_ADDRESS:?export the pool script address}"
@@ -115,6 +116,7 @@ if [[ ! -f "$SCRIPT_DIR/.env.cosigner" ]]; then
     : "${SURRENDER_DEADLINE_POSIX_MS:?export the pool deadline}"
     : "${MAX_CMATRA_PER_TX:?export the per-transaction cap in base units}"
     : "${MAX_CMATRA_PER_DAY:?export the 24-hour cap in base units}"
+    : "${BLOCKFROST_PROJECT_ID:?export the Blockfrost project id for this host}"
     SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
     (
         umask 177
@@ -131,6 +133,7 @@ CMATRA_ASSET_HEX=$CMATRA_ASSET_HEX
 SURRENDER_DEADLINE_POSIX_MS=$SURRENDER_DEADLINE_POSIX_MS
 MAX_CMATRA_PER_TX=$MAX_CMATRA_PER_TX
 MAX_CMATRA_PER_DAY=$MAX_CMATRA_PER_DAY
+BLOCKFROST_PROJECT_ID=$BLOCKFROST_PROJECT_ID
 ENVFILE
     )
     unset SECRET

@@ -208,6 +208,9 @@ class RedemptionPin:
     remaining: Mapping[str, int]
     """Per unit, NFT or fungible: its supply at the pin, less the team waiver,
     less what the quarantine address already held (never below zero)."""
+    supply: Mapping[str, int]
+    """Per unit: its on-chain supply at the pin. More on chain now means
+    editions minted since, which the signers refuse to redeem."""
 
 
 def load_redemption_pin(path: Path) -> RedemptionPin:
@@ -219,6 +222,7 @@ def load_redemption_pin(path: Path) -> RedemptionPin:
     doc = json.loads(Path(path).read_text())
     nft_units: set[str] = set()
     remaining: dict[str, int] = {}
+    supply: dict[str, int] = {}
     for asset in ALL_MERGE_ASSETS:
         entry = doc["assets"].get(asset.name)
         if entry is None or entry["policy_id"] != asset.policy_id:
@@ -229,9 +233,10 @@ def load_redemption_pin(path: Path) -> RedemptionPin:
         for name, row in entry["units"].items():
             unit = asset.policy_id + name
             remaining[unit] = max(0, row["supply"] - row["waiver"] - row["quarantined"])
+            supply[unit] = row["supply"]
             if not fungible:
                 nft_units.add(unit)
-    return RedemptionPin(frozenset(nft_units), remaining)
+    return RedemptionPin(frozenset(nft_units), remaining, supply)
 
 
 def surrendered_entitlement(

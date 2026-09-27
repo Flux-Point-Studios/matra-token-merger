@@ -235,6 +235,12 @@ The threat model is **dual-admin compromise**:
   (`audit_pack/2026-09-27/redemption_pin.json`: its supply at the pin, less
   the team waiver, less what quarantine already held), so units minted or
   surrendered before the pin are never paid for again.
+- Neither signer redeems a unit whose supply on chain is above its supply at
+  the pin: editions of one name are indistinguishable, so a later edition
+  stops that unit's redemptions until the admins decide. Each signer asks its
+  own Blockfrost project, from its own host, before it records an approval.
+  `python -m scripts.pin_redemption --check <pin>` lists every such unit, any
+  redeemable name the pin lacks, and any change in quarantine since the pin.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it
   cannot mint or drain. The front-end never holds either admin key.
 - Compromising user wallets is out of scope — that's a per-user problem,
