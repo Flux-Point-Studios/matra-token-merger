@@ -2,15 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# The dependency pins match pyproject.toml: pycardano >= 0.19 pulls in a
-# cbor2pure build that fails to import.
-RUN pip install --no-cache-dir \
-    "pycardano>=0.13.2,<0.19.0" \
-    "cbor2>=5.6.0,<6.0.0" \
-    "requests>=2.31.0" \
-    "python-dotenv>=1.0.0" \
-    "fastapi==0.115.*" \
-    "uvicorn[standard]==0.34.*"
+# Exactly the versions CI tests, each checked against its hash.
+COPY services/deploy/requirements-cosigner.txt /tmp/
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements-cosigner.txt
 
 # The co-signer prices surrenders with the same code and data the surrender
 # API uses: the rational-rate helpers in tools/, the rate table and the

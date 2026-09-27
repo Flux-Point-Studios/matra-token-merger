@@ -40,9 +40,14 @@ steps:
       VALIDATOR: onchain/quarantine_validator
 
   - name: python
-    image: nikolaik/python-nodejs:python3.11-nodejs20   # python+node so the HW interop gate actually runs (not skipped)
+    # python+node so the HW interop gate actually runs (not skipped); 3.12 is
+    # what both signing hosts run
+    image: nikolaik/python-nodejs:python3.12-nodejs20
     commands:
       - python -m pip install --upgrade pip -q
+      # the co-signer's hash-pinned lock first, so the tests run on exactly the
+      # versions the signing hosts install (tests/test_deploy_lock.py checks it)
+      - pip install -q --require-hashes -r services/deploy/requirements-cosigner.txt
       - pip install -q -e ".[dev]"
       - pip show pycardano | grep -E '^(Name|Version|Requires):'
       - pip show cbor2 | grep -E '^(Name|Version):'
