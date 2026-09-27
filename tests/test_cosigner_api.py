@@ -16,8 +16,7 @@ from fastapi.testclient import TestClient
 from pycardano import PaymentSigningKey
 
 import services.cosigner_api as cosigner
-from services.cosign_policy import SLOT_OFFSET_S, evaluate_surrender
-from services.cosign_policy import split_tx as cosigner_split
+from services.cosign_policy import SLOT_OFFSET_S, evaluate_surrender, split_tx
 from tests.cosign_cases import (
     ADMIN_1,
     BASE_T1,
@@ -30,6 +29,7 @@ from tests.cosign_cases import (
     _add_coin,
     another_pool_utxo,
     golden_scenario,
+    ledger_refusing_writes,
     throwaway_key,
     without_claimant_witness,
 )
@@ -264,8 +264,8 @@ def test_refuses_a_claimant_signature_over_another_body(service):
     _add_coin(other.body[1][CHANGE], -1)
     forged = other.build()
     # The first body with the witness of the second.
-    body, _, tail = cosigner_split(s.tx)
-    _, witnesses, _ = cosigner_split(forged.tx)
+    body, _, tail = split_tx(s.tx)
+    _, witnesses, _ = split_tx(forged.tx)
     resp = _post(service, Scenario(b"\x84" + body + witnesses + tail, s.language_views, s.parents, s.now_slot))
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["code"] == "claimant_witness"
@@ -335,12 +335,11 @@ def test_malformed_transaction_is_a_coded_refusal(service):
 def test_unwritable_ledger_is_a_coded_refusal(service):
     s = golden_scenario(BASE_T1)
     client = service.start(service.client(s.now_slot))
-    service.ledger.chmod(0o400)
     try:
-        resp = TestClient(cosigner.app, raise_server_exceptions=False).post(
-            "/cosign", json=_request(s), headers=HEADERS)
+        with ledger_refusing_writes(service.ledger):
+            resp = TestClient(cosigner.app, raise_server_exceptions=False).post(
+                "/cosign", json=_request(s), headers=HEADERS)
     finally:
-        service.ledger.chmod(0o600)
         client.__exit__(None, None, None)
     assert resp.status_code == 503, resp.text
     assert resp.json()["detail"]["code"] == "ledger_unavailable"

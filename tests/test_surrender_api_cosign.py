@@ -41,6 +41,7 @@ import services.surrender_api as api
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger
+from tests.cosign_cases import ledger_refusing_writes
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
 from tools.process_surrender import load_rate_table, load_redemption_pin, surrendered_entitlement
@@ -428,12 +429,8 @@ def test_submit_after_the_build_was_forgotten_asks_for_a_rebuild(world):
 
 def test_unwritable_primary_ledger_refuses_with_a_code(world):
     built = world.build_route(1_000)
-    Path(world.primary_ledger.path).chmod(0o400)
-    try:
-        with pytest.raises(HTTPException) as err:
-            world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
-    finally:
-        Path(world.primary_ledger.path).chmod(0o600)
+    with ledger_refusing_writes(world.primary_ledger.path), pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
     assert err.value.status_code == 503
     assert err.value.detail["code"] == "ledger_unavailable"
     assert world.submitted == []

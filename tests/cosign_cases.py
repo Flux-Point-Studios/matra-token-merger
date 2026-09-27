@@ -16,10 +16,12 @@ import copy
 import gzip
 import hashlib
 import json
+import sqlite3
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import nacl.signing
 from pycardano import Address
@@ -293,6 +295,23 @@ def another_pool_utxo(d: Draft) -> None:
     _add_coin(out, 1)
     d.replace_parent_output(d.pool_ref(), out)
     _add_coin(d.body[1][CONTINUATION], 1)
+
+
+@contextmanager
+def ledger_refusing_writes(path: str | Path) -> Iterator[None]:
+    """Every insert into the redemption ledger at ``path`` fails with a SQLite
+    error, as it would on a full disk or a read-only mount. A trigger rather
+    than a file mode, because CI runs as root and root ignores file modes."""
+    with closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute(
+            "CREATE TRIGGER refuse_writes BEFORE INSERT ON approvals"
+            " BEGIN SELECT RAISE(ABORT, 'ledger refuses writes'); END"
+        )
+    try:
+        yield
+    finally:
+        with closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute("DROP TRIGGER refuse_writes")
 
 
 def without_claimant_witness(s: Scenario) -> Scenario:
