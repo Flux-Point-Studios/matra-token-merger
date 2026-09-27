@@ -115,14 +115,33 @@ def _garbage(rng: random.Random, depth: int = 0):
     return rng.choice(choices)()
 
 
-def _slots(value, path=()):
+def _garbage_key(rng: random.Random):
+    return rng.choice([rng.randrange(20), (0,), Tag(258, (1,)), Simple.TRUE, b"\x05", "x", None])
+
+
+def _maps(value):
+    """Every map at or under ``value``."""
+    if isinstance(value, dict):
+        yield value
+        children = value.values()
+    elif isinstance(value, list):
+        children = value
+    elif isinstance(value, Tag):
+        children = [value.value]
+    else:
+        return
+    for child in list(children):
+        yield from _maps(child)
+
+
+def _slots(value):
     """Every (container, key) under ``value`` that a new value can replace."""
     if isinstance(value, dict):
         items = value.items()
     elif isinstance(value, list):
         items = enumerate(value)
     elif isinstance(value, Tag):
-        yield from _slots(value.value, path)
+        yield from _slots(value.value)
         return
     else:
         return
@@ -133,16 +152,19 @@ def _slots(value, path=()):
 
 @pytest.mark.parametrize("base", [BASE_T1, BASE_FUNGIBLE])
 def test_garbage_anywhere_is_refused_with_a_code(base):
-    """Random values dropped anywhere in a surrender's body, witness set or
-    producing bodies are approved or refused with a code, never a crash (the
-    co-signer would answer 500)."""
+    """Random values, or random keys in a map, dropped anywhere in a
+    surrender's body, witness set or producing bodies are approved or refused
+    with a code, never a crash (the co-signer would answer 500)."""
     rng = random.Random(base)
     for _ in range(400):
         d = Draft(golden_scenario(base))
         d.reindex = rng.random() < 0.5
         root = rng.choice([d.body, d.ws, *d.parents])
-        container, key = rng.choice(list(_slots(root)))
-        container[key] = _garbage(rng)
+        if rng.random() < 0.25:
+            rng.choice(list(_maps(root)))[_garbage_key(rng)] = _garbage(rng)
+        else:
+            container, key = rng.choice(list(_slots(root)))
+            container[key] = _garbage(rng)
         try:
             s = d.build()
         except (KeyError, IndexError, TypeError, ValueError, StopIteration, AttributeError):

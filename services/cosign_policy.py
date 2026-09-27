@@ -230,15 +230,18 @@ def split_tx(tx_cbor: bytes) -> tuple[bytes, bytes, bytes]:
     return spans[0], spans[1], spans[2] + spans[3]
 
 
-def _map_raw_values(buf: bytes) -> dict[Any, bytes]:
-    """A definite-length map's values as their exact encoded bytes. ``buf`` has
-    already passed ``decode`` (via ``split_tx``), so keys are unique."""
+def _witness_fields(buf: bytes) -> dict[int, bytes]:
+    """A witness set's fields as their exact encoded bytes, keyed by the
+    Conway field number (0-7); the ledger cannot decode any other key. ``buf``
+    has already passed ``decode`` (via ``split_tx``), so keys are unique."""
     major, count, pos = _head(buf, 0)
     if major != 5 or count is None:
         raise CosignRejected("witness_shape", "witness set is not a definite map")
-    out: dict[Any, bytes] = {}
+    out: dict[int, bytes] = {}
     for _ in range(count):
         key, pos = _item(buf, pos, 1)
+        if not (_uint(key) and key <= 7):
+            raise CosignRejected("witness_shape", f"witness set key {key!r}")
         start = pos
         _, pos = _item(buf, pos, 1)
         out[key] = buf[start:pos]
@@ -538,7 +541,7 @@ def evaluate_surrender(
     if pool_in.coin - continuation.coin > MAX_POOL_LOVELACE_OUTFLOW:
         raise CosignRejected("pool_lovelace", "pool continuation loses lovelace")
 
-    witness = _map_raw_values(witness_raw)
+    witness = _witness_fields(witness_raw)
     if 5 not in witness:
         raise CosignRejected("redeemers_missing", "no redeemers")
     preimage = witness[5] + witness.get(4, b"") + language_views

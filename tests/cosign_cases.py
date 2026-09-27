@@ -798,6 +798,21 @@ def witness_set_repeats_a_key(d):
     d.raw_ws = bytes([ws[0] + 1]) + ws[1:] + encode(5) + encode({})
 
 
+@case("witness_shape")
+def witness_set_key_is_an_array(d):
+    d.ws[(1,)] = 0
+
+
+@case("witness_shape")
+def witness_set_key_is_a_boolean(d):
+    d.ws[Simple.TRUE] = 0
+
+
+@case("witness_shape")
+def witness_set_key_is_not_a_conway_field(d):
+    d.ws[8] = []
+
+
 @case("redeemers_missing")
 def redeemers_removed(d):
     del d.ws[5]
