@@ -51,6 +51,7 @@ from pycardano import (  # noqa: E402
 )
 from pycardano.hash import VerificationKeyHash  # noqa: E402
 
+import services.cosign_policy as cosign_policy  # noqa: E402
 import services.surrender_api as api  # noqa: E402
 from tests.test_surrender_redeemer_index import (  # noqa: E402
     _CMATRA_ASSET,
@@ -346,15 +347,14 @@ class TestWireInvariants:
         ):
             assert api._pure_dumps(api._pure_loads(blob)) == blob
 
-    def test_tx_body_bytes_slices_exact_body(self):
-        body_bytes, _, _ = split_tx(MIXED_TX)
-        assert api._tx_body_bytes(MIXED_TX) == body_bytes
+    def test_policy_split_tx_slices_exact_parts(self):
+        assert cosign_policy.split_tx(MIXED_TX) == split_tx(MIXED_TX)
 
-    def test_tx_body_bytes_rejects_non_array4(self):
+    def test_policy_split_tx_rejects_non_array4(self):
         with pytest.raises(ValueError):
-            api._tx_body_bytes(b"\x83" + MIXED_TX[1:])
+            cosign_policy.split_tx(b"\x83" + MIXED_TX[1:])
         with pytest.raises(ValueError):
-            api._tx_body_bytes(b"")
+            cosign_policy.split_tx(b"")
 
 
 # ---------------------------------------------------------------------------

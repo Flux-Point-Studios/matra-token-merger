@@ -40,15 +40,13 @@ from services.pool_tip import PoolTipManager, VOID_DATUM_HEX  # noqa: E402
 SCRIPT_ADDR = "addr_test1wrs6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg7n8k3c"
 # 58-char placeholder — satisfies BuildSurrenderRequest min_length(40).
 USER_ADDR = "addr_test1" + "q" * 50
-NFT_UNIT = "cd" * 28 + "4e4654"
 
 
 def _req():
     from services.surrender_api import AssetToSurrender, BuildSurrenderRequest
     return BuildSurrenderRequest(
         user_address=USER_ADDR,
-        assets=[AssetToSurrender(asset_key="AGENT", quantity_base=1,
-                                 nft_units=[NFT_UNIT])],
+        assets=[AssetToSurrender(asset_key="AGENT", quantity_base=1)],
     )
 
 
@@ -76,10 +74,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(api, "POOL_TIP_DEPTH_CAP", 8)
     monkeypatch.setattr(api, "find_pool_utxos",
                         lambda *a, **k: [dict(u) for u in confirmed])
-    monkeypatch.setattr(api, "compute_redemption", lambda rt, k, q: 100)
-    monkeypatch.setattr(api, "_resolve_legacy_assets",
-                        lambda *a, **k: [{"policy_hex": "cd" * 28,
-                                          "asset_hex": "4e4654", "quantity": 1}])
+    monkeypatch.setattr(api, "surrendered_entitlement", lambda rt, units, nfts: 100)
 
     class _FakeAddr:
         payment_part = b"\x00" * 28  # not a PycScriptHash

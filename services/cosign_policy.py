@@ -71,7 +71,7 @@ _ALLOWED_BODY_KEYS = frozenset({0, 1, 2, 3, 8, 11, 13, 14, 16, 17})
 _MAX_DEPTH = 64
 
 
-class CosignRejected(Exception):
+class CosignRejected(ValueError):
     """The transaction is not a surrender this policy approves."""
 
     def __init__(self, code: str, detail: str = "") -> None:

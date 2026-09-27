@@ -8,8 +8,8 @@ minor 24-27, i.e. >=24 elements — has that prefix read twice. The second read
 treats the first element's initial byte as the count and runs off the buffer end
 (``CBORDecodeEOF``).
 
-The surrender-api's byte-surgery decoders (``_pure_loads`` and the raw
-``CBORDecoder(stream).decode()`` calls) go through that patched global, so a tx
+The surrender-api's byte-surgery decoder (``_pure_loads``) goes through that
+patched global, so a tx
 whose inputs set has >=24 entries — routine for a fragmented wallet whose
 coin-selection pulls two dozen UTxOs — crashes ``_wrap_body_sets_258`` and the
 build returns a generic 422. surrender_api.py reinstalls a corrected drop-in that
@@ -18,7 +18,6 @@ keeps the ``IndefiniteFrozenList`` wrap but reads each length exactly once.
 
 from __future__ import annotations
 
-import io
 import os
 import sys
 from pathlib import Path
@@ -42,6 +41,7 @@ from pycardano import (  # noqa: E402
 from pycardano.hash import TransactionId  # noqa: E402
 from pycardano.serialization import IndefiniteFrozenList  # noqa: E402
 
+import services.cosign_policy as cosign_policy  # noqa: E402
 import services.surrender_api as api  # noqa: E402
 
 # A key-controlled mainnet wallet address (payment part is a pubkey hash).
@@ -126,8 +126,8 @@ def test_wrap_body_sets_258_preserves_input_order_at_ge24():
     assert wrapped_inputs == original_inputs
 
 
-def test_tx_body_bytes_slices_ge24_input_tx():
-    # The raw-decoder path (_tx_body_bytes walks the stream) must also handle >=24.
+def test_split_tx_slices_ge24_input_tx():
+    # Slicing the assembled wire (split_tx) must also handle >=24 inputs.
     ins = [TransactionInput(TransactionId(bytes([i % 256]) * 32), i) for i in range(24)]
     body = TransactionBody(
         inputs=ins,
@@ -139,6 +139,6 @@ def test_tx_body_bytes_slices_ge24_input_tx():
     tx = Transaction(body, TransactionWitnessSet())
     wire = tx.to_cbor()
     wire = wire if isinstance(wire, (bytes, bytearray)) else bytes.fromhex(wire)
-    body_bytes = api._tx_body_bytes(wire)
+    body_bytes = cosign_policy.split_tx(wire)[0]
     # The sliced body decodes cleanly and round-trips the input count.
     assert len(api._pure_loads(body_bytes)[0]) == 24
