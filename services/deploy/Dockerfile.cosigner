@@ -2,16 +2,23 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install only what the co-signer needs (minimal attack surface)
+# The dependency pins match pyproject.toml: pycardano >= 0.19 pulls in a
+# cbor2pure build that fails to import.
 RUN pip install --no-cache-dir \
-    fastapi==0.115.* \
-    uvicorn[standard]==0.34.* \
-    pycardano==0.19.* \
-    httpx==0.28.*
+    "pycardano>=0.13.2,<0.19.0" \
+    "cbor2>=5.6.0,<6.0.0" \
+    "requests>=2.31.0" \
+    "python-dotenv>=1.0.0" \
+    "fastapi==0.115.*" \
+    "uvicorn[standard]==0.34.*"
 
-# Copy only the co-signer service + minimal dependencies
-COPY services/cosigner_api.py services/cosigner_api.py
-COPY services/__init__.py services/__init__.py 2>/dev/null || true
+# The co-signer prices surrenders with the same code and data the surrender
+# API uses: the rational-rate helpers in tools/ and the pinned rate table and
+# NFT list in audit_pack/.
+COPY services/__init__.py services/cosigner_api.py services/cosign_policy.py services/
+COPY tools/__init__.py tools/config.py tools/api_clients.py tools/cardano_utils.py tools/process_surrender.py tools/
+COPY audit_pack/2026-04-19/rate_table_cmatra.json audit_pack/2026-04-19/
+COPY audit_pack/2026-09-27/redeemable_nft_units.json audit_pack/2026-09-27/
 
 EXPOSE 8421
 

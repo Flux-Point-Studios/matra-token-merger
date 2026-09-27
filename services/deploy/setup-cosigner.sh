@@ -101,25 +101,47 @@ echo ""
 echo "============================================"
 
 # --- Step 3: Create .env.cosigner ---
+# The co-signer refuses to start without its policy. Export these before
+# running this script (values for the deployed pool are in the ceremony
+# record): COSIGNER_PRIMARY_ADMIN_PKH, SURRENDER_SCRIPT_ADDRESS,
+# QUARANTINE_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
+# SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY.
 if [[ ! -f "$SCRIPT_DIR/.env.cosigner" ]]; then
+    : "${COSIGNER_PRIMARY_ADMIN_PKH:?export the admin_1 key hash}"
+    : "${SURRENDER_SCRIPT_ADDRESS:?export the pool script address}"
+    : "${QUARANTINE_ADDRESS:?export the quarantine address}"
+    : "${CMATRA_POLICY_HEX:?export the cMATRA policy id}"
+    : "${CMATRA_ASSET_HEX:?export the cMATRA asset name hex}"
+    : "${SURRENDER_DEADLINE_POSIX_MS:?export the pool deadline}"
+    : "${MAX_CMATRA_PER_TX:?export the per-transaction cap in base units}"
+    : "${MAX_CMATRA_PER_DAY:?export the 24-hour cap in base units}"
     SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-    cat > "$SCRIPT_DIR/.env.cosigner" <<EOF
+    (
+        umask 177
+        cat > "$SCRIPT_DIR/.env.cosigner" <<ENVFILE
 COSIGNER_SKEY_PATH=/app/keys/admin_2.skey
 COSIGNER_API_SECRET=$SECRET
-COSIGNER_API_PORT=8421
-EOF
-    chmod 600 "$SCRIPT_DIR/.env.cosigner"
+COSIGNER_LEDGER_PATH=/app/data/cosigned.sqlite3
+COSIGNER_PRIMARY_ADMIN_PKH=$COSIGNER_PRIMARY_ADMIN_PKH
+NETWORK=${NETWORK:-mainnet}
+SURRENDER_SCRIPT_ADDRESS=$SURRENDER_SCRIPT_ADDRESS
+QUARANTINE_ADDRESS=$QUARANTINE_ADDRESS
+CMATRA_POLICY_HEX=$CMATRA_POLICY_HEX
+CMATRA_ASSET_HEX=$CMATRA_ASSET_HEX
+SURRENDER_DEADLINE_POSIX_MS=$SURRENDER_DEADLINE_POSIX_MS
+MAX_CMATRA_PER_TX=$MAX_CMATRA_PER_TX
+MAX_CMATRA_PER_DAY=$MAX_CMATRA_PER_DAY
+ENVFILE
+    )
+    unset SECRET
+    mkdir -p "$SCRIPT_DIR/data"
     echo ""
-    echo "Created .env.cosigner with generated API secret."
-    echo ""
-    echo "  API Secret: $SECRET"
-    echo ""
-    echo "  Set this SAME value on Server A:"
-    echo "    COSIGNER_API_SECRET=$SECRET"
+    echo "Created .env.cosigner (mode 600) with a generated API secret."
+    echo "Copy COSIGNER_API_SECRET from it into Server A's environment file"
+    echo "without displaying it, e.g. over SSH into a mode-600 file."
     echo ""
 else
     echo ".env.cosigner already exists — skipping."
-    SECRET=$(grep COSIGNER_API_SECRET "$SCRIPT_DIR/.env.cosigner" | cut -d= -f2)
 fi
 
 # --- Step 4: Build and start ---
@@ -146,7 +168,7 @@ echo ""
 echo "  Next steps:"
 echo "    1. On Server A, set these env vars:"
 echo "       COSIGNER_URL=http://<this-machine-ip>:8421"
-echo "       COSIGNER_API_SECRET=$SECRET"
+echo "       COSIGNER_API_SECRET=<the value in .env.cosigner>"
 echo "       COSIGNER_PKH=$PKH"
 echo ""
 echo "    2. Configure firewall to only allow Server A's IP on port 8421"

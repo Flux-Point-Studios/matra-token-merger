@@ -1,179 +1,214 @@
 #!/usr/bin/env python3
 """
-Co-Signer Microservice (Server B) for Dual-Admin Surrender Pool.
+Co-signer service (Server B) for the dual-admin surrender pool.
 
-This is a lightweight FastAPI service that runs on a SEPARATE server from the
-main surrender API.  It holds the second admin signing key and provides a
-single endpoint: sign a transaction hash and return the VK witness.
+Runs on a separate host from the surrender API and holds the second admin
+key. It signs a transaction only after it has read the whole transaction and
+services.cosign_policy has approved it as a surrender, and only while the
+payouts it signed over the last 24 hours stay under a cap persisted on disk.
+The pool validator itself checks nothing but the two signatures and the time
+window, so this service is the control that stops one compromised host from
+spending the pool.
 
-The main surrender API (Server A) builds the transaction, signs with Key A,
-then calls this service to get Key B's signature.  Both signatures are merged
-into the transaction before returning it to the user.
+POST /cosign takes the full transaction, the bodies of the transactions that
+produced its inputs (each is checked against the input's transaction id), and
+the PlutusV3 language views that close its script_data_hash. Requests carry a
+shared secret in X-API-Secret, compared in constant time.
 
-Security:
-  - Protected by a shared API secret (COSIGNER_API_SECRET)
-  - Only signs transaction hashes — never sees or builds full transactions
-  - Should run on separate infrastructure from Server A
-  - If Server A is compromised, attacker still can't drain the pool
-    (they'd need Server B's key too, and the validator requires both)
+Environment (all required unless noted):
+  COSIGNER_SKEY_PATH          admin_2 signing key file
+  COSIGNER_API_SECRET         shared with the surrender API, >= 32 characters
+  COSIGNER_PRIMARY_ADMIN_PKH  admin_1 key hash (the other required signer)
+  COSIGNER_LEDGER_PATH        SQLite file recording every signed payout
+  MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
+  plus the policy variables read by services.cosign_policy.load_config
+  (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
+  CMATRA_ASSET_HEX, SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, and
+  optionally RATE_TABLE_PATH / REDEEMABLE_NFTS_PATH).
 
 Usage:
-  # Set environment variables
-  export COSIGNER_SKEY_PATH=/secure/path/to/admin_2.skey
-  export COSIGNER_API_SECRET=<shared-secret-with-server-a>
-
-  # Run
-  py -3.12 -m services.cosigner_api
+  uvicorn services.cosigner_api:app --host <lan-ip> --port 8421
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
-import sys
-from pathlib import Path
+import sqlite3
+import time
+from contextlib import closing
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+from pycardano import PaymentSigningKey, PaymentVerificationKey
 
-from pycardano import (
-    PaymentSigningKey,
-    PaymentVerificationKey,
-    VerificationKey,
-    VerificationKeyWitness,
+from services.cosign_policy import (
+    Approval,
+    CosignConfig,
+    CosignRejected,
+    evaluate_surrender,
+    load_config,
+    slot_at,
 )
 
 logger = logging.getLogger("cosigner_api")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-COSIGNER_SKEY_PATH: str = os.environ.get("COSIGNER_SKEY_PATH", "")
-COSIGNER_API_SECRET: str = os.environ.get("COSIGNER_API_SECRET", "")
-COSIGNER_PORT: int = int(os.environ.get("COSIGNER_API_PORT", "8421"))
-
-# ---------------------------------------------------------------------------
-# State
-# ---------------------------------------------------------------------------
+DAY_S = 86_400
+MIN_SECRET_LENGTH = 32
 
 
 class CosignerState:
     sk: PaymentSigningKey | None = None
-    vk: PaymentVerificationKey | None = None
+    vkey_hex: str = ""
     pkh_hex: str = ""
+    secret: bytes = b""
+    cfg: CosignConfig | None = None
+    ledger_path: str = ""
+    max_per_day: int = 0
 
 
 state = CosignerState()
 
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
+HexString = Annotated[str, StringConstraints(max_length=65_536, pattern=r"^[0-9a-fA-F]+$")]
 
 
 class CosignRequest(BaseModel):
-    """Request to co-sign a transaction hash."""
-    tx_hash_hex: str = Field(
-        ..., description="Transaction body hash (hex, 64 chars)",
-        min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]+$",
+    tx_cbor_hex: HexString = Field(..., min_length=8)
+    parent_bodies_hex: list[HexString] = Field(..., min_length=1, max_length=256)
+    language_views_hex: str = Field(
+        ..., min_length=2, max_length=16_384, pattern=r"^[0-9a-fA-F]+$",
     )
 
 
 class CosignResponse(BaseModel):
-    """Response with the VK witness."""
     vkey_hex: str
     signature_hex: str
     pkh_hex: str
+    tx_hash: str
+    payout: int
 
 
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
+app = FastAPI(title="cMATRA Co-Signer", version="2.0.0")
 
-app = FastAPI(title="cMATRA Co-Signer", version="1.0.0")
 
-# No CORS needed — this is server-to-server only
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[],  # no browser access
-    allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type", "X-API-Secret"],
-)
+def _need(key: str) -> str:
+    value = os.environ.get(key, "").strip()
+    if not value:
+        raise ValueError(f"{key} must be set")
+    return value
+
+
+@app.on_event("startup")
+def startup() -> None:
+    """Load the key, the policy and the ledger; refuse to start without any of them."""
+    secret = _need("COSIGNER_API_SECRET")
+    if len(secret) < MIN_SECRET_LENGTH:
+        raise ValueError(f"COSIGNER_API_SECRET must be at least {MIN_SECRET_LENGTH} characters")
+    sk = PaymentSigningKey.load(_need("COSIGNER_SKEY_PATH"))
+    vk = PaymentVerificationKey.from_signing_key(sk)
+    primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
+    ledger_path = _need("COSIGNER_LEDGER_PATH")
+    max_per_day = int(_need("MAX_CMATRA_PER_DAY"))
+    cfg = load_config(os.environ, [primary, vk.hash().payload])
+    with closing(sqlite3.connect(ledger_path)) as conn, conn:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS cosigned ("
+            " tx_hash BLOB PRIMARY KEY, payout INTEGER NOT NULL, signed_at REAL NOT NULL)"
+        )
+
+    state.sk = sk
+    state.vkey_hex = vk.payload.hex()
+    state.pkh_hex = vk.hash().payload.hex()
+    state.secret = secret.encode()
+    state.cfg = cfg
+    state.ledger_path = ledger_path
+    state.max_per_day = max_per_day
+    logger.info(
+        "Co-signer ready: PKH=%s network=%s per-tx cap=%d per-day cap=%d",
+        state.pkh_hex, cfg.network, cfg.max_payout_per_tx, max_per_day,
+    )
 
 
 @app.middleware("http")
 async def verify_secret(request: Request, call_next):
-    """Reject requests without valid API secret (except health)."""
+    """Every route but /health needs the shared secret."""
     if request.url.path == "/health":
         return await call_next(request)
-    if request.method == "OPTIONS":
-        return await call_next(request)
-
-    if not COSIGNER_API_SECRET:
-        return JSONResponse(status_code=503, content={"detail": "Not configured"})
-
-    provided = request.headers.get("x-api-secret", "")
-    if not provided or provided != COSIGNER_API_SECRET:
+    provided = request.headers.get("x-api-secret", "").encode()
+    if not state.secret or not hmac.compare_digest(provided, state.secret):
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
-
     return await call_next(request)
 
 
-@app.on_event("startup")
-def startup():
-    if COSIGNER_SKEY_PATH and Path(COSIGNER_SKEY_PATH).exists():
-        state.sk = PaymentSigningKey.load(COSIGNER_SKEY_PATH)
-        state.vk = PaymentVerificationKey.from_signing_key(state.sk)
-        state.pkh_hex = state.vk.hash().payload.hex()
-        logger.info("Co-signer key loaded: PKH=%s", state.pkh_hex)
-    else:
-        logger.error("COSIGNER_SKEY_PATH not set or file missing: %s", COSIGNER_SKEY_PATH)
+def _record_within_daily_cap(approval: Approval, now: float) -> None:
+    """Record the payout, refusing it if the rolling 24-hour total would pass
+    the cap. A transaction already recorded is not counted again."""
+    with closing(sqlite3.connect(state.ledger_path, timeout=10, isolation_level=None)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            known = conn.execute(
+                "SELECT 1 FROM cosigned WHERE tx_hash = ?", (approval.tx_hash,)
+            ).fetchone()
+            if known is None:
+                (signed,) = conn.execute(
+                    "SELECT COALESCE(SUM(payout), 0) FROM cosigned WHERE signed_at > ?",
+                    (now - DAY_S,),
+                ).fetchone()
+                if signed + approval.payout > state.max_per_day:
+                    raise CosignRejected(
+                        "daily_cap",
+                        f"{signed} signed in 24h + {approval.payout} exceeds {state.max_per_day}",
+                    )
+                conn.execute(
+                    "INSERT INTO cosigned (tx_hash, payout, signed_at) VALUES (?, ?, ?)",
+                    (approval.tx_hash, approval.payout, now),
+                )
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
 
 
 @app.post("/cosign", response_model=CosignResponse)
-def cosign(req: CosignRequest):
-    """Sign a transaction hash with the co-signer key.
-
-    Returns the verification key and signature so Server A can construct
-    a VerificationKeyWitness and merge it into the transaction.
-    """
-    if not state.sk:
-        raise HTTPException(503, "Co-signer key not loaded")
-
+def cosign(req: CosignRequest) -> CosignResponse:
+    """Verify the full transaction, record it against the daily cap, then sign
+    its body hash."""
+    now = time.time()
     try:
-        tx_hash_bytes = bytes.fromhex(req.tx_hash_hex)
-        signature = state.sk.sign(tx_hash_bytes)
-        vk = VerificationKey.from_signing_key(state.sk)
-
-        logger.info("Co-signed tx: %s", req.tx_hash_hex[:16])
-
-        return CosignResponse(
-            vkey_hex=vk.payload.hex(),
-            signature_hex=signature.hex(),
-            pkh_hex=state.pkh_hex,
+        approval = evaluate_surrender(
+            bytes.fromhex(req.tx_cbor_hex),
+            bytes.fromhex(req.language_views_hex),
+            [bytes.fromhex(body) for body in req.parent_bodies_hex],
+            slot_at(now, state.cfg.network),
+            state.cfg,
         )
-    except Exception as e:
-        logger.error("Co-sign failed: %s", e)
-        raise HTTPException(500, "Co-signing failed")
+        _record_within_daily_cap(approval, now)
+    except CosignRejected as exc:
+        logger.warning("Refused to co-sign: %s", exc)
+        raise HTTPException(422, {"code": exc.code, "detail": exc.detail})
+
+    signature = state.sk.sign(approval.tx_hash)
+    logger.info(
+        "Co-signed %s: payout %d to %s", approval.tx_hash.hex(), approval.payout,
+        approval.claimant.hex(),
+    )
+    return CosignResponse(
+        vkey_hex=state.vkey_hex,
+        signature_hex=signature.hex(),
+        pkh_hex=state.pkh_hex,
+        tx_hash=approval.tx_hash.hex(),
+        payout=approval.payout,
+    )
 
 
 @app.get("/health")
-def health():
+def health() -> dict:
     return {
         "status": "ok",
         "key_loaded": state.sk is not None,
         "pkh": state.pkh_hex[:16] + "..." if state.pkh_hex else None,
     }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "services.cosigner_api:app",
-        host="0.0.0.0",
-        port=COSIGNER_PORT,
-        log_level="info",
-    )
