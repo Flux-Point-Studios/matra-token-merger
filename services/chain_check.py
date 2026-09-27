@@ -4,12 +4,10 @@ services.cosign_policy judges a transaction by the bytes it is handed. What
 those bytes cannot show comes from the signer's own view of the chain, a
 Blockfrost project queried from the signer's own host:
 
-  * no surrendered unit has more supply on chain than it had at the pin. The
-    two collection policies with a single key and no time lock can still mint
-    another edition of a pinned name, and editions of one name are
-    indistinguishable, so while a later edition exists the unit is not
-    redeemed at all: otherwise its minter could be paid ahead of the holder of
-    the pinned edition;
+  * no surrendered unit has more supply on chain than it had at the pin. Two
+    collection policies can still mint, and editions of one name are
+    indistinguishable, so a signer cannot tell a pinned edition from a later
+    one; while a later edition exists the unit is not redeemed at all;
   * every input and collateral input is an unspent output on chain, or an
     output of a surrender this signer has recorded (a chained surrender
     spends outputs still in the mempool). A producing body proves what an
