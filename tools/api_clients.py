@@ -145,6 +145,13 @@ class BlockfrostClient:
     def get_tx_utxos(self, tx_hash: str) -> dict[str, Any]:
         return self._get(f"/txs/{tx_hash}/utxos")
 
+    def get_tx(self, tx_hash: str) -> dict[str, Any]:
+        return self._get(f"/txs/{tx_hash}")
+
+    def get_tx_cbor(self, tx_hash: str) -> bytes:
+        """The transaction exactly as it sits on chain (body, witnesses, …)."""
+        return bytes.fromhex(self._get(f"/txs/{tx_hash}/cbor")["cbor"])
+
     def submit_tx(self, cbor_bytes: bytes) -> str:
         """Submit a signed transaction. Returns tx hash.
 
@@ -180,6 +187,12 @@ class BlockfrostClient:
             path += f"/{asset}"
         return self._get_all_pages(path)
 
+    def get_address_transactions(self, address: str) -> list[dict[str, Any]]:
+        """Every transaction touching *address*, oldest first (auto-paged)."""
+        return self._get_all_pages(
+            f"/addresses/{address}/transactions", extra_params={"order": "asc"},
+        )
+
     # -- policy assets ---------------------------------------------------
 
     def get_policy_assets(self, policy_id: str) -> list[dict[str, Any]]:
@@ -190,6 +203,9 @@ class BlockfrostClient:
 
     def get_protocol_parameters(self) -> dict[str, Any]:
         return self._get("/epochs/latest/parameters")
+
+    def get_epoch_parameters(self, epoch: int) -> dict[str, Any]:
+        return self._get(f"/epochs/{epoch}/parameters")
 
 
 # ===================================================================
