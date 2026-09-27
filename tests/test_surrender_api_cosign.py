@@ -39,6 +39,7 @@ from pycardano.hash import ScriptHash, TransactionId
 
 import services.cosigner_api as cosigner
 import services.surrender_api as api
+from services.chain_check import ChainUnavailable
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger, create_ledger
@@ -119,6 +120,20 @@ def test_malformed_surrender_requests_are_refused_before_any_build(validating, a
     assert reason in str(err.value.detail)
     assert validating == {}
     assert api.state.tip_mgr.chain_state() is None  # the tip was never acquired
+
+
+def test_evaluate_answers_an_unreachable_chain_view_with_its_code(validating, monkeypatch):
+    def unanswerable(**_):
+        raise ChainUnavailable("no route to host")
+
+    monkeypatch.setattr(api, "_build_surrender_tx", unanswerable)
+    monkeypatch.setattr(api, "find_pool_utxos", lambda *_: [
+        {"tx_hash": "a" * 64, "output_index": 0, "cmatra_amount": 10**15, "ada_amount": 1_500_000}])
+    with pytest.raises(HTTPException) as err:
+        api.evaluate_surrender(api.BuildSurrenderRequest(
+            user_address=MAINNET_USER, assets=[_item("AGENT", 1000)]))
+    assert err.value.status_code == 503
+    assert err.value.detail["code"] == "chain_unavailable"
 
 
 def test_valid_request_is_priced_by_the_units_it_quarantines(validating):

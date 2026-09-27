@@ -212,6 +212,9 @@ MAX_CMATRA_PER_DAY: str = os.environ.get("MAX_CMATRA_PER_DAY", "")
 # the pool-tip depth cap.
 BUILT_BODIES_KEPT = 256
 
+# The 503 detail when a chain view cannot confirm a surrender.
+_CHAIN_UNAVAILABLE = {"code": "chain_unavailable", "message": "Please retry shortly."}
+
 # Shared secret — the Next.js proxy must send this in X-API-Secret header.
 # Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
 API_SECRET: str = os.environ.get("SURRENDER_API_SECRET", "")
@@ -935,7 +938,7 @@ async def build_surrender(req: BuildSurrenderRequest):
         state.tip_mgr.release_build(build_token)
         logger.error("Refused to build a surrender for %s: chain view unavailable: %s",
                      req.user_address[:24], e)
-        raise HTTPException(503, {"code": "chain_unavailable", "message": "Please retry shortly."})
+        raise HTTPException(503, _CHAIN_UNAVAILABLE)
     except Exception:
         state.tip_mgr.release_build(build_token)
         logger.exception("Failed to build/preflight surrender tx for %s", req.user_address[:24])
@@ -1088,7 +1091,7 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> bytes:
         raise HTTPException(400, {"code": exc.code, "message": exc.detail})
     except ChainUnavailable as exc:
         logger.error("Refused to co-sign %s: chain view unavailable: %s", tx_hash_hex[:16], exc)
-        raise HTTPException(503, {"code": "chain_unavailable", "message": "Please retry shortly."})
+        raise HTTPException(503, _CHAIN_UNAVAILABLE)
     except sqlite3.Error as exc:
         logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
         raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})
@@ -2047,6 +2050,9 @@ def evaluate_surrender(req: BuildSurrenderRequest):
         raise HTTPException(500, "Transaction build failed during evaluation")
     except CosignRejected as e:
         raise HTTPException(422, {"code": e.code, "message": e.detail})
+    except ChainUnavailable as e:
+        logger.error("Evaluate: chain view unavailable for %s: %s", req.user_address[:24], e)
+        raise HTTPException(503, _CHAIN_UNAVAILABLE)
     except Exception:
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")
