@@ -987,7 +987,7 @@ def _get_cosigner_witness(
                 "language_views_hex": language_views.hex(),
             },
             headers={"X-API-Secret": COSIGNER_SECRET},
-            # the co-signer asks its own chain view, whose retries alone can take 13 s
+            # the co-signer asks its own chain view; one lookup may back off for 21 s
             timeout=30.0,
         )
         resp.raise_for_status()
