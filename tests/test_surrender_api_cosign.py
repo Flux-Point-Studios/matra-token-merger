@@ -308,8 +308,8 @@ def test_inflated_payout_is_refused_before_either_admin_signs(world):
 
 
 def test_cosigner_refuses_even_if_the_primary_skips_its_own_check(world, monkeypatch):
-    """A compromised primary host that bypasses its local check still cannot
-    obtain the second signature."""
+    """The co-signer checks independently: a primary that skips its own check
+    still does not obtain the second signature."""
     monkeypatch.setattr(api, "check_surrender", lambda *a, **k: None)
     with pytest.raises(HTTPException) as err:
         world.build(_entitlement(1_000) * 100)

@@ -1,9 +1,8 @@
 """What an admin checks before it adds its signature to a surrender-pool spend.
 
-The pool validator accepts any spend that both admins sign inside the time
-window; it constrains no output. This policy is therefore the only thing
-between one compromised admin host and the whole pool. It reads the complete
-transaction and approves only a surrender:
+The pool validator checks the two admin signatures and the time window; every
+other property of a surrender is checked here, off chain, by each signer. The
+policy reads the complete transaction and approves only a surrender:
 
   * exactly one pool input, holding only ADA and cMATRA under the Void inline
     datum; every other input and all collateral from one key-hash address on

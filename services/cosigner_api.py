@@ -6,9 +6,8 @@ Runs on a separate host from the surrender API and holds the second admin
 key. It signs a transaction only after it has read the whole transaction and
 services.cosign_policy has approved it as a surrender, and only while the
 payouts it signed over the last 24 hours stay under a cap persisted on disk.
-The pool validator itself checks nothing but the two signatures and the time
-window, so this service is the control that stops one compromised host from
-spending the pool.
+The check does not depend on anything the surrender API asserts: input values
+come from producing bodies hashed against the inputs' transaction ids.
 
 POST /cosign takes the full transaction, the bodies of the transactions that
 produced its inputs (each is checked against the input's transaction id), and
