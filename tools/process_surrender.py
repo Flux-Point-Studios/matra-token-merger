@@ -31,7 +31,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import cbor2
 from cbor2 import CBORTag
@@ -55,7 +55,7 @@ from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
 
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada, payment_key_hash_from_skey
-from tools.config import FLUX_DECIMALS, PUBLIC_POOL_BASE
+from tools.config import FLUX_DECIMALS, LEGACY_TOKENS, NFT_COLLECTIONS, PUBLIC_POOL_BASE
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +189,52 @@ def compute_redemption(
     #   NFT:      count_of_nfts * rate_base_per_unit
     redemption = quantity_base * rate_base
     return redemption
+
+
+def load_redeemable_nfts(path: Path) -> frozenset[str]:
+    """Load the pinned NFT units (policy hex + asset-name hex) that may be
+    surrendered, checking each collection's policy against tools.config.
+
+    Raises ValueError if a collection is missing or pinned under another policy.
+    """
+    doc = json.loads(Path(path).read_text())
+    units: set[str] = set()
+    for nft in NFT_COLLECTIONS:
+        entry = doc["collections"].get(nft.name)
+        if entry is None or entry["policy_id"] != nft.policy_id:
+            raise ValueError(f"{path}: {nft.name} is not pinned under {nft.policy_id}")
+        units.update(nft.policy_id + name for name in entry["asset_names"])
+    return frozenset(units)
+
+
+def surrendered_entitlement(
+    rate_table: dict[str, Any],
+    units: Mapping[str, int],
+    redeemable_nfts: frozenset[str],
+) -> int:
+    """cMATRA owed for surrendered legacy units (unit hex -> quantity).
+
+    Quantities are summed per merge asset before pricing, so every caller gets
+    the same floor rounding. A fungible unit counts its quantity; an NFT unit
+    must be in ``redeemable_nfts`` and have quantity 1.
+
+    Raises ValueError for anything else.
+    """
+    fungible = {token.unit: token.name for token in LEGACY_TOKENS}
+    collections = {nft.policy_id: nft.name for nft in NFT_COLLECTIONS}
+    per_asset: dict[str, int] = {}
+    for unit, quantity in units.items():
+        if unit in fungible:
+            name, count = fungible[unit], quantity
+        elif unit in redeemable_nfts and quantity == 1:
+            name, count = collections[unit[:56]], 1
+        else:
+            raise ValueError(f"{unit} x{quantity} is not a redeemable merge asset")
+        per_asset[name] = per_asset.get(name, 0) + count
+    return sum(
+        compute_redemption(rate_table, name, count)
+        for name, count in per_asset.items()
+    )
 
 
 # ---------------------------------------------------------------------------
