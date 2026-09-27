@@ -37,6 +37,7 @@ def approval(n: int, spends: tuple[bytes, int], payout: int = 10, units=None) ->
     return Approval(
         tx_hash=_tx(n), payout=payout, claimant=b"\x61" + b"\x01" * 28,
         pool_input=spends, units={UNIT: 1} if units is None else units,
+        inputs=(spends,),
     )
 
 
@@ -135,6 +136,14 @@ def test_an_approval_already_recorded_is_admitted_again_unchanged(ledger):
     ledger.record(approval(1, POOL_ROOT, payout=100), 1001.0, LIMITS)
     ledger.check(approval(1, POOL_ROOT, payout=100), 1002.0, LIMITS)
     assert rows(ledger) == 1
+
+
+def test_recorded_names_the_approvals_written_and_nothing_else(ledger):
+    ledger.check(approval(1, POOL_ROOT), 1000.0, LIMITS)
+    assert not ledger.recorded(_tx(1))
+    ledger.record(approval(1, POOL_ROOT), 1000.0, LIMITS)
+    assert ledger.recorded(_tx(1))
+    assert not ledger.recorded(_tx(2))
 
 
 def test_check_writes_nothing(ledger):

@@ -23,11 +23,15 @@ policy reads the complete transaction and approves only a surrender:
   * bounded fee, collateral and validity interval, still open when checked and
     closing before the surrender deadline (so an AdminWithdraw spend can never
     validate);
-  * a per-transaction payout cap.
+  * a per-transaction payout cap;
+  * the inputs hold exactly what the outputs and the fee take, so no output
+    holds anything its transaction did not bring in.
 
 ``require_claimant_signature`` then checks that the claimant's payment key
-signed the body. The per-day cap and each unit's remaining redemptions are
-enforced against every signer's own record by services.redemption_ledger.
+signed the body. services.chain_check confirms against the signer's own view
+of the chain that the inputs exist and no unit's supply grew, and the per-day
+cap and each unit's remaining redemptions are enforced against every signer's
+own record by services.redemption_ledger.
 
 Decoding is strict and self-contained: a duplicated map key anywhere, trailing
 bytes, floats or undefined simple values are refused, and CBOR booleans and
@@ -348,6 +352,18 @@ def _quantity(assets: Mapping[bytes, Mapping[bytes, int]], policy: bytes, name: 
     return assets.get(policy, {}).get(name, 0)
 
 
+def _total(outputs: Iterable[Output]) -> tuple[int, dict[tuple[bytes, bytes], int]]:
+    """Lovelace and every asset's nonzero quantity, summed over ``outputs``."""
+    coin, assets = 0, {}
+    for out in outputs:
+        coin += out.coin
+        for policy, names in out.assets.items():
+            for name, quantity in names.items():
+                if quantity:
+                    assets[policy, name] = assets.get((policy, name), 0) + quantity
+    return coin, assets
+
+
 # ---------------------------------------------------------------------------
 # Policy
 # ---------------------------------------------------------------------------
@@ -410,6 +426,8 @@ class Approval:
     pool_input: tuple[bytes, int]
     units: Mapping[str, int]
     """The legacy units the transaction quarantines (unit hex -> quantity)."""
+    inputs: tuple[tuple[bytes, int], ...]
+    """Every output it spends or offers as collateral, the pool's included."""
 
 
 def evaluate_surrender(
@@ -498,9 +516,9 @@ def evaluate_surrender(
     if claimant[0] & 0x0F != cfg.pool_address[0] & 0x0F:
         raise CosignRejected("claimant_network", "claimant address is on another network")
 
-    for ref in _elements(body.get(13, [])):
-        if resolve(ref)[1].address != claimant:
-            raise CosignRejected("collateral_not_claimant", "collateral is not the claimant's")
+    collateral = [resolve(raw) for raw in _elements(body.get(13, []))]
+    if any(out.address != claimant for _, out in collateral):
+        raise CosignRejected("collateral_not_claimant", "collateral is not the claimant's")
     if 16 in body and parse_output(body[16]).address != claimant:
         raise CosignRejected("collateral_return_not_claimant", "collateral return leaves the claimant")
 
@@ -509,8 +527,8 @@ def evaluate_surrender(
     outputs = body.get(1)
     if not isinstance(outputs, list):
         raise CosignRejected("body_shape", "outputs are not an array")
-    for raw in outputs:
-        out = parse_output(raw)
+    produced = [parse_output(raw) for raw in outputs]
+    for out in produced:
         if out.has_script_ref:
             raise CosignRejected("output_script_ref", "an output carries a reference script")
         if out.address == cfg.pool_address:
@@ -567,9 +585,15 @@ def evaluate_surrender(
     if data != PROCESS_SURRENDER:
         raise CosignRejected("redeemer_action", "redeemer is not ProcessSurrender")
 
+    coin_in, assets_in = _total([pool_in, *spent.values()])
+    coin_out, assets_out = _total(produced)
+    if (coin_in, assets_in) != (coin_out + fee, assets_out):
+        raise CosignRejected("unbalanced", "the inputs do not equal the outputs plus the fee")
+
     return Approval(
         tx_hash=blake2b_256(body_raw), payout=payout, claimant=claimant,
         pool_input=pool_ref, units=quarantined,
+        inputs=tuple(sorted({pool_ref, *spent, *(ref for ref, _ in collateral)})),
     )
 
 

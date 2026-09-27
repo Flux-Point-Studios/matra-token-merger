@@ -162,6 +162,7 @@ class World:
         self.user_addr = Address(self.user_sk.to_verification_key().hash(), network=Network.TESTNET)
         self.chain: dict[str, bytes] = {}
         self.supply: dict[str, int] = dict(PIN.supply)
+        self.spent: set[tuple[str, int]] = set()
         self.chain_failure: Exception | None = None
         self.submitted: list[bytes] = []
 
@@ -247,6 +248,18 @@ class World:
             def submit_tx(self, tx):
                 world.submitted.append(tx)
                 return hashlib.blake2b(split_tx(tx)[0], digest_size=32).hexdigest()
+
+            def get_tx_utxos(self, tx_hash):
+                if world.chain_failure is not None:
+                    raise world.chain_failure
+                if tx_hash not in world.chain:
+                    raise not_found()
+                count = len(TransactionBody.from_cbor(world.chain[tx_hash]).outputs)
+                return {"hash": tx_hash, "outputs": [
+                    {"output_index": i, "collateral": False,
+                     "consumed_by_tx": "ee" * 32 if (tx_hash, i) in world.spent else None}
+                    for i in range(count)
+                ]}
 
             def get_asset_info(self, unit):
                 if world.chain_failure is not None:
@@ -509,3 +522,30 @@ def test_an_unreachable_chain_view_stops_the_build_before_signing(world):
     assert world.signed_by_admin == []
     world.chain_failure = None
     world.build_route(1_000)  # the pool tip was released
+
+
+# ---------------------------------------------------------------------------
+# Inputs the chain does not hold
+# ---------------------------------------------------------------------------
+
+
+def test_a_spent_pool_output_is_refused_before_either_admin_signs(world):
+    world.spent.add((world.pool_utxo["tx_hash"], 0))
+    with pytest.raises(CosignRejected) as err:
+        world.build(_entitlement(1_000))
+    assert err.value.code == "input_spent"
+    assert world.signed_by_admin == []
+    assert world.cosign_calls == 0
+
+
+def test_an_output_of_a_build_that_was_never_cosigned_is_refused(world):
+    """The primary's own build, which no signer recorded and the chain never
+    saw, cannot parent another surrender."""
+    _, first_hash, pool_out, _ = world.build(_entitlement(1_000))
+    orphan = {"tx_hash": first_hash, "output_index": 1,
+              "cmatra_amount": pool_out["cmatra_amount"], "ada_amount": pool_out["ada_amount"]}
+    with pytest.raises(CosignRejected) as err:
+        world.build(_entitlement(1_000), pool_utxo=orphan)
+    assert err.value.code == "input_unknown"
+    assert len(world.signed_by_admin) == 1  # the first build only
+    assert world.cosign_calls == 0

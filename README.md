@@ -238,7 +238,10 @@ The threat model is **dual-admin compromise**:
 - Neither signer redeems a unit whose supply on chain is above its supply at
   the pin: editions of one name are indistinguishable, so a later edition
   stops that unit's redemptions until the admins decide. Each signer asks its
-  own Blockfrost project, from its own host, before it records an approval.
+  own Blockfrost project, from its own host, before it records an approval,
+  and also confirms there that every input is an unspent output on chain or
+  an output of a surrender it recorded, so nothing it records rests on
+  outputs that do not exist.
   `python -m scripts.pin_redemption --check <pin>` lists every such unit, any
   redeemable name the pin lacks, and any change in quarantine since the pin.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it

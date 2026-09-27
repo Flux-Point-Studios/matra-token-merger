@@ -311,13 +311,41 @@ def not_found() -> requests.HTTPError:
 
 class FakeChain:
     """A signer's view of the chain: the BlockfrostClient calls
-    services.chain_check makes. Each unit's supply is the pinned one unless
-    ``supply`` says otherwise; ``failure``, when set, is raised by every call."""
+    services.chain_check makes. The transactions whose bodies it holds are on
+    chain, their outputs unspent unless listed in ``spent``; each unit's
+    supply is the pinned one unless ``supply`` says otherwise; ``failure``,
+    when set, is raised by every call."""
 
-    def __init__(self, supply: Mapping[str, int] | None = None,
+    def __init__(self, bodies: Mapping[str, bytes] | None = None,
+                 supply: Mapping[str, int] | None = None,
                  failure: Exception | None = None) -> None:
+        self.bodies = dict(bodies or {})
+        self.spent: dict[tuple[str, int], str] = {}
         self.supply = {**PIN.supply, **(supply or {})}
         self.failure = failure
+
+    @classmethod
+    def as_at_the_golden_builds(cls) -> "FakeChain":
+        """Every transaction that produced a golden surrender's inputs, each
+        output unspent, as when those surrenders were built."""
+        return cls({tx: bytes.fromhex(body) for tx, body in golden()["parents"].items()})
+
+    def publish(self, *bodies: bytes) -> None:
+        for body in bodies:
+            self.bodies[blake(body).hex()] = body
+
+    def get_tx_utxos(self, tx_hash: str) -> dict:
+        self._answer()
+        if tx_hash not in self.bodies:
+            raise not_found()
+        count = len(decode(self.bodies[tx_hash])[1])
+        outputs = [
+            {"output_index": i, "collateral": False, "consumed_by_tx": self.spent.get((tx_hash, i))}
+            for i in range(count)
+        ]
+        # A valid transaction's collateral return is listed but never created.
+        outputs.append({"output_index": count, "collateral": True, "consumed_by_tx": None})
+        return {"hash": tx_hash, "inputs": [], "outputs": outputs}
 
     def _answer(self) -> None:
         if self.failure is not None:
@@ -824,6 +852,29 @@ def payout_above_the_per_transaction_cap(d):
 def lovelace_leaks_out_of_the_pool(d):
     d.body[1][CONTINUATION][1][0] -= 500_001
     _add_coin(d.body[1][CHANGE], 500_001)
+
+
+@case("unbalanced")
+def claimant_change_grows_by_one_lovelace(d):
+    _add_coin(d.body[1][CHANGE], 1)
+
+
+@case("unbalanced")
+def claimant_change_holds_a_pass_no_input_held(d):
+    """An output a later surrender could spend: it must not hold what no
+    input brought in."""
+    policy = bytes.fromhex(T1_ADAM_PASS.policy_id)
+    held = _quarantine_nft(d)
+    extra = next(
+        bytes.fromhex(u[56:]) for u in sorted(REDEEMABLE)
+        if u.startswith(T1_ADAM_PASS.policy_id) and bytes.fromhex(u[56:]) != held
+    )
+    _add_asset(d.body[1][CHANGE], policy, extra, 1)
+
+
+@case("unbalanced")
+def fee_raised_without_paying_for_it(d):
+    d.body[2] += 1
 
 
 # -- redeemers ---------------------------------------------------------------

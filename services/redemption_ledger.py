@@ -120,6 +120,13 @@ class RedemptionLedger:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._uri, uri=True, timeout=10, isolation_level=None)
 
+    def recorded(self, tx_hash: bytes) -> bool:
+        """Whether this signer recorded an approval of ``tx_hash``."""
+        with closing(self._connect()) as conn:
+            return conn.execute(
+                "SELECT 1 FROM approvals WHERE tx_hash = ?", (tx_hash,)
+            ).fetchone() is not None
+
     def check(self, approval: Approval, now: float, limits: Mapping[str, int]) -> None:
         """Raise :class:`CosignRejected` if recording ``approval`` would pass a
         limit. Writes nothing."""

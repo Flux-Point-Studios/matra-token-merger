@@ -36,6 +36,7 @@ from tests.cosign_cases import (
     throwaway_key,
     without_claimant_witness,
 )
+from tests.cbor_encode import encode
 from tests.test_cosign_policy import ENV as POLICY_ENV
 from tests.test_cosign_policy import SURRENDERS
 
@@ -76,7 +77,7 @@ def service(tmp_path, monkeypatch):
     class Service:
         vkey = bytes(sk.to_verification_key().payload)
         ledger = tmp_path / "cosigned.sqlite3"
-        chain = FakeChain()
+        chain = FakeChain.as_at_the_golden_builds()
 
         clock = [0]
 
@@ -317,6 +318,7 @@ def test_second_redemption_of_a_unit_past_its_editions_is_refused(service):
     d.sign_as(throwaway_key(2))
     another_pool_utxo(d)
     second = d.build()
+    service.chain.publish(*second.parents)
     client = service.start(service.client(first.now_slot))
     try:
         assert client.post("/cosign", json=_request(first), headers=HEADERS).status_code == 200
@@ -349,6 +351,7 @@ def test_signatures_that_cannot_both_land_count_once_against_the_daily_cap(servi
     b.body[2] += 1
     _add_coin(b.body[1][CHANGE], -1)
     rebuilt = b.build()
+    service.chain.publish(*first.parents, *rebuilt.parents)
     monkeypatch.setenv("MAX_CMATRA_PER_DAY", str(2 * _payout(first) - 1))
     client = service.start(service.client(first.now_slot))
     try:
@@ -420,3 +423,43 @@ def test_an_unreachable_chain_view_is_a_coded_refusal(service):
 
 def _units(s: Scenario) -> dict[str, int]:
     return dict(evaluate_surrender(s.tx, s.language_views, s.parents, s.now_slot, s.cfg).units)
+
+
+def test_a_surrender_spending_outputs_the_chain_never_saw_is_refused(service):
+    """Inputs resolved from producing bodies the caller made up: the
+    transaction can never land, so it is neither signed nor allowed to use up
+    the unit's limit or the daily cap."""
+    d = Draft(golden_scenario(BASE_T1))
+    d.sign_as(throwaway_key(901))
+    another_pool_utxo(d)
+    resp = _post(service, d.build())
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "input_unknown"
+    assert "signature_hex" not in resp.text
+    assert service.rows() == 0
+    # The unit's limit is untouched: its holder is still paid.
+    assert _post(service, golden_scenario(BASE_T1)).status_code == 200
+    assert service.rows() == 1
+
+
+def test_an_invented_pool_output_is_refused_beside_a_real_claimant_output(service):
+    d = Draft(golden_scenario(BASE_T1))
+    d.sign_as(throwaway_key(902))
+    service.chain.publish(encode(d.parents[-1]))  # the claimant's output exists
+    another_pool_utxo(d)
+    invented_pool = d.pool_ref()[0]
+    resp = _post(service, d.build())
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "input_unknown"
+    assert invented_pool.hex() in resp.json()["detail"]["detail"]
+    assert service.rows() == 0
+
+
+def test_a_surrender_spending_a_spent_pool_output_is_refused(service):
+    s = golden_scenario(BASE_T1)
+    pool_tx, pool_index = Draft(s).pool_ref()
+    service.chain.spent[(pool_tx.hex(), pool_index)] = "cd" * 32
+    resp = _post(service, s)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "input_spent"
+    assert service.rows() == 0
