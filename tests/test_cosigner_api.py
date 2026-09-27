@@ -17,6 +17,7 @@ from pycardano import PaymentSigningKey
 
 import services.cosigner_api as cosigner
 from services.cosign_policy import SLOT_OFFSET_S, evaluate_surrender, split_tx
+from services.redemption_ledger import create_ledger
 from tests.cosign_cases import (
     ADMIN_1,
     BASE_T1,
@@ -67,6 +68,7 @@ def service(tmp_path, monkeypatch):
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+    create_ledger(env["COSIGNER_LEDGER_PATH"])
 
     class Service:
         vkey = bytes(sk.to_verification_key().payload)
@@ -212,6 +214,17 @@ def test_refuses_to_start_without_its_configuration(service, monkeypatch, missin
     with pytest.raises(ValueError, match=missing):
         with service.client(0):
             pass
+
+
+def test_refuses_to_start_without_its_ledger(service, tmp_path, monkeypatch):
+    """A ledger that went missing would forget every approval, so the
+    service never starts on a fresh one it made itself."""
+    absent = tmp_path / "moved-away.sqlite3"
+    monkeypatch.setenv("COSIGNER_LEDGER_PATH", str(absent))
+    with pytest.raises(FileNotFoundError, match="redemption_ledger init"):
+        with service.client(0):
+            pass
+    assert not absent.exists()
 
 
 def test_refuses_to_start_with_a_short_secret(service, monkeypatch):

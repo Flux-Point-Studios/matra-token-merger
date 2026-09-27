@@ -20,7 +20,8 @@ Environment (all required unless noted):
   COSIGNER_SKEY_PATH          admin_2 signing key file
   COSIGNER_API_SECRET         shared with the surrender API, >= 32 characters
   COSIGNER_PRIMARY_ADMIN_PKH  admin_1 key hash (the other required signer)
-  COSIGNER_LEDGER_PATH        SQLite file recording every signed surrender
+  COSIGNER_LEDGER_PATH        SQLite file recording every signed surrender, created
+                              once with python -m services.redemption_ledger init
   MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
   plus the policy variables read by services.cosign_policy.load_config
   (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,

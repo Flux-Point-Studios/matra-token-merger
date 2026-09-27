@@ -200,7 +200,8 @@ COSIGNER_URL: str = os.environ.get("COSIGNER_URL", "")
 COSIGNER_SECRET: str = os.environ.get("COSIGNER_API_SECRET", "")
 COSIGNER_PKH: str = os.environ.get("COSIGNER_PKH", "")
 # This service's own record of co-signed surrenders, held to the same 24-hour
-# cap and pinned unit limits as the co-signer's.
+# cap and pinned unit limits as the co-signer's. Created once with
+# python -m services.redemption_ledger init; startup refuses a missing one.
 SURRENDER_LEDGER_PATH: str = os.environ.get("SURRENDER_LEDGER_PATH", "")
 MAX_CMATRA_PER_DAY: str = os.environ.get("MAX_CMATRA_PER_DAY", "")
 

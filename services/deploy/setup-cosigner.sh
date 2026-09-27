@@ -134,7 +134,8 @@ MAX_CMATRA_PER_DAY=$MAX_CMATRA_PER_DAY
 ENVFILE
     )
     unset SECRET
-    mkdir -p "$SCRIPT_DIR/data"
+    mkdir -p -m 700 "$SCRIPT_DIR/data"
+    NEW_SIGNER=1
     echo ""
     echo "Created .env.cosigner (mode 600) with a generated API secret."
     echo "Copy COSIGNER_API_SECRET from it into Server A's environment file"
@@ -149,6 +150,20 @@ echo ""
 echo "Building Docker container..."
 cd "$SCRIPT_DIR"
 docker compose -f docker-compose.cosigner.yml build
+
+# The ledger of approvals is created once, for a signer that has never signed.
+# The service refuses to start without it; a replacement would forget every
+# approval and with them the caps.
+LEDGER="$SCRIPT_DIR/data/cosigned.sqlite3"
+if [[ ! -f "$LEDGER" ]]; then
+    if [[ "${NEW_SIGNER:-0}" != 1 ]]; then
+        echo "ERROR: $LEDGER is missing, but this co-signer was set up before." >&2
+        echo "Restore the ledger it has been using; do not start it on a new one." >&2
+        exit 1
+    fi
+    docker compose -f docker-compose.cosigner.yml run --rm --no-deps cosigner \
+        python -m services.redemption_ledger init /app/data/cosigned.sqlite3
+fi
 
 echo ""
 read -p "Start the co-signer service now? [y/N] " START

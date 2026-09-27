@@ -17,20 +17,42 @@ over the pool outputs no recorded transaction produced. Any set of approvals
 that can all land together is counted in full, while a surrender rebuilt
 against the same pool output, or superseded by another surrender of that
 output, is not counted twice.
+
+A ledger that went missing would reset every limit, so it is created once,
+deliberately, and never implicitly:
+
+    python -m services.redemption_ledger init <path>
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import sys
 from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
 from services.cosign_policy import Approval, CosignRejected
 
 DAY_S = 86_400
+
+_SCHEMA = (
+    "CREATE TABLE approvals ("
+    " tx_hash BLOB PRIMARY KEY, pool_tx BLOB NOT NULL, pool_index INTEGER NOT NULL,"
+    " payout INTEGER NOT NULL, units TEXT NOT NULL, signed_at REAL NOT NULL)"
+)
+
+
+def create_ledger(path: str) -> None:
+    """Create an empty ledger at ``path``, readable by its owner only.
+    Raises FileExistsError if anything is already there."""
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    with closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute(_SCHEMA)
 
 
 @dataclass(frozen=True)
@@ -76,14 +98,27 @@ class RedemptionLedger:
     signs with one key."""
 
     def __init__(self, path: str, max_per_day: int) -> None:
+        """Open the ledger at ``path``. Raises FileNotFoundError if there is
+        none, and ValueError if the file there is not a ledger."""
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"{path}: no redemption ledger. Find the one this signer has been using;"
+                f" only for a signer that has never signed: python -m services.redemption_ledger init {path}"
+            )
         self.path = path
         self.max_per_day = max_per_day
-        with closing(sqlite3.connect(path)) as conn, conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS approvals ("
-                " tx_hash BLOB PRIMARY KEY, pool_tx BLOB NOT NULL, pool_index INTEGER NOT NULL,"
-                " payout INTEGER NOT NULL, units TEXT NOT NULL, signed_at REAL NOT NULL)"
-            )
+        # mode=rw: a connection never creates the file, so a ledger removed
+        # while the service runs fails every write instead of starting over.
+        self._uri = Path(path).resolve().as_uri() + "?mode=rw"
+        with closing(self._connect()) as conn:
+            found = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'approvals'"
+            ).fetchone()
+        if found is None:
+            raise ValueError(f"{path} is not a redemption ledger")
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self._uri, uri=True, timeout=10, isolation_level=None)
 
     def check(self, approval: Approval, now: float, limits: Mapping[str, int]) -> None:
         """Raise :class:`CosignRejected` if recording ``approval`` would pass a
@@ -96,7 +131,7 @@ class RedemptionLedger:
         self._admit(approval, now, limits, record=True)
 
     def _admit(self, approval: Approval, now: float, limits: Mapping[str, int], record: bool) -> None:
-        with closing(sqlite3.connect(self.path, timeout=10, isolation_level=None)) as conn:
+        with closing(self._connect()) as conn:
             conn.execute("BEGIN IMMEDIATE" if record else "BEGIN")
             try:
                 rows = [
@@ -132,3 +167,13 @@ class RedemptionLedger:
         paid = _heaviest((row for row in rows if row.signed_at > now - DAY_S), lambda row: row.payout)
         if paid > self.max_per_day:
             raise CosignRejected("daily_cap", f"{paid} in 24h would pass {self.max_per_day}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3 or sys.argv[1] != "init":
+        sys.exit("usage: python -m services.redemption_ledger init <path>")
+    try:
+        create_ledger(sys.argv[2])
+    except FileExistsError:
+        sys.exit(f"{sys.argv[2]} exists; a ledger is never replaced")
+    print(f"created an empty redemption ledger at {sys.argv[2]}")

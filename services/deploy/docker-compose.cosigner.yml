@@ -6,8 +6,9 @@ version: "3.8"
 # Runs on a SEPARATE machine from Server A (the surrender API).
 # This machine holds admin key 2 and co-signs a transaction only after
 # services/cosign_policy.py has verified it as a surrender. ./data holds the
-# ledger of signed payouts that enforces the per-day cap; keep it across
-# restarts and upgrades.
+# ledger of signed payouts that enforces the caps; keep it across restarts
+# and upgrades. setup-cosigner.sh creates it once; the service refuses to start
+# without it.
 #
 # Setup:
 #   1. Copy this file + .env.cosigner to the co-signer host

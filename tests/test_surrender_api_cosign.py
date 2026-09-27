@@ -40,7 +40,7 @@ import services.cosigner_api as cosigner
 import services.surrender_api as api
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
-from services.redemption_ledger import RedemptionLedger
+from services.redemption_ledger import RedemptionLedger, create_ledger
 from tests.cosign_cases import ledger_refusing_writes
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
@@ -196,6 +196,7 @@ class World:
         }
         self.cosigner_sk.save(env["COSIGNER_SKEY_PATH"])
         self.ledger = env["COSIGNER_LEDGER_PATH"]
+        create_ledger(self.ledger)
         for key, value in env.items():
             monkeypatch.setenv(key, value)
         monkeypatch.setattr(cosigner.time, "time", lambda: NOW + SLOT_OFFSET_S[NETWORK])
@@ -205,6 +206,7 @@ class World:
         self.signed_by_admin: list[bytes] = []
         self.cosign_calls = 0
         self._wire_surrender_api(env)
+        create_ledger(str(tmp_path / "primary.sqlite3"))
         self.primary_ledger = RedemptionLedger(str(tmp_path / "primary.sqlite3"), 10**15)
         monkeypatch.setattr(api.state, "ledger", self.primary_ledger)
 

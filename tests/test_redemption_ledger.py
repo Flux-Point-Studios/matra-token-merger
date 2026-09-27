@@ -7,13 +7,20 @@ transaction spends, its payout and the units it quarantines."""
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
+import subprocess
+import sys
 import threading
+from pathlib import Path
 
 import pytest
 
 from services.cosign_policy import Approval, CosignRejected
-from services.redemption_ledger import DAY_S, RedemptionLedger
+from services.redemption_ledger import DAY_S, RedemptionLedger, create_ledger
+
+ROOT = Path(__file__).resolve().parent.parent
 
 UNIT = "ab" * 28 + "01"
 OTHER = "ab" * 28 + "02"
@@ -39,7 +46,9 @@ def after(n: int) -> tuple[bytes, int]:
 
 @pytest.fixture
 def ledger(tmp_path):
-    return RedemptionLedger(str(tmp_path / "ledger.sqlite3"), max_per_day=100)
+    path = str(tmp_path / "ledger.sqlite3")
+    create_ledger(path)
+    return RedemptionLedger(path, max_per_day=100)
 
 
 def rows(ledger: RedemptionLedger) -> int:
@@ -176,3 +185,64 @@ def test_concurrent_writers_never_pass_the_cap(ledger):
     assert errors == []
     assert len(admitted) == 10
     assert rows(ledger) == 10
+
+
+# ---------------------------------------------------------------------------
+# A ledger is created once, deliberately; losing it is never a fresh start
+# ---------------------------------------------------------------------------
+
+
+def test_a_missing_ledger_file_is_refused_and_not_created(tmp_path):
+    path = tmp_path / "absent.sqlite3"
+    with pytest.raises(FileNotFoundError, match="redemption_ledger init"):
+        RedemptionLedger(str(path), max_per_day=100)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("content", [b"", b"not a database"])
+def test_a_file_that_is_not_a_ledger_is_refused(tmp_path, content):
+    path = tmp_path / "other.sqlite3"
+    path.write_bytes(content)
+    with pytest.raises((ValueError, sqlite3.DatabaseError)):
+        RedemptionLedger(str(path), max_per_day=100)
+
+
+def test_a_database_without_the_approvals_table_is_refused(tmp_path):
+    path = tmp_path / "other.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE unrelated (x)")
+    with pytest.raises(ValueError, match="not a redemption ledger"):
+        RedemptionLedger(str(path), max_per_day=100)
+
+
+def test_a_ledger_removed_while_in_use_is_not_recreated(ledger):
+    ledger.record(approval(1, POOL_ROOT), 1000.0, LIMITS)
+    os.remove(ledger.path)
+    with pytest.raises(sqlite3.OperationalError):
+        ledger.record(approval(2, after(1)), 1000.0, LIMITS)
+    assert not os.path.exists(ledger.path)
+
+
+def test_create_ledger_makes_an_empty_private_ledger(tmp_path):
+    path = str(tmp_path / "new.sqlite3")
+    create_ledger(path)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert rows(RedemptionLedger(path, max_per_day=100)) == 0
+
+
+def test_create_ledger_never_replaces_an_existing_ledger(ledger):
+    ledger.record(approval(1, POOL_ROOT), 1000.0, LIMITS)
+    with pytest.raises(FileExistsError):
+        create_ledger(ledger.path)
+    assert rows(ledger) == 1
+
+
+def test_init_command_creates_the_ledger_once(tmp_path):
+    path = tmp_path / "cli.sqlite3"
+    command = [sys.executable, "-m", "services.redemption_ledger", "init", str(path)]
+    first = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    assert rows(RedemptionLedger(str(path), max_per_day=100)) == 0
+    again = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+    assert again.returncode != 0
+    assert "exists" in again.stderr
