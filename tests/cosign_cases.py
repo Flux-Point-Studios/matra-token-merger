@@ -158,6 +158,8 @@ class Draft:
         self.raw_ws: bytes | None = None
         self.drop_parents: set[bytes] = set()
         self.header = b"\x84"
+        self.tail = b"\xf5\xf6"
+        self.datums_in_hash = False
         self.signer: nacl.signing.SigningKey | None = None
 
     def sign_as(self, key: nacl.signing.SigningKey) -> None:
@@ -227,7 +229,8 @@ class Draft:
                 for (tag, index), value in self.ws[5].items()
             }
         if self.rehash and 5 in self.ws:
-            self.body[11] = blake(encode(self.ws[5]) + self.language_views)
+            datums = encode(self.ws[4]) if self.datums_in_hash else b""
+            self.body[11] = blake(encode(self.ws[5]) + datums + self.language_views)
         body_raw = self.raw_body if self.raw_body is not None else encode(self.body)
         if self.signer is not None:
             vkey = bytes(self.signer.verify_key)
@@ -238,7 +241,7 @@ class Draft:
             encode(p) for p in self.parents if blake(encode(p)) not in self.drop_parents
         )
         return Scenario(
-            self.header + body_raw + ws_raw + b"\xf5\xf6",
+            self.header + body_raw + ws_raw + self.tail,
             self.language_views, parents, self.now, self.cfg,
         )
 
@@ -361,6 +364,20 @@ def tx_is_not_a_four_element_array(d):
 @case("tx_shape")
 def tx_has_trailing_bytes(d):
     d.raw_ws = encode(d.ws) + b"\x00"
+
+
+@case("tx_tail")
+def transaction_marked_invalid(d):
+    """is_valid false: the ledger runs the pool script expecting it to fail,
+    and refuses the transaction when it passes."""
+    d.tail = b"\xf4\xf6"
+
+
+@case("tx_tail")
+def auxiliary_data_attached(d):
+    """Auxiliary data without the body's metadata hash, which a surrender
+    may not carry anyway."""
+    d.tail = b"\xf5\xa0"
 
 
 @case("body_shape")
@@ -811,6 +828,26 @@ def witness_set_key_is_a_boolean(d):
 @case("witness_shape")
 def witness_set_key_is_not_a_conway_field(d):
     d.ws[8] = []
+
+
+@case("witness_shape")
+def witness_datums_empty(d):
+    """Conway declares the datums field a nonempty set, and the ledger leaves
+    an empty one out of script_data_hash; hashed in, the transaction could
+    never land."""
+    d.ws[4] = []
+    d.datums_in_hash = True
+
+
+@case("witness_shape")
+def witness_datums_an_empty_tagged_set(d):
+    d.ws[4] = Tag(258, [])
+    d.datums_in_hash = True
+
+
+@case("witness_shape")
+def witness_native_scripts_empty(d):
+    d.ws[1] = []
 
 
 @case("redeemers_missing")

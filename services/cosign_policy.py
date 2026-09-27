@@ -104,6 +104,8 @@ class Simple(Enum):
 
 VOID_INLINE_DATUM = [1, Tag(24, bytes.fromhex("d87980"))]
 PROCESS_SURRENDER = Tag(121, [])
+# A transaction's last two items: is_valid true, no auxiliary data.
+_VALID_WITHOUT_AUXILIARY_DATA = b"\xf5\xf6"
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +234,9 @@ def split_tx(tx_cbor: bytes) -> tuple[bytes, bytes, bytes]:
 
 def _witness_fields(buf: bytes) -> dict[int, bytes]:
     """A witness set's fields as their exact encoded bytes, keyed by the
-    Conway field number (0-7); the ledger cannot decode any other key. ``buf``
+    Conway field number (0-7); the ledger cannot decode any other key, nor an
+    empty set in any field but the redeemers (Conway declares the others
+    nonempty sets, and leaves empty datums out of script_data_hash). ``buf``
     has already passed ``decode`` (via ``split_tx``), so keys are unique."""
     major, count, pos = _head(buf, 0)
     if major != 5 or count is None:
@@ -243,7 +247,9 @@ def _witness_fields(buf: bytes) -> dict[int, bytes]:
         if not (_uint(key) and key <= 7):
             raise CosignRejected("witness_shape", f"witness set key {key!r}")
         start = pos
-        _, pos = _item(buf, pos, 1)
+        value, pos = _item(buf, pos, 1)
+        if key != 5 and value in ([], Tag(258, [])):
+            raise CosignRejected("witness_shape", f"witness set field {key} is an empty set")
         out[key] = buf[start:pos]
     return out
 
@@ -418,7 +424,9 @@ def evaluate_surrender(
     the redeemers, and a CBOR item is self-delimiting, so a matching hash pins
     the redeemers inspected here whatever suffix the caller supplies.
     """
-    body_raw, witness_raw, _ = split_tx(tx_cbor)
+    body_raw, witness_raw, tail = split_tx(tx_cbor)
+    if tail != _VALID_WITHOUT_AUXILIARY_DATA:
+        raise CosignRejected("tx_tail", "not marked valid, or carries auxiliary data")
     body = decode(body_raw)
     if not isinstance(body, dict):
         raise CosignRejected("body_shape", "transaction body is not a map")
