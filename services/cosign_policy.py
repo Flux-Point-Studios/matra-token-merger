@@ -35,8 +35,9 @@ redemptions are enforced against every signer's own record by
 services.redemption_ledger.
 
 Decoding is strict and self-contained: a duplicated map key anywhere, trailing
-bytes, floats or undefined simple values are refused, and CBOR booleans and
-tags never compare equal to integers or arrays, so the policy never reads a
+bytes, floats or undefined simple values are refused, CBOR booleans and tags
+never compare equal to integers or arrays, and an output's policy ids must be
+28 bytes and its asset names at most 32, so the policy never reads a
 different value than the ledger would.
 """
 
@@ -302,9 +303,16 @@ def _value(raw: Any) -> tuple[int, dict[bytes, dict[bytes, int]]]:
     for policy, names in assets.items():
         if not isinstance(policy, bytes) or not isinstance(names, dict):
             raise CosignRejected("output_shape", "malformed asset bundle")
+        # The ledger's own limits: a policy id is a 28-byte script hash and
+        # an asset name at most 32 bytes. Units are keyed as policy + name
+        # hex, which only these lengths keep unambiguous.
+        if len(policy) != 28:
+            raise CosignRejected("output_shape", f"policy id of {len(policy)} bytes")
         for name, quantity in names.items():
             if not isinstance(name, bytes) or not _uint(quantity):
                 raise CosignRejected("output_shape", "malformed asset quantity")
+            if len(name) > 32:
+                raise CosignRejected("output_shape", f"asset name of {len(name)} bytes")
     return coin, assets
 
 

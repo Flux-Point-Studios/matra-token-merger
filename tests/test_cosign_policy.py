@@ -14,6 +14,7 @@ from services.cosign_policy import (
     decode,
     evaluate_surrender,
     load_config,
+    parse_output,
     require_claimant_signature,
     slot_at,
     split_tx,
@@ -24,6 +25,7 @@ from tests.cosign_cases import (
     CASES,
     DECODE_ACCEPTED,
     DECODE_REFUSED,
+    OUTPUTS_ACCEPTED,
     SPLIT_REFUSED,
     WITNESS_CASES,
     MAINNET,
@@ -228,6 +230,11 @@ def test_split_tx_refuses_a_truncated_final_item(name, raw):
 @pytest.mark.parametrize("raw,value", DECODE_ACCEPTED)
 def test_decoder_reads_valid_encodings(raw, value):
     assert decode(raw) == value
+
+
+@pytest.mark.parametrize("name,raw", OUTPUTS_ACCEPTED, ids=[n for n, _ in OUTPUTS_ACCEPTED])
+def test_outputs_at_the_limits_of_an_asset_id_are_read(name, raw):
+    assert parse_output(raw).assets == raw[1][1]
 
 
 def test_split_tx_returns_exact_body_witnesses_and_tail():

@@ -798,6 +798,21 @@ def output_asset_bundle_malformed(d):
     d.body[1][PAYOUT][1][1][CMATRA_POLICY] = [CMATRA_NAME]
 
 
+@case("output_shape")
+def output_policy_id_of_27_bytes(d):
+    _add_asset(d.body[1][CHANGE], b"\xee" * 27, b"x", 1)
+
+
+@case("output_shape")
+def output_policy_id_of_29_bytes(d):
+    _add_asset(d.body[1][CHANGE], b"\xee" * 29, b"x", 1)
+
+
+@case("output_shape")
+def output_asset_name_of_33_bytes(d):
+    _add_asset(d.body[1][CHANGE], b"\xee" * 28, b"\x01" * 33, 1)
+
+
 @case("pool_datum")
 def pool_datum_altered(d):
     d.body[1][CONTINUATION][2] = [1, Tag(24, bytes.fromhex("d87a80"))]
@@ -867,6 +882,20 @@ def quarantined_nft_under_a_foreign_policy(d):
     _add_asset(d.body[1][QUARANTINE_OUT], policy, name, -1)
     _add_asset(d.body[1][QUARANTINE_OUT], b"\xee" * 28, b"junk", 1)
     d.move_cmatra(CONTINUATION, PAYOUT, 99 * T1_RATE)
+
+
+@case("output_shape")
+def quarantined_pass_split_across_policy_and_name(d):
+    """The pass with its policy id cut to 27 bytes and the 28th byte moved
+    into its name, in the claimant's input and in quarantine: an asset the
+    ledger cannot hold, whose policy and name spell the pass's unit."""
+    policy = bytes.fromhex(T1_ADAM_PASS.policy_id)
+    name = _quarantine_nft(d)
+    held = next(r for r in d.inputs() if name in d.parent_output(r)[1][1].get(policy, {}))
+    for output in (split := copy.deepcopy(d.parent_output(held))), d.body[1][QUARANTINE_OUT]:
+        _add_asset(output, policy, name, -1)
+        _add_asset(output, policy[:27], policy[27:] + name, 1)
+    d.replace_parent_output(held, split)
 
 
 @case("quarantine_assets")
@@ -1154,6 +1183,13 @@ DECODE_ACCEPTED: list[tuple[bytes, Any]] = [
     (b"\xf5", Simple.TRUE),
     (b"\xf4", Simple.FALSE),
     (b"\xf6", None),
+]
+
+# Outputs at the limits of an asset id that the ledger accepts: a 28-byte
+# policy id with a 32-byte or an empty asset name.
+OUTPUTS_ACCEPTED: list[tuple[str, list]] = [
+    ("asset_name_of_32_bytes", [ATTACKER, [2_000_000, {b"\xee" * 28: {b"\x01" * 32: 1}}]]),
+    ("empty_asset_name", [ATTACKER, [2_000_000, {b"\xee" * 28: {b"": 1}}]]),
 ]
 
 # Transactions whose final item is cut short: the decoder must say "cbor"
