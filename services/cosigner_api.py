@@ -1,179 +1,201 @@
 #!/usr/bin/env python3
 """
-Co-Signer Microservice (Server B) for Dual-Admin Surrender Pool.
+Co-signer service (Server B) for the dual-admin surrender pool.
 
-This is a lightweight FastAPI service that runs on a SEPARATE server from the
-main surrender API.  It holds the second admin signing key and provides a
-single endpoint: sign a transaction hash and return the VK witness.
+Runs on a separate host from the surrender API and holds the second admin
+key. It signs a transaction only after it has read the whole transaction,
+services.cosign_policy has approved it as a surrender that its claimant has
+signed, services.chain_check has confirmed it against this host's own view
+of the chain, and services.redemption_ledger has recorded it within the
+24-hour cap and each surrendered unit's pinned limit. The check does not
+depend on anything the surrender API asserts: input values come from
+producing bodies hashed against the inputs' transaction ids.
 
-The main surrender API (Server A) builds the transaction, signs with Key A,
-then calls this service to get Key B's signature.  Both signatures are merged
-into the transaction before returning it to the user.
+POST /cosign takes the full transaction carrying the claimant's witness, the
+bodies of the transactions that produced its inputs (each is checked against
+the input's transaction id), and the PlutusV3 language views that close its
+script_data_hash. Requests carry a shared secret in X-API-Secret, compared in
+constant time.
 
-Security:
-  - Protected by a shared API secret (COSIGNER_API_SECRET)
-  - Only signs transaction hashes — never sees or builds full transactions
-  - Should run on separate infrastructure from Server A
-  - If Server A is compromised, attacker still can't drain the pool
-    (they'd need Server B's key too, and the validator requires both)
+Environment (all required unless noted):
+  COSIGNER_SKEY_PATH          admin_2 signing key file
+  COSIGNER_API_SECRET         shared with the surrender API, >= 32 characters
+  COSIGNER_PRIMARY_ADMIN_PKH  admin_1 key hash (the other required signer)
+  COSIGNER_LEDGER_PATH        SQLite file recording every signed surrender, created
+                              once with python -m services.redemption_ledger init
+  MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
+  BLOCKFROST_PROJECT_ID       this host's Blockfrost project on NETWORK
+  plus the policy variables read by services.cosign_policy.load_config
+  (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
+  CMATRA_ASSET_HEX, SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, and
+  optionally RATE_TABLE_PATH / REDEMPTION_PIN_PATH).
 
 Usage:
-  # Set environment variables
-  export COSIGNER_SKEY_PATH=/secure/path/to/admin_2.skey
-  export COSIGNER_API_SECRET=<shared-secret-with-server-a>
-
-  # Run
-  py -3.12 -m services.cosigner_api
+  uvicorn services.cosigner_api:app --host <lan-ip> --port 8421
 """
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
-import sys
-from pathlib import Path
+import sqlite3
+import time
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+from pycardano import PaymentSigningKey, PaymentVerificationKey
 
-from pycardano import (
-    PaymentSigningKey,
-    PaymentVerificationKey,
-    VerificationKey,
-    VerificationKeyWitness,
+from services.chain_check import ChainUnavailable, confirm_on_chain
+from services.cosign_policy import (
+    CosignConfig,
+    CosignRejected,
+    evaluate_surrender,
+    load_config,
+    require_claimant_signature,
+    slot_at,
 )
+from services.redemption_ledger import RedemptionLedger
+from tools.api_clients import BlockfrostClient
+from tools.config import BLOCKFROST_BASE_URLS
 
 logger = logging.getLogger("cosigner_api")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-COSIGNER_SKEY_PATH: str = os.environ.get("COSIGNER_SKEY_PATH", "")
-COSIGNER_API_SECRET: str = os.environ.get("COSIGNER_API_SECRET", "")
-COSIGNER_PORT: int = int(os.environ.get("COSIGNER_API_PORT", "8421"))
-
-# ---------------------------------------------------------------------------
-# State
-# ---------------------------------------------------------------------------
+MIN_SECRET_LENGTH = 32
 
 
 class CosignerState:
     sk: PaymentSigningKey | None = None
-    vk: PaymentVerificationKey | None = None
+    vkey_hex: str = ""
     pkh_hex: str = ""
+    secret: bytes = b""
+    cfg: CosignConfig | None = None
+    ledger: RedemptionLedger | None = None
+    chain: BlockfrostClient | None = None
 
 
 state = CosignerState()
 
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
+# Whole bytes only: bytes.fromhex refuses an odd digit count.
+_HEX_BYTES = r"^(?:[0-9a-fA-F]{2})+$"
+HexString = Annotated[str, StringConstraints(max_length=65_536, pattern=_HEX_BYTES)]
 
 
 class CosignRequest(BaseModel):
-    """Request to co-sign a transaction hash."""
-    tx_hash_hex: str = Field(
-        ..., description="Transaction body hash (hex, 64 chars)",
-        min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]+$",
-    )
+    tx_cbor_hex: HexString = Field(..., min_length=8)
+    parent_bodies_hex: list[HexString] = Field(..., min_length=1, max_length=256)
+    language_views_hex: str = Field(..., min_length=2, max_length=16_384, pattern=_HEX_BYTES)
 
 
 class CosignResponse(BaseModel):
-    """Response with the VK witness."""
     vkey_hex: str
     signature_hex: str
     pkh_hex: str
+    tx_hash: str
+    payout: int
 
 
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
+app = FastAPI(title="cMATRA Co-Signer", version="2.0.0")
 
-app = FastAPI(title="cMATRA Co-Signer", version="1.0.0")
 
-# No CORS needed — this is server-to-server only
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[],  # no browser access
-    allow_methods=["POST", "GET"],
-    allow_headers=["Content-Type", "X-API-Secret"],
-)
+def _need(key: str) -> str:
+    value = os.environ.get(key, "").strip()
+    if not value:
+        raise ValueError(f"{key} must be set")
+    return value
+
+
+@app.on_event("startup")
+def startup() -> None:
+    """Load the key, the policy and the ledger; refuse to start without any of them."""
+    secret = _need("COSIGNER_API_SECRET")
+    if len(secret) < MIN_SECRET_LENGTH:
+        raise ValueError(f"COSIGNER_API_SECRET must be at least {MIN_SECRET_LENGTH} characters")
+    sk = PaymentSigningKey.load(_need("COSIGNER_SKEY_PATH"))
+    vk = PaymentVerificationKey.from_signing_key(sk)
+    primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
+    ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")))
+    cfg = load_config(os.environ, [primary, vk.hash().payload])
+    chain = BlockfrostClient(_need("BLOCKFROST_PROJECT_ID"), BLOCKFROST_BASE_URLS[cfg.network])
+
+    state.sk = sk
+    state.vkey_hex = vk.payload.hex()
+    state.pkh_hex = vk.hash().payload.hex()
+    state.secret = secret.encode()
+    state.cfg = cfg
+    state.ledger = ledger
+    state.chain = chain
+    logger.info(
+        "Co-signer ready: PKH=%s network=%s per-tx cap=%d per-day cap=%d pinned units=%d",
+        state.pkh_hex, cfg.network, cfg.max_payout_per_tx, ledger.max_per_day,
+        len(cfg.redemption_limits),
+    )
 
 
 @app.middleware("http")
 async def verify_secret(request: Request, call_next):
-    """Reject requests without valid API secret (except health)."""
+    """Every route but /health needs the shared secret."""
     if request.url.path == "/health":
         return await call_next(request)
-    if request.method == "OPTIONS":
-        return await call_next(request)
-
-    if not COSIGNER_API_SECRET:
-        return JSONResponse(status_code=503, content={"detail": "Not configured"})
-
-    provided = request.headers.get("x-api-secret", "")
-    if not provided or provided != COSIGNER_API_SECRET:
+    provided = request.headers.get("x-api-secret", "").encode()
+    if not state.secret or not hmac.compare_digest(provided, state.secret):
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
-
     return await call_next(request)
 
 
-@app.on_event("startup")
-def startup():
-    if COSIGNER_SKEY_PATH and Path(COSIGNER_SKEY_PATH).exists():
-        state.sk = PaymentSigningKey.load(COSIGNER_SKEY_PATH)
-        state.vk = PaymentVerificationKey.from_signing_key(state.sk)
-        state.pkh_hex = state.vk.hash().payload.hex()
-        logger.info("Co-signer key loaded: PKH=%s", state.pkh_hex)
-    else:
-        logger.error("COSIGNER_SKEY_PATH not set or file missing: %s", COSIGNER_SKEY_PATH)
-
-
 @app.post("/cosign", response_model=CosignResponse)
-def cosign(req: CosignRequest):
-    """Sign a transaction hash with the co-signer key.
-
-    Returns the verification key and signature so Server A can construct
-    a VerificationKeyWitness and merge it into the transaction.
-    """
-    if not state.sk:
-        raise HTTPException(503, "Co-signer key not loaded")
-
+def cosign(req: CosignRequest) -> CosignResponse:
+    """Verify the full transaction and its claimant's signature, confirm it
+    against the chain, record it within the cap and the pinned unit limits,
+    then sign its body hash."""
+    now = time.time()
+    tx = bytes.fromhex(req.tx_cbor_hex)
     try:
-        tx_hash_bytes = bytes.fromhex(req.tx_hash_hex)
-        signature = state.sk.sign(tx_hash_bytes)
-        vk = VerificationKey.from_signing_key(state.sk)
-
-        logger.info("Co-signed tx: %s", req.tx_hash_hex[:16])
-
-        return CosignResponse(
-            vkey_hex=vk.payload.hex(),
-            signature_hex=signature.hex(),
-            pkh_hex=state.pkh_hex,
+        approval = evaluate_surrender(
+            tx,
+            bytes.fromhex(req.language_views_hex),
+            [bytes.fromhex(body) for body in req.parent_bodies_hex],
+            slot_at(now, state.cfg.network),
+            state.cfg,
         )
-    except Exception as e:
-        logger.error("Co-sign failed: %s", e)
-        raise HTTPException(500, "Co-signing failed")
+        require_claimant_signature(tx, approval)
+        confirm_on_chain(approval, state.cfg, state.chain, state.ledger.recorded)
+        state.ledger.record(approval, now, state.cfg.redemption_limits)
+    except CosignRejected as exc:
+        logger.warning("Refused to co-sign: %s", exc)
+        raise HTTPException(422, {"code": exc.code, "detail": exc.detail})
+    except ChainUnavailable as exc:
+        logger.error("Refused to co-sign: chain view unavailable: %s", exc)
+        raise HTTPException(
+            503, {"code": "chain_unavailable", "detail": "the chain view cannot confirm the transaction"},
+        )
+    except sqlite3.Error as exc:
+        logger.error("Refused to co-sign: ledger unavailable: %s", exc)
+        raise HTTPException(
+            503, {"code": "ledger_unavailable", "detail": "the signing ledger cannot be written"},
+        )
+
+    signature = state.sk.sign(approval.tx_hash)
+    logger.info(
+        "Co-signed %s: payout %d to %s", approval.tx_hash.hex(), approval.payout,
+        approval.claimant.hex(),
+    )
+    return CosignResponse(
+        vkey_hex=state.vkey_hex,
+        signature_hex=signature.hex(),
+        pkh_hex=state.pkh_hex,
+        tx_hash=approval.tx_hash.hex(),
+        payout=approval.payout,
+    )
 
 
 @app.get("/health")
-def health():
+def health() -> dict:
     return {
         "status": "ok",
         "key_loaded": state.sk is not None,
         "pkh": state.pkh_hex[:16] + "..." if state.pkh_hex else None,
     }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "services.cosigner_api:app",
-        host="0.0.0.0",
-        port=COSIGNER_PORT,
-        log_level="info",
-    )

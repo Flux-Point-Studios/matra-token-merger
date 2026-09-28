@@ -29,9 +29,10 @@ import argparse
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import cbor2
 from cbor2 import CBORTag
@@ -54,8 +55,14 @@ from pycardano import (
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
 
 from tools.api_clients import BlockfrostClient
-from tools.cardano_utils import estimate_min_ada, payment_key_hash_from_skey
-from tools.config import FLUX_DECIMALS, PUBLIC_POOL_BASE
+from tools.cardano_utils import estimate_min_ada
+from tools.config import (
+    ALL_MERGE_ASSETS,
+    FLUX_DECIMALS,
+    LEGACY_TOKENS,
+    NFT_COLLECTIONS,
+    PUBLIC_POOL_BASE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +196,77 @@ def compute_redemption(
     #   NFT:      count_of_nfts * rate_base_per_unit
     redemption = quantity_base * rate_base
     return redemption
+
+
+@dataclass(frozen=True)
+class RedemptionPin:
+    """What may still be surrendered, from a pin written by
+    scripts/pin_redemption.py."""
+
+    nft_units: frozenset[str]
+    """Every NFT unit (policy hex + asset-name hex) that existed at the pin."""
+    remaining: Mapping[str, int]
+    """Per unit, NFT or fungible: its supply at the pin, less the team waiver,
+    less what the quarantine address already held (never below zero)."""
+    supply: Mapping[str, int]
+    """Per unit: its on-chain supply at the pin. More on chain now means
+    editions minted since, which the signers refuse to redeem."""
+
+
+def load_redemption_pin(path: Path) -> RedemptionPin:
+    """Load a redemption pin, checking every merge asset is pinned under its
+    configured policy and a fungible only as its configured token.
+
+    Raises ValueError otherwise.
+    """
+    doc = json.loads(Path(path).read_text())
+    nft_units: set[str] = set()
+    remaining: dict[str, int] = {}
+    supply: dict[str, int] = {}
+    for asset in ALL_MERGE_ASSETS:
+        entry = doc["assets"].get(asset.name)
+        if entry is None or entry["policy_id"] != asset.policy_id:
+            raise ValueError(f"{path}: {asset.name} is not pinned under {asset.policy_id}")
+        fungible = hasattr(asset, "asset_name_hex")
+        if fungible and set(entry["units"]) != {asset.asset_name_hex}:
+            raise ValueError(f"{path}: {asset.name} must pin exactly {asset.asset_name_hex}")
+        for name, row in entry["units"].items():
+            unit = asset.policy_id + name
+            remaining[unit] = max(0, row["supply"] - row["waiver"] - row["quarantined"])
+            supply[unit] = row["supply"]
+            if not fungible:
+                nft_units.add(unit)
+    return RedemptionPin(frozenset(nft_units), remaining, supply)
+
+
+def surrendered_entitlement(
+    rate_table: dict[str, Any],
+    units: Mapping[str, int],
+    redeemable_nfts: frozenset[str],
+) -> int:
+    """cMATRA owed for surrendered legacy units (unit hex -> quantity).
+
+    Quantities are summed per merge asset before pricing, so every caller gets
+    the same floor rounding. A fungible unit counts its quantity; an NFT unit
+    must be in ``redeemable_nfts`` and have quantity 1.
+
+    Raises ValueError for anything else.
+    """
+    fungible = {token.unit: token.name for token in LEGACY_TOKENS}
+    collections = {nft.policy_id: nft.name for nft in NFT_COLLECTIONS}
+    per_asset: dict[str, int] = {}
+    for unit, quantity in units.items():
+        if unit in fungible:
+            name, count = fungible[unit], quantity
+        elif unit in redeemable_nfts and quantity == 1:
+            name, count = collections[unit[:56]], 1
+        else:
+            raise ValueError(f"{unit} x{quantity} is not a redeemable merge asset")
+        per_asset[name] = per_asset.get(name, 0) + count
+    return sum(
+        compute_redemption(rate_table, name, count)
+        for name, count in per_asset.items()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +689,6 @@ def process_surrender_batch(
         )
 
     # Resolve legacy asset info from config for known assets
-    from tools.config import ALL_MERGE_ASSETS
     asset_lookup: dict[str, Any] = {}
     for asset_info in ALL_MERGE_ASSETS:
         asset_lookup[asset_info.name] = asset_info

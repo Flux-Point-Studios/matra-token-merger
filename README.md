@@ -101,23 +101,29 @@ The merger has **two on-chain pieces** and **two operator services**.
                   │  • builds surrender tx  │
                   └───────────┬─────────────┘
                               │ HTTPS (LAN only)
-                              │ X-Cosigner-Secret
+                              │ X-API-Secret
                               ▼
                   ┌─────────────────────────┐
                   │  cosigner_api.py        │
                   │  (Server B — separate   │
                   │  physical host)         │
                   │  • holds admin_2.skey   │
-                  │  • signs only when tx   │
-                  │    matches expected     │
-                  │    surrender pattern    │
+                  │  • signs only a verified│
+                  │    surrender its        │
+                  │    claimant has signed  │
                   └─────────────────────────┘
 ```
 
 Server A and Server B are deployed on **separate physical machines** so that
-compromising one does not yield minting or pool-drain authority. The
-co-signer service refuses to sign any transaction that doesn't match the
-expected surrender / mint / admin-sweep shape.
+compromising one does not yield minting or pool-drain authority. A surrender
+is built unsigned by Server A, signed by the claimant's wallet, and only then
+sent to the co-signer; admin 1 signs last. Both servers check the whole
+transaction against `services/cosign_policy.py` (a pool payout equal to the
+rate-table price of exactly the legacy units moved to quarantine, and the
+claimant's own signature), and each keeps a ledger
+(`services/redemption_ledger.py`) that holds its approvals to a 24-hour cap
+and to what the redemption pin says remains of each legacy unit, and records
+an approval before its signature leaves.
 
 ---
 
@@ -226,10 +232,22 @@ The threat model is **dual-admin compromise**:
   no pool draining for the same reason. The cosigner service additionally
   refuses to sign anything that doesn't match the expected transaction
   pattern (this is defense-in-depth on top of the dual-signature requirement).
+- Each legacy unit redeems at most what remained of it at the redemption pin
+  (`audit_pack/2026-09-27/redemption_pin.json`: its supply at the pin, less
+  the team waiver, less what quarantine already held), so units minted or
+  surrendered before the pin are never paid for again.
+- Neither signer redeems a unit whose supply on chain is above its supply at
+  the pin: editions of one name are indistinguishable, so a later edition
+  stops that unit's redemptions until the admins decide. Each signer asks its
+  own Blockfrost project, from its own host, before it records an approval,
+  and also confirms there that every input is an unspent output on chain or
+  an output of a surrender it recorded, so nothing it records rests on
+  outputs that do not exist.
+  `python -m scripts.pin_redemption --check <pin>` lists every such unit, any
+  redeemable name the pin lacks, and any change in quarantine since the pin.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it
   cannot mint or drain. The front-end never holds either admin key.
-- Compromising user wallets is out of scope — that's a per-user problem,
-  not a protocol-level one.
+- Compromising a user's wallet is out of scope: it affects that user only.
 
 Once the surrender deadline passes, the only on-chain operation the admins
 can perform is the sweep of unclaimed cMATRA. They cannot mint more, they

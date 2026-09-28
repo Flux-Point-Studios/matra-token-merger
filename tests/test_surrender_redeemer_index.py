@@ -7,7 +7,7 @@ in THAT order. So the SPEND redeemer index MUST equal the script (pool) input's
 position in ``sorted(inputs, key=lambda i: (i.tx_id_bytes, i.index))`` or the
 node rejects the tx with ``extraRedeemers=['spend:<n>']``.
 
-This drives the REAL ``_build_cosigned_surrender_tx`` (not the mocked
+This drives the REAL ``_build_surrender_tx`` (not the mocked
 ``_build_tx_blocking`` used by the chaining tests) against synthetic user
 UTxOs whose tx_hashes bracket the pool hash so the script input lands at
 canonical positions 0, 1, and 2. For each, it decodes the assembled tx CBOR
@@ -267,7 +267,7 @@ def _build_with_user_prefix(prefix: str):
         legacy = [
             {"policy_hex": _LEGACY_POLICY, "asset_hex": _LEGACY_ASSET, "quantity": 1}
         ]
-        tx_cbor_hex, _tx_hash, _pool_out, _user_change = api._build_cosigned_surrender_tx(
+        tx_cbor_hex, _tx_hash, _pool_out, _user_change = api._build_surrender_tx(
             user_addr_bech, 100, legacy, pool_utxo
         )
     return tx_cbor_hex

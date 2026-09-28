@@ -37,7 +37,7 @@ logger = logging.getLogger("surrender_api.pool_tip")
 VOID_DATUM_HEX = "d87980"
 
 # The pool-change output is ALWAYS index 1. Determinism (proven in the design
-# doc): _build_cosigned_surrender_tx adds outputs (0) cMATRA->user, (1)
+# doc): _build_surrender_tx adds outputs (0) cMATRA->user, (1)
 # pool-change->script, (2) quarantine; builder.build() defaults
 # merge_change=False; pycardano sorts inputs but NOT explicit outputs and
 # appends change AFTER them. So index 1 is fixed even if change splits into
@@ -138,7 +138,7 @@ class PoolTip:
 
     def as_pool_utxo_dict(self) -> dict[str, Any]:
         """Reconstruct the ``pool_utxo`` dict shape that
-        ``_build_cosigned_surrender_tx`` consumes (no signature change)."""
+        ``_build_surrender_tx`` consumes (no signature change)."""
         return {
             "tx_hash": self.tx_hash,
             "output_index": self.output_index,

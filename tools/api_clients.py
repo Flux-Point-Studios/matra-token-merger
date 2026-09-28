@@ -32,6 +32,10 @@ _MAX_RETRIES = 5
 _BACKOFF_BASE = 1.5  # seconds
 
 
+class BlockfrostUnavailable(RuntimeError):
+    """Every retry got a transient error (429 or 5xx)."""
+
+
 def _request_with_retry(
     method: str,
     url: str,
@@ -74,7 +78,7 @@ def _request_with_retry(
                 time.sleep(wait)
             else:
                 raise
-    raise RuntimeError(f"Exhausted retries for {url}")
+    raise BlockfrostUnavailable(f"Exhausted retries for {url}")
 
 
 # ===================================================================
@@ -145,6 +149,13 @@ class BlockfrostClient:
     def get_tx_utxos(self, tx_hash: str) -> dict[str, Any]:
         return self._get(f"/txs/{tx_hash}/utxos")
 
+    def get_tx(self, tx_hash: str) -> dict[str, Any]:
+        return self._get(f"/txs/{tx_hash}")
+
+    def get_tx_cbor(self, tx_hash: str) -> bytes:
+        """The transaction exactly as it sits on chain (body, witnesses, …)."""
+        return bytes.fromhex(self._get(f"/txs/{tx_hash}/cbor")["cbor"])
+
     def submit_tx(self, cbor_bytes: bytes) -> str:
         """Submit a signed transaction. Returns tx hash.
 
@@ -180,16 +191,29 @@ class BlockfrostClient:
             path += f"/{asset}"
         return self._get_all_pages(path)
 
+    def get_address_transactions(self, address: str) -> list[dict[str, Any]]:
+        """Every transaction touching *address*, oldest first (auto-paged)."""
+        return self._get_all_pages(
+            f"/addresses/{address}/transactions", extra_params={"order": "asc"},
+        )
+
     # -- policy assets ---------------------------------------------------
 
     def get_policy_assets(self, policy_id: str) -> list[dict[str, Any]]:
         """Return all assets minted under *policy_id* (auto-paged)."""
         return self._get_all_pages(f"/assets/policy/{policy_id}")
 
+    def get_asset_history(self, unit: str) -> list[dict[str, Any]]:
+        """Every mint and burn of *unit*, oldest first (auto-paged)."""
+        return self._get_all_pages(f"/assets/{unit}/history", extra_params={"order": "asc"})
+
     # -- protocol params -------------------------------------------------
 
     def get_protocol_parameters(self) -> dict[str, Any]:
         return self._get("/epochs/latest/parameters")
+
+    def get_epoch_parameters(self, epoch: int) -> dict[str, Any]:
+        return self._get(f"/epochs/{epoch}/parameters")
 
 
 # ===================================================================

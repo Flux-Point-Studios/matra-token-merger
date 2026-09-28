@@ -5,7 +5,7 @@
 #
 # Run this ON the GMKTec machine. It will:
 #   1. Generate admin key pair 2 (the key NEVER leaves this machine)
-#   2. Create the .env.cosigner file
+#   2. Create .env.cosigner, or add the settings an existing one lacks
 #   3. Build and start the Docker container
 #   4. Print the PKH for you to configure on Server A
 #
@@ -100,33 +100,94 @@ echo "    2. Validator compile: aiken blueprint apply (2nd param)"
 echo ""
 echo "============================================"
 
-# --- Step 3: Create .env.cosigner ---
-if [[ ! -f "$SCRIPT_DIR/.env.cosigner" ]]; then
-    SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-    cat > "$SCRIPT_DIR/.env.cosigner" <<EOF
-COSIGNER_SKEY_PATH=/app/keys/admin_2.skey
-COSIGNER_API_SECRET=$SECRET
-COSIGNER_API_PORT=8421
-EOF
-    chmod 600 "$SCRIPT_DIR/.env.cosigner"
-    echo ""
-    echo "Created .env.cosigner with generated API secret."
-    echo ""
-    echo "  API Secret: $SECRET"
-    echo ""
-    echo "  Set this SAME value on Server A:"
-    echo "    COSIGNER_API_SECRET=$SECRET"
-    echo ""
-else
-    echo ".env.cosigner already exists — skipping."
-    SECRET=$(grep COSIGNER_API_SECRET "$SCRIPT_DIR/.env.cosigner" | cut -d= -f2)
+# --- Step 3: Write the settings .env.cosigner lacks ---
+# The co-signer refuses to start without its policy. Export these before
+# running this script (values for the deployed pool are in the ceremony
+# record): COSIGNER_PRIMARY_ADMIN_PKH, SURRENDER_SCRIPT_ADDRESS,
+# QUARANTINE_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
+# SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY, and
+# BLOCKFROST_PROJECT_ID (this host's own view of the chain). A setting already
+# in .env.cosigner is kept as it is, so on a host an earlier version set up
+# only the settings it lacks are added and its API secret stays.
+ENV_FILE="$SCRIPT_DIR/.env.cosigner"
+EXPORTED=(COSIGNER_PRIMARY_ADMIN_PKH SURRENDER_SCRIPT_ADDRESS QUARANTINE_ADDRESS
+          CMATRA_POLICY_HEX CMATRA_ASSET_HEX SURRENDER_DEADLINE_POSIX_MS
+          MAX_CMATRA_PER_TX MAX_CMATRA_PER_DAY BLOCKFROST_PROJECT_ID)
+has_setting() { [[ -f "$ENV_FILE" ]] && grep -q "^$1=" "$ENV_FILE"; }
+
+UNSET=()
+for name in "${EXPORTED[@]}"; do
+    has_setting "$name" || [[ -n "${!name:-}" ]] || UNSET+=("$name")
+done
+if (( ${#UNSET[@]} )); then
+    echo "ERROR: .env.cosigner does not set ${UNSET[*]}; export them and run this again." >&2
+    exit 1
 fi
+
+ADDED=()
+NEW_SECRET=0
+# A co-signer whose settings name no ledger never kept one, so it gets its
+# first. One that names a ledger must find it.
+FIRST_LEDGER=0
+add_setting() {
+    has_setting "$1" && return
+    echo "$1=$2" >> "$ENV_NEXT"
+    ADDED+=("$1")
+}
+ENV_NEXT=$(mktemp "$SCRIPT_DIR/.env.cosigner.XXXXXX")
+trap 'rm -f "$ENV_NEXT"' EXIT
+if [[ -f "$ENV_FILE" ]]; then
+    cat "$ENV_FILE" > "$ENV_NEXT"
+    # A last line without a newline would run into the first added setting.
+    [[ -z "$(tail -c1 "$ENV_FILE")" ]] || echo >> "$ENV_NEXT"
+fi
+add_setting COSIGNER_SKEY_PATH /app/keys/admin_2.skey
+if ! has_setting COSIGNER_API_SECRET; then
+    SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    add_setting COSIGNER_API_SECRET "$SECRET"
+    unset SECRET
+    NEW_SECRET=1
+fi
+has_setting COSIGNER_LEDGER_PATH || FIRST_LEDGER=1
+add_setting COSIGNER_LEDGER_PATH /app/data/cosigned.sqlite3
+add_setting NETWORK "${NETWORK:-mainnet}"
+for name in "${EXPORTED[@]}"; do
+    add_setting "$name" "${!name:-}"
+done
+
+echo ""
+if (( ${#ADDED[@]} )); then
+    mv "$ENV_NEXT" "$ENV_FILE"
+    echo "Added to .env.cosigner (mode 600): ${ADDED[*]}"
+else
+    echo ".env.cosigner already has every setting."
+fi
+if (( NEW_SECRET )); then
+    echo "It holds a generated API secret. Copy COSIGNER_API_SECRET from it into"
+    echo "Server A's environment file without displaying it, e.g. over SSH into a"
+    echo "mode-600 file."
+fi
+mkdir -p -m 700 "$SCRIPT_DIR/data"
 
 # --- Step 4: Build and start ---
 echo ""
 echo "Building Docker container..."
 cd "$SCRIPT_DIR"
 docker compose -f docker-compose.cosigner.yml build
+
+# The ledger of approvals is created once, for a signer that has never signed.
+# The service refuses to start without it; a replacement would forget every
+# approval and with them the caps.
+LEDGER="$SCRIPT_DIR/data/cosigned.sqlite3"
+if [[ ! -f "$LEDGER" ]]; then
+    if (( ! FIRST_LEDGER )); then
+        echo "ERROR: $LEDGER is missing, but this co-signer has kept a ledger." >&2
+        echo "Restore the ledger it has been using; do not start it on a new one." >&2
+        exit 1
+    fi
+    docker compose -f docker-compose.cosigner.yml run --rm --no-deps cosigner \
+        python -m services.redemption_ledger init /app/data/cosigned.sqlite3
+fi
 
 echo ""
 read -p "Start the co-signer service now? [y/N] " START
@@ -146,7 +207,7 @@ echo ""
 echo "  Next steps:"
 echo "    1. On Server A, set these env vars:"
 echo "       COSIGNER_URL=http://<this-machine-ip>:8421"
-echo "       COSIGNER_API_SECRET=$SECRET"
+echo "       COSIGNER_API_SECRET=<the value in .env.cosigner>"
 echo "       COSIGNER_PKH=$PKH"
 echo ""
 echo "    2. Configure firewall to only allow Server A's IP on port 8421"

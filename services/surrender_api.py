@@ -3,31 +3,38 @@
 FastAPI microservice for the cMATRA merger portal.
 
 Wraps tools/process_surrender.py to provide HTTP endpoints for:
-  - Building partially-signed surrender transactions (admin co-signs)
-  - Submitting fully-signed transactions
+  - Building unsigned surrender transactions
+  - Submitting them once the user has signed, with both admins' signatures
   - Pool status queries
 
-Two-party co-signing flow:
+Signing flow:
   1. Frontend sends user's address + assets to surrender
   2. Server builds tx: pool UTxO (script) + user UTxOs → cMATRA to user + legacy to quarantine
-  3. Server signs with admin key (partial: only admin witness)
-  4. Returns partially-signed CBOR hex to frontend
-  5. Frontend wallet adds user's signature via CIP-30 signTx
-  6. Frontend sends fully-signed CBOR back for submission
+  3. Server checks it with the co-signer's policy
+  4. Returns the unsigned CBOR hex to the frontend
+  5. Frontend wallet adds the user's signature via CIP-30 signTx
+  6. Frontend sends the wallet's witnesses back; the server checks the user's
+     signature, gets admin key 2's from the co-signer (which checks everything
+     again), records the surrender in its own ledger, signs with admin key 1
+     and submits
+A build needs nothing but an address, so it carries no admin signature and
+nothing is counted against either signer's cap or a unit's redemption limit
+until the user has signed.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import json
 import logging
 import os
 import re
+import sqlite3
 import sys
 import time
 import uuid
+from collections import UserList
 from pathlib import Path
 from typing import Any
 
@@ -73,10 +80,10 @@ from pycardano import (
     VerificationKeyWitness,
 )
 from pycardano.exception import InvalidTransactionException
-from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
+from pycardano.hash import ScriptHash as PycScriptHash, TransactionId, VerificationKeyHash
 from pycardano.utils import min_lovelace_post_alonzo
-from pycardano.plutus import RedeemerKey, RedeemerMap, RedeemerTag
-from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenList
+from pycardano.plutus import CostModels, RedeemerKey, RedeemerMap, RedeemerTag
+from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenList, default_encoder
 
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada
@@ -85,8 +92,24 @@ from tools.process_surrender import (
     compute_redemption,
     find_pool_utxos,
     load_rate_table,
+    load_redemption_pin,
     load_script_from_blueprint,
+    surrendered_entitlement,
 )
+from services.cosign_policy import (
+    DEFAULT_RATE_TABLE_PATH,
+    DEFAULT_REDEMPTION_PIN_PATH,
+    Approval,
+    CosignConfig,
+    CosignRejected,
+    load_config,
+    require_claimant_signature,
+    slot_at,
+    split_tx,
+)
+from services.cosign_policy import evaluate_surrender as check_surrender
+from services.chain_check import ChainUnavailable, confirm_on_chain
+from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
 from services.pool_tip import (
     PoolSettlingError,
@@ -103,9 +126,9 @@ logger = logging.getLogger("surrender_api")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 ADMIN_SKEY_PATH: str = os.environ.get("ADMIN_SKEY_PATH", "")
-RATE_TABLE_PATH: str = os.environ.get(
-    "RATE_TABLE_PATH",
-    str(_PROJECT_ROOT / "audit_pack/2026-03-11/rate_table_cmatra.json"),
+RATE_TABLE_PATH: str = os.environ.get("RATE_TABLE_PATH") or str(DEFAULT_RATE_TABLE_PATH)
+REDEMPTION_PIN_PATH: str = (
+    os.environ.get("REDEMPTION_PIN_PATH") or str(DEFAULT_REDEMPTION_PIN_PATH)
 )
 BLUEPRINT_PATH: str = os.environ.get(
     "BLUEPRINT_PATH",
@@ -179,6 +202,21 @@ COLLATERAL_UTXO: str = os.environ.get("COLLATERAL_UTXO", "")
 # The co-signer holds the second admin key on separate infrastructure.
 COSIGNER_URL: str = os.environ.get("COSIGNER_URL", "")
 COSIGNER_SECRET: str = os.environ.get("COSIGNER_API_SECRET", "")
+COSIGNER_PKH: str = os.environ.get("COSIGNER_PKH", "")
+# This service's own record of co-signed surrenders, held to the same 24-hour
+# cap and pinned unit limits as the co-signer's. Created once with
+# python -m services.redemption_ledger init; startup refuses a missing one.
+SURRENDER_LEDGER_PATH: str = os.environ.get("SURRENDER_LEDGER_PATH", "")
+MAX_CMATRA_PER_DAY: str = os.environ.get("MAX_CMATRA_PER_DAY", "")
+
+# Bodies of the transactions this service built, kept so a chained surrender
+# can hand the co-signer the producing body of an input Blockfrost cannot
+# serve yet, and what each build needs to be co-signed at submit. Far above
+# the pool-tip depth cap.
+BUILT_BODIES_KEPT = 256
+
+# The 503 detail when a chain view cannot confirm a surrender.
+_CHAIN_UNAVAILABLE = {"code": "chain_unavailable", "message": "Please retry shortly."}
 
 # Shared secret — the Next.js proxy must send this in X-API-Secret header.
 # Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -243,8 +281,8 @@ assert 258 not in cbor2._decoder.semantic_decoders, (
 # length prefix, so a definite array whose length needs a following byte (>=24
 # elements, CBOR minor 24-27) has that prefix read twice: the second read
 # treats the first element's bytes as the count and runs off the buffer end
-# (CBORDecodeEOF). It bites `_pure_loads` and every raw CBORDecoder.decode()
-# below whenever a tx body carries a >=24-element set field — 24+ inputs, which
+# (CBORDecodeEOF). It bites `_pure_loads` (and so the tag-258 transforms)
+# whenever a tx body carries a >=24-element set field — 24+ inputs, which
 # a fragmented wallet's coin-selection routinely produces. Reinstall a drop-in
 # that keeps the IndefiniteFrozenList wrap but reads each length exactly once.
 _STOCK_DECODE_ARRAY = cbor2._decoder.CBORDecoder.decode_array
@@ -303,18 +341,6 @@ def _wrap_witness_vkeys_258(ws_cbor: bytes) -> bytes:
     return _pure_dumps(ws)
 
 
-def _tx_body_bytes(tx_cbor: bytes) -> bytes:
-    """Slice the body element's exact bytes out of a serialized tx (array(4))
-    by walking the CBOR stream — no re-encoding."""
-    if not tx_cbor or tx_cbor[0] != 0x84:
-        raise ValueError("Tx CBOR header is not array(4)")
-    stream = io.BytesIO(tx_cbor)
-    stream.read(1)
-    start = stream.tell()
-    cbor2._decoder.CBORDecoder(stream).decode()
-    return tx_cbor[start:stream.tell()]
-
-
 # ---------------------------------------------------------------------------
 # App state (loaded once on startup)
 # ---------------------------------------------------------------------------
@@ -323,20 +349,29 @@ def _tx_body_bytes(tx_cbor: bytes) -> bytes:
 class AppState:
     """Mutable singleton holding loaded config — populated on startup."""
     rate_table: dict[str, Any] | None = None
+    redeemable_nfts: frozenset[str] = frozenset()
     script_cbor_hex: str | None = None
     admin_sk: PaymentSigningKey | None = None
     admin_vk: PaymentVerificationKey | None = None
     admin_pkh: Any = None
     admin_addr: Address | None = None
+    cosigner_pkh: VerificationKeyHash | None = None
+    # The co-signer's own policy, run here first: this service refuses to sign
+    # a transaction the co-signer would refuse.
+    cosign_config: CosignConfig | None = None
+    ledger: RedemptionLedger | None = None
+    built_bodies: dict[str, bytes] = {}
+    # tx hash -> (producing bodies, language views) for the co-signer.
+    cosign_inputs: dict[str, tuple[list[bytes], bytes]] = {}
     bf: BlockfrostClient | None = None
 
     # Tracks tx hashes built by this service.  submit-surrender only allows
     # submitting txs whose hash is in this set.  Entries expire after 10 min.
     pending_tx_hashes: dict[str, float] = {}  # tx_hash_hex -> created_at
-    # Mirror map keyed by the same tx_hash, holding the admin-signed CBOR
-    # bytes verbatim. At submit time we merge the wallet's partial witness
-    # set into THIS exact byte sequence (preserving the body bytes the
-    # wallet signed), then forward to Blockfrost.
+    # Mirror map keyed by the same tx_hash, holding the built CBOR bytes
+    # verbatim. At submit time we merge the wallet's partial witness set and
+    # the admins' witnesses into THIS exact byte sequence (preserving the
+    # body bytes every signature covers), then forward to Blockfrost.
     pending_tx_cbor: dict[str, bytes] = {}
     TX_HASH_TTL: float = 600.0  # 10 minutes
 
@@ -405,13 +440,13 @@ class BuildSurrenderResponse(BaseModel):
 class SubmitRequest(BaseModel):
     # Wallet-side partial witness set CBOR hex (what CIP-30 signTx with
     # partialSign=true returns). Holds the user's vkey witness only. The
-    # server merges it into the admin-signed tx body stashed at build time.
+    # server merges it into the tx stashed at build time.
     tx_cbor_hex: str = Field(
         ..., description="Wallet partial witness set CBOR hex",
         min_length=8, max_length=32_768, pattern=r"^[0-9a-fA-F]+$",
     )
     # tx_hash returned by /build-surrender. Required so the server can
-    # locate the matching admin-signed tx body to merge into.
+    # locate the matching built tx to merge into.
     tx_hash: str = Field(
         ..., description="tx_hash from the build-surrender response",
         min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]+$",
@@ -512,6 +547,8 @@ async def startup():
     logger.info(
         "Loaded rate table: %d token(s)", len(state.rate_table.get("tokens", {}))
     )
+    state.redeemable_nfts = load_redemption_pin(Path(REDEMPTION_PIN_PATH)).nft_units
+    logger.info("Loaded %d redeemable NFT unit(s)", len(state.redeemable_nfts))
 
     # Script
     if Path(BLUEPRINT_PATH).exists():
@@ -557,6 +594,22 @@ async def startup():
             "Admin skey not configured (%s) — build-surrender will fail",
             ADMIN_SKEY_PATH,
         )
+
+    # Dual-admin mode: the co-signer's key hash is a required signer, and its
+    # policy (with both admins) is checked locally before either key signs.
+    if COSIGNER_URL:
+        if not (COSIGNER_PKH and SURRENDER_LEDGER_PATH and MAX_CMATRA_PER_DAY) or state.admin_pkh is None:
+            raise RuntimeError(
+                "COSIGNER_URL needs COSIGNER_PKH, SURRENDER_LEDGER_PATH, MAX_CMATRA_PER_DAY and the admin key"
+            )
+        state.cosigner_pkh = VerificationKeyHash(bytes.fromhex(COSIGNER_PKH))
+        state.cosign_config = load_config(
+            {**os.environ, "RATE_TABLE_PATH": RATE_TABLE_PATH,
+             "REDEMPTION_PIN_PATH": REDEMPTION_PIN_PATH},
+            [state.admin_pkh.payload, state.cosigner_pkh.payload],
+        )
+        state.ledger = RedemptionLedger(SURRENDER_LEDGER_PATH, int(MAX_CMATRA_PER_DAY))
+        logger.info("Co-signer PKH: %s", COSIGNER_PKH[:16])
 
     # Pool-tip chainer. Seeds lazily on the first build (so startup never
     # fails when the chain is briefly unreachable), then chains in memory.
@@ -660,38 +713,67 @@ def _build_asset_lookup() -> dict[str, Any]:
     return {a.name: a for a in ALL_MERGE_ASSETS}
 
 
-def _resolve_legacy_assets(
-    asset_key: str,
-    quantity_base: int,
-    nft_units: list[str] | None,
-    asset_lookup: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Resolve legacy asset details for the quarantine output."""
-    info = asset_lookup.get(asset_key)
-    if info is None:
-        raise HTTPException(400, f"Unknown asset key: {asset_key}")
-
-    if hasattr(info, "asset_name_hex"):
-        # Fungible token
-        return [{
-            "policy_hex": info.policy_id,
-            "asset_hex": info.asset_name_hex,
-            "quantity": quantity_base,
-        }]
-    else:
-        # NFT collection — each NFT is a separate asset
+def _surrendered_units(assets: list[AssetToSurrender]) -> dict[str, int]:
+    """The legacy units (unit hex -> quantity) a request asks to move to
+    quarantine. NFT surrenders must name exactly ``quantity_base`` distinct
+    pinned units under the collection's own policy. Raises HTTP 400 otherwise."""
+    lookup = _build_asset_lookup()
+    units: dict[str, int] = {}
+    seen: set[str] = set()
+    for item in assets:
+        info = lookup.get(item.asset_key)
+        if info is None:
+            raise HTTPException(400, f"Unknown asset key: {item.asset_key}")
+        if item.asset_key in seen:
+            raise HTTPException(400, f"{item.asset_key} is listed twice")
+        seen.add(item.asset_key)
+        if hasattr(info, "asset_name_hex"):
+            if item.nft_units:
+                raise HTTPException(400, f"nft_units apply only to NFT collections, not {item.asset_key}")
+            units[info.unit] = item.quantity_base
+            continue
+        nft_units = [unit.lower() for unit in item.nft_units or []]
         if not nft_units:
-            raise HTTPException(400, f"NFT surrender requires nft_units list for {asset_key}")
-        result = []
-        for unit_hex in nft_units:
-            policy_hex = unit_hex[:56]
-            asset_hex = unit_hex[56:]
-            result.append({
-                "policy_hex": policy_hex,
-                "asset_hex": asset_hex,
-                "quantity": 1,
-            })
-        return result
+            raise HTTPException(400, f"NFT surrender requires nft_units list for {item.asset_key}")
+        if len(nft_units) != item.quantity_base:
+            raise HTTPException(
+                400,
+                f"{item.asset_key}: quantity_base is {item.quantity_base} but nft_units "
+                f"names {len(nft_units)} unit(s)",
+            )
+        if len(set(nft_units)) != len(nft_units):
+            raise HTTPException(400, f"{item.asset_key}: a unit is listed twice")
+        for unit in nft_units:
+            if unit[:56] != info.policy_id or unit not in state.redeemable_nfts:
+                raise HTTPException(400, f"{unit} is not a redeemable {item.asset_key} unit")
+            units[unit] = 1
+    return units
+
+
+def _price_request(
+    assets: list[AssetToSurrender],
+) -> tuple[int, dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """(cMATRA owed, per-asset summary, legacy assets for the quarantine
+    output). The total is priced from the exact units the transaction will
+    quarantine, with the function the co-signer re-prices it with."""
+    units = _surrendered_units(assets)
+    try:
+        total = surrendered_entitlement(state.rate_table, units, state.redeemable_nfts)
+        summary = {}
+        for item in assets:
+            cmatra = compute_redemption(state.rate_table, item.asset_key, item.quantity_base)
+            summary[item.asset_key] = {
+                "quantity_base": item.quantity_base,
+                "cmatra_base": cmatra,
+                "cmatra_display": cmatra / (10 ** FLUX_DECIMALS),
+            }
+    except (KeyError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    legacy = [
+        {"policy_hex": unit[:56], "asset_hex": unit[56:], "quantity": quantity}
+        for unit, quantity in units.items()
+    ]
+    return total, summary, legacy
 
 
 def _build_tx_blocking(
@@ -715,7 +797,7 @@ def _build_tx_blocking(
     skipped: the generous seed execution units (set in the builder) cover the
     trivial validator, and the script was already proven valid by the confirmed
     root of the same chain. The submit itself is the authoritative check."""
-    tx_cbor_hex, tx_hash, built_pool_output, user_change = _build_cosigned_surrender_tx(
+    tx_cbor_hex, tx_hash, built_pool_output, user_change = _build_surrender_tx(
         user_address=user_address,
         total_cmatra=total_cmatra,
         legacy_assets=legacy_assets,
@@ -742,14 +824,15 @@ def _build_tx_blocking(
 
 @app.post("/build-surrender", response_model=BuildSurrenderResponse)
 async def build_surrender(req: BuildSurrenderRequest):
-    """Build a partially-signed surrender transaction against the pool TIP.
+    """Build an unsigned surrender transaction against the pool TIP.
 
     The server reads the in-memory pool tip (chained off the prior surrender's
     pending change output — no Blockfrost re-query, so chunk N+1 sees chunk N
-    immediately), builds the full transaction, signs with the admin key, and
-    returns the CBOR for the wallet to co-sign. The single-flight lock is held
-    from here through /submit-surrender so two surrenders never target the same
-    tip; the tip advances ONLY after submit returns mempool-accept.
+    immediately), builds the full transaction and returns the CBOR for the
+    wallet to sign; the admins sign at /submit-surrender. The single-flight
+    lock is held from here through /submit-surrender so two surrenders never
+    target the same tip; the tip advances ONLY after submit returns
+    mempool-accept.
     """
     # Validate user address format
     if not req.user_address.startswith("addr1") and not req.user_address.startswith("addr_test1"):
@@ -791,32 +874,7 @@ async def build_surrender(req: BuildSurrenderRequest):
     if state.tip_mgr is None:
         raise HTTPException(503, "Pool-tip chainer not initialized")
 
-    asset_lookup = _build_asset_lookup()
-
-    # Compute total cMATRA owed
-    total_cmatra = 0
-    redemption_summary: dict[str, dict[str, Any]] = {}
-    all_legacy_assets: list[dict[str, Any]] = []
-
-    for item in req.assets:
-        try:
-            cmatra_amount = compute_redemption(
-                state.rate_table, item.asset_key, item.quantity_base,
-            )
-        except (KeyError, ValueError) as e:
-            raise HTTPException(400, str(e))
-
-        total_cmatra += cmatra_amount
-        redemption_summary[item.asset_key] = {
-            "quantity_base": item.quantity_base,
-            "cmatra_base": cmatra_amount,
-            "cmatra_display": cmatra_amount / (10 ** FLUX_DECIMALS),
-        }
-
-        legacy = _resolve_legacy_assets(
-            item.asset_key, item.quantity_base, item.nft_units, asset_lookup,
-        )
-        all_legacy_assets.extend(legacy)
+    total_cmatra, redemption_summary, all_legacy_assets = _price_request(req.assets)
 
     # Acquire the single-flight lock and read the pool tip. Cold-start seeds
     # from Blockfrost (largest confirmed UTxO); thereafter the tip is the prior
@@ -876,13 +934,22 @@ async def build_surrender(req: BuildSurrenderRequest):
             raise size_exc
         logger.exception("Failed to build surrender tx for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed. Please try again.")
+    except CosignRejected as e:
+        state.tip_mgr.release_build(build_token)
+        logger.warning("Refused to build a surrender for %s: %s", req.user_address[:24], e)
+        raise HTTPException(422, {"code": e.code, "message": e.detail})
+    except ChainUnavailable as e:
+        state.tip_mgr.release_build(build_token)
+        logger.error("Refused to build a surrender for %s: chain view unavailable: %s",
+                     req.user_address[:24], e)
+        raise HTTPException(503, _CHAIN_UNAVAILABLE)
     except Exception:
         state.tip_mgr.release_build(build_token)
         logger.exception("Failed to build/preflight surrender tx for %s", req.user_address[:24])
         raise HTTPException(422, "Transaction preflight failed. Please retry.")
 
     # Register the tx hash so submit-surrender will accept it, stash the exact
-    # admin-signed CBOR (so the wallet's witness merge preserves the body), and
+    # built CBOR (so the witness merges preserve the body), and
     # stash the tip-advance context (delivered amount + the pool output the
     # datum guard will check at submit time).
     _prune_expired_tx_hashes()
@@ -905,42 +972,27 @@ async def build_surrender(req: BuildSurrenderRequest):
     )
 
 
-def _fetch_cosigner_pkh() -> None:
-    """Fetch and cache the co-signer's PKH from their health endpoint."""
-    try:
-        resp = httpx.get(f"{COSIGNER_URL}/health", timeout=5.0)
-        data = resp.json()
-        pkh_hex = data.get("pkh", "").replace("...", "")
-        if pkh_hex and len(pkh_hex) >= 56:
-            # Health returns truncated PKH — use the /cosign endpoint to get full PKH
-            # For now, fetch it by doing a dummy cosign or reading from env
-            pass
-        logger.info("Co-signer service reachable at %s", COSIGNER_URL)
-    except Exception as e:
-        logger.warning("Co-signer service unreachable: %s", e)
-
-    # Read co-signer PKH from env (most reliable — set during deployment)
-    cosigner_pkh_hex = os.environ.get("COSIGNER_PKH", "")
-    if cosigner_pkh_hex:
-        from pycardano.hash import VerificationKeyHash
-        state.cosigner_pkh = VerificationKeyHash(bytes.fromhex(cosigner_pkh_hex))
-        logger.info("Co-signer PKH: %s", cosigner_pkh_hex[:16])
-    else:
-        state.cosigner_pkh = None
-        logger.warning("COSIGNER_PKH not set — dual-admin mode disabled")
-
-
-def _get_cosigner_witness(tx_hash_hex: str) -> VerificationKeyWitness:
-    """Call the co-signer service to sign a transaction hash.
+def _get_cosigner_witness(
+    tx_cbor: bytes, parent_bodies: list[bytes], language_views: bytes,
+) -> VerificationKeyWitness:
+    """Ask the co-signer to verify and sign the claimant-signed transaction.
+    It re-checks the whole transaction against its own policy and ledger, so
+    it gets the transaction, the bodies that produced its inputs and the
+    language views that close its script_data_hash.
 
     Returns a VerificationKeyWitness ready to merge into the witness set.
     """
     try:
         resp = httpx.post(
             f"{COSIGNER_URL}/cosign",
-            json={"tx_hash_hex": tx_hash_hex},
+            json={
+                "tx_cbor_hex": tx_cbor.hex(),
+                "parent_bodies_hex": [body.hex() for body in parent_bodies],
+                "language_views_hex": language_views.hex(),
+            },
             headers={"X-API-Secret": COSIGNER_SECRET},
-            timeout=10.0,
+            # the co-signer asks its own chain view; one lookup may back off for 21 s
+            timeout=30.0,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -1001,6 +1053,89 @@ def _tx_too_large_http_exception(
             "max_tx_size_bytes": max_tx_size_bytes,
             "suggested_batch_size": 4,
         },
+    )
+
+
+def _keep_recent(store: dict[str, Any], tx_hash_hex: str, value: Any) -> None:
+    store[tx_hash_hex] = value
+    while len(store) > BUILT_BODIES_KEPT:
+        del store[next(iter(store))]
+
+
+def _check_locally(
+    tx: bytes, parent_bodies: list[bytes], language_views: bytes, now: float, signed: bool,
+) -> Approval:
+    """Run the co-signer's checks here first, against this service's own
+    ledger and chain view, so it never signs, or asks the co-signer to sign,
+    what the co-signer would refuse. ``signed``: the claimant has signed, so
+    check their signature too."""
+    cfg = state.cosign_config
+    approval = check_surrender(tx, language_views, parent_bodies, slot_at(now, cfg.network), cfg)
+    if signed:
+        require_claimant_signature(tx, approval)
+    state.ledger.check(approval, now, cfg.redemption_limits)
+    confirm_on_chain(approval, cfg, state.bf, state.ledger.recorded)
+    return approval
+
+
+def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
+    """The co-signer's [key, signature] witness for the claimant-signed
+    ``tx``, once both this service and the co-signer have checked it and
+    both have recorded it."""
+    inputs = state.cosign_inputs.get(tx_hash_hex)
+    if inputs is None:
+        raise HTTPException(409, {"code": "build_expired", "message": "Please build the surrender again."})
+    parent_bodies, language_views = inputs
+    now = time.time()
+    try:
+        approval = _check_locally(tx, parent_bodies, language_views, now, signed=True)
+        witness = _get_cosigner_witness(tx, parent_bodies, language_views)
+        state.ledger.record(approval, now, state.cosign_config.redemption_limits)
+    except CosignRejected as exc:
+        logger.warning("Refused to co-sign %s: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(400, {"code": exc.code, "message": exc.detail})
+    except ChainUnavailable as exc:
+        logger.error("Refused to co-sign %s: chain view unavailable: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(503, _CHAIN_UNAVAILABLE)
+    except sqlite3.Error as exc:
+        logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})
+    return [witness.vkey.payload, witness.signature]
+
+
+def _signed_by_admins(tx_hash_hex: str, tx: bytes) -> bytes:
+    """The claimant-signed ``tx`` with the admins' witnesses: the
+    co-signer's when one is configured, then admin 1's over the same body.
+    With a co-signer, admin 1 signs only once this service has checked the
+    claimant's signature and recorded the surrender in its own ledger."""
+    witnesses = [_cosign(tx_hash_hex, tx)] if COSIGNER_URL else []
+    body_hash = hashlib.blake2b(split_tx(tx)[0], digest_size=32).digest()
+    witnesses.append([
+        VerificationKey.from_signing_key(state.admin_sk).payload,
+        state.admin_sk.sign(body_hash),
+    ])
+    return _merge_vkey_witnesses(tx, witnesses, 258 if TAG_SETS_258 else None)
+
+
+def _producing_bodies(tx_body: TransactionBody) -> list[bytes]:
+    """The body of every transaction that produced an input or collateral
+    input, from this service's own builds when the chain cannot serve it yet
+    (a chained surrender spends outputs still in the mempool)."""
+    tx_ids = dict.fromkeys(
+        ref.transaction_id.payload.hex()
+        for ref in [*tx_body.inputs, *(tx_body.collateral or [])]
+    )
+    return [
+        state.built_bodies.get(tx_id) or split_tx(state.bf.get_tx_cbor(tx_id))[0]
+        for tx_id in tx_ids
+    ]
+
+
+def _language_views(context: Any) -> bytes:
+    """The PlutusV3 cost-model encoding the builder put in script_data_hash."""
+    return cbor2.dumps(
+        CostModels({2: context.protocol_param.cost_models.get("PlutusV3", {})}),
+        default=default_encoder,
     )
 
 
@@ -1215,14 +1350,14 @@ def _confirmed_ada_only_utxos(
     return out
 
 
-def _build_cosigned_surrender_tx(
+def _build_surrender_tx(
     user_address: str,
     total_cmatra: int,
     legacy_assets: list[dict[str, Any]],
     pool_utxo: dict[str, Any],
     user_inputs: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str, dict[str, Any] | None, list[dict[str, Any]]]:
-    """Build a surrender tx and partially sign with admin key(s).
+    """Build an unsigned surrender tx.
 
     Transaction structure:
       Inputs:
@@ -1232,10 +1367,11 @@ def _build_cosigned_surrender_tx(
         1. cMATRA to user_address
         2. Remaining pool balance back to script_address (void datum)
         3. Legacy assets to quarantine_address
-      Required signer: admin PKH
+      Required signers: both admin PKHs
 
-    The builder auto-selects user UTxOs for the legacy assets + fees.
-    Admin signs the script spend. User must add their signature via wallet.
+    The builder auto-selects user UTxOs for the legacy assets + fees. The
+    user adds their signature via wallet; /submit-surrender then gets admin
+    2's from the co-signer and adds admin 1's.
 
     ``user_inputs`` (chained path): the user's pending change UTxOs from the
     prior chunk, added as EXPLICIT inputs instead of Blockfrost address
@@ -1426,15 +1562,8 @@ def _build_cosigned_surrender_tx(
 
     # Required signers: both admin PKHs (dual-signer validator)
     builder.required_signers = [state.admin_pkh]
-    # Add co-signer PKH if configured (dual-admin mode)
-    cosigner_pkh_bytes = None
     if COSIGNER_URL:
-        # Fetch co-signer's PKH from their health endpoint at startup
-        # (cached in state.cosigner_pkh after first call)
-        if not hasattr(state, "cosigner_pkh") or state.cosigner_pkh is None:
-            _fetch_cosigner_pkh()
-        if state.cosigner_pkh:
-            builder.required_signers.append(state.cosigner_pkh)
+        builder.required_signers.append(state.cosigner_pkh)
 
     # Build the transaction — change goes to user.
     tx_body = builder.build(change_address=user_addr)
@@ -1459,35 +1588,26 @@ def _build_cosigned_surrender_tx(
         witness_set = builder.build_witness_set()
         tx_body = _canonicalize_body_and_index_redeemer(tx_body, witness_set, tx_in)
 
-    # Create admin 1 witness (Server A — local key) over the canonical body.
-    # TAG_SETS_258: re-frame the body's set fields uniformly as tag-258 FIRST —
-    # all three signatures (admin_1, the cosigner, and the user's HW/software
-    # wallet) must cover the hash of the exact bytes that go on the wire.
-    if TAG_SETS_258:
-        body_bytes = _wrap_body_sets_258(tx_body.to_cbor())
-        tx_hash = hashlib.blake2b(body_bytes, digest_size=32).digest()
-    else:
-        body_bytes = None
-        tx_hash = tx_body.hash()
-    admin_signature = state.admin_sk.sign(tx_hash)
-    admin_vk_witness = VerificationKeyWitness(
-        VerificationKey.from_signing_key(state.admin_sk),
-        admin_signature,
-    )
+    # TAG_SETS_258: re-frame the body's set fields uniformly as tag-258 before
+    # anyone signs — all three signatures (the user's HW/software wallet, the
+    # cosigner and admin_1) must cover the hash of the exact bytes that go on
+    # the wire.
+    body_bytes = _wrap_body_sets_258(tx_body.to_cbor()) if TAG_SETS_258 else tx_body.to_cbor()
+    tx_hash = hashlib.blake2b(body_bytes, digest_size=32).digest()
+    _keep_recent(state.built_bodies, tx_hash.hex(), body_bytes)
 
-    if witness_set.vkey_witnesses is None:
-        witness_set.vkey_witnesses = []
-    witness_set.vkey_witnesses.append(admin_vk_witness)
-
-    # Get admin 2 witness from co-signer service (Server B).
-    # NOTE: tx_body.hash() returns raw bytes in this pycardano version,
-    # NOT a TransactionId — so don't call .payload on it.
-    tx_hash_hex = tx_hash.hex() if isinstance(tx_hash, bytes) else tx_hash.payload.hex()
+    # Check the transaction with the co-signer's own policy and limits before
+    # handing it out; both admins sign only at submit, once the claimant has.
     if COSIGNER_URL:
-        cosigner_witness = _get_cosigner_witness(tx_hash_hex)
-        witness_set.vkey_witnesses.append(cosigner_witness)
+        unsigned_tx = b"\x84" + body_bytes + witness_set.to_cbor() + b"\xf5\xf6"
+        parent_bodies = _producing_bodies(tx_body)
+        language_views = _language_views(context)
+        _check_locally(unsigned_tx, parent_bodies, language_views, time.time(), signed=False)
+        _keep_recent(state.cosign_inputs, tx_hash.hex(), (parent_bodies, language_views))
 
-    # Assemble the partially-signed transaction. The pycardano Transaction is
+    tx_hash_hex = tx_hash.hex()
+
+    # Assemble the unsigned transaction. The pycardano Transaction is
     # used for structural reads (outputs) only; the wire bytes come from raw
     # assembly on the tag-258 path — a pycardano re-serialization would re-emit
     # the body with mixed framing and desync the signed hash from the wire.
@@ -1495,7 +1615,7 @@ def _build_cosigned_surrender_tx(
     if TAG_SETS_258:
         ws_bytes = _wrap_witness_vkeys_258(witness_set.to_cbor())
         wire = b"\x84" + body_bytes + ws_bytes + b"\xf5\xf6"
-        assert _tx_body_bytes(wire) == body_bytes, (
+        assert split_tx(wire)[0] == body_bytes, (
             "assembled wire body bytes != the signed body bytes"
         )
         tx_cbor_hex = wire.hex()
@@ -1532,7 +1652,7 @@ def _build_cosigned_surrender_tx(
         })
 
     logger.info(
-        "Built co-signed surrender tx: %d cMATRA → %s (tx: %s, pool_out=%s, "
+        "Built surrender tx: %d cMATRA → %s (tx: %s, pool_out=%s, "
         "user_change_outs=%d)",
         total_cmatra,
         user_address[:24] + "...",
@@ -1691,47 +1811,69 @@ def _prune_expired_tx_hashes() -> None:
         state.pending_tx_cbor.pop(h, None)
 
 
+def _vkey_witness_pairs(value: Any) -> tuple[list[list[bytes]], int | None]:
+    """A witness set's vkey witnesses (``value``, its key-0 field) as
+    [public key, signature] pairs, and the set tag they were framed in.
+
+    Conway encodes the list bare or as a tag-258 set; duck-type the tag,
+    since isinstance is False across cbor2's C/pure class split. Every entry
+    must be a 32-byte key and a 64-byte signature, checked before anything is
+    converted or hashed from any entry."""
+    tag = getattr(value, "tag", None)
+    if tag not in (None, 258):
+        raise ValueError(f"vkey witnesses framed in tag {tag}")
+    entries = value.value if tag else value
+    if not isinstance(entries, (list, UserList)):
+        raise ValueError("vkey witnesses are not an array")
+    for entry in entries:
+        if not (isinstance(entry, (list, UserList)) and len(entry) == 2
+                and isinstance(entry[0], bytes) and len(entry[0]) == 32
+                and isinstance(entry[1], bytes) and len(entry[1]) == 64):
+            raise ValueError("malformed vkey witness")
+    return [[entry[0], entry[1]] for entry in entries], tag
+
+
+def _merge_vkey_witnesses(tx: bytes, added: list[list[bytes]], tag: int | None) -> bytes:
+    """``tx`` with the [public key, signature] pairs in ``added`` among its
+    vkey witnesses, each in place of any witness already there under the
+    same key (the first of repeated keys in ``added`` is kept). The vkeys are
+    tag-258 framed if they were already or ``tag`` is 258.
+
+    The outer tx is a CBOR array of 4: `[tx_body, witness_set, is_valid,
+    aux]`. Only the witness_set is decoded, merged and re-encoded; the body
+    and tail bytes are kept verbatim, so every signature over
+    blake2b-256(tx_body) stays valid. Pure-cbor2 throughout: the C extension
+    decodes a tag-258 vkey set to a Python set of tuples and its dumps()
+    cannot serialize pure-class CBORTag values at all."""
+    body_bytes, ws_bytes, tail_bytes = split_tx(tx)
+    witness_set = _pure_loads(ws_bytes)
+    if not isinstance(witness_set, dict):
+        raise ValueError("witness_set is not a CBOR map")
+    present, present_tag = _vkey_witness_pairs(witness_set.get(0, []))
+
+    by_key: dict[bytes, bytes] = {}
+    for key, signature in added:
+        by_key.setdefault(key, signature)
+    vkeys = [pair for pair in present if pair[0] not in by_key]
+    vkeys += [[key, signature] for key, signature in by_key.items()]
+
+    set_tag = present_tag or tag
+    merged = {0: _PureCBORTag(set_tag, vkeys) if set_tag else vkeys}
+    merged.update((key, value) for key, value in witness_set.items() if key != 0)
+    return b"\x84" + body_bytes + _pure_dumps(merged) + tail_bytes
+
+
 def _merge_wallet_witnesses(
     original_tx_cbor: bytes, wallet_witness_cbor: bytes,
 ) -> bytes:
     """Merge the wallet's partial witness set (CIP-30 signTx partialSign
-    output, typically `{0: [[pk, sig]]}`) into the admin-signed tx CBOR
-    produced by /build-surrender, and return the assembled tx bytes
-    ready for submission.
+    output, typically `{0: [[pk, sig]]}`) into the tx CBOR stashed by
+    /build-surrender, keeping the body bytes the wallet signed.
 
-    The outer tx is a CBOR array of 4: `[tx_body, witness_set, is_valid,
-    aux]`. We walk the original CBOR stream to capture the exact byte
-    range of each element, decode-merge-re-encode ONLY the witness_set,
-    and reassemble. tx_body bytes are preserved verbatim so the wallet's
-    Ed25519 signature over blake2b-256(tx_body) remains valid.
-
-    Pure-cbor2 throughout: the C extension decodes a tag-258 vkey set to a
-    Python set of tuples — which the merge loop would silently skip,
-    dropping witnesses — and its dumps() cannot serialize pure-class
-    CBORTag values at all.
-
-    Vkey witnesses are deduplicated by public key (some wallets re-emit
-    the admin keys they observed in the original witness set; we keep
-    one instance each).
-    """
-    if not original_tx_cbor or original_tx_cbor[0] != 0x84:
-        raise ValueError("Original tx CBOR header is not array(4)")
-
-    # Walk the original tx CBOR, capturing byte ranges for each element.
-    stream = io.BytesIO(original_tx_cbor)
-    stream.read(1)  # consume 0x84
-    body_start = stream.tell()
-    cbor2._decoder.CBORDecoder(stream).decode()
-    body_end = stream.tell()
-    ws_start = body_end
-    cbor2._decoder.CBORDecoder(stream).decode()
-    ws_end = stream.tell()
-    tail_bytes = original_tx_cbor[ws_end:]  # is_valid + aux
-    body_bytes = original_tx_cbor[body_start:body_end]
-    original_ws = _pure_loads(original_tx_cbor[ws_start:ws_end])
-    if not isinstance(original_ws, dict):
-        raise ValueError("Original witness_set is not a CBOR map")
-
+    Only well-formed vkey witnesses are taken, and none under a key the body
+    names as a required signer: those are the admins', which this service
+    adds itself once the claimant has signed. Any other witness-set field the
+    wallet returns is ignored."""
     wallet_ws = _pure_loads(wallet_witness_cbor)
     if isinstance(wallet_ws, list) and len(wallet_ws) == 4:
         # HW-wallet stacks may return the ENTIRE signed tx
@@ -1739,34 +1881,16 @@ def _merge_wallet_witnesses(
         wallet_ws = wallet_ws[1]
     if not isinstance(wallet_ws, dict):
         raise ValueError("Wallet partial witness set is not a CBOR map")
+    pairs, tag = _vkey_witness_pairs(wallet_ws.get(0, []))
 
-    # Extract vkey witnesses from both. Conway encodes the vkey list as
-    # either a plain list `[[pk, sig], ...]` or a tag-258 set. Duck-type
-    # the tag — isinstance is False across cbor2's C/pure class split.
-    def _unwrap_vkey_list(value):
-        if getattr(value, "tag", None) is not None:
-            return list(value.value), value.tag
-        return list(value) if value else [], None
-
-    orig_vkeys, orig_tag = _unwrap_vkey_list(original_ws.get(0))
-    wallet_vkeys, wallet_tag = _unwrap_vkey_list(wallet_ws.get(0))
-    set_tag = orig_tag or wallet_tag  # preserve set tag if either side used it
-
-    seen: set[bytes] = set()
-    merged_vkeys: list = []
-    for vw in (*orig_vkeys, *wallet_vkeys):
-        if not (isinstance(vw, (list, tuple)) and len(vw) == 2):
-            continue
-        pk = bytes(vw[0])
-        if pk in seen:
-            continue
-        seen.add(pk)
-        merged_vkeys.append(list(vw))
-
-    original_ws[0] = _PureCBORTag(set_tag, merged_vkeys) if set_tag else merged_vkeys
-    merged_ws_bytes = _pure_dumps(original_ws)
-
-    return b"\x84" + body_bytes + merged_ws_bytes + tail_bytes
+    body = _pure_loads(split_tx(original_tx_cbor)[0])
+    required = body.get(14, [])
+    required_signers = set(required.value if getattr(required, "tag", None) == 258 else required)
+    claimant_side = [
+        pair for pair in pairs
+        if hashlib.blake2b(pair[0], digest_size=28).digest() not in required_signers
+    ]
+    return _merge_vkey_witnesses(original_tx_cbor, claimant_side, tag)
 
 
 @app.post("/submit-surrender", response_model=SubmitResponse)
@@ -1776,13 +1900,13 @@ async def submit_surrender(req: SubmitRequest):
     CIP-30 `signTx(cbor, partialSign=true)` returns only the wallet's
     partial witness set (typically `{0: [[pk, sig]]}`), not the full
     signed transaction. This endpoint takes that partial witness set
-    plus the build-time `tx_hash`, looks up the admin-signed tx CBOR
-    stashed at build time, merges the wallet's vkey witnesses into the
-    existing witness set, and forwards the assembled tx to Blockfrost.
+    plus the build-time `tx_hash`, looks up the tx CBOR stashed at build
+    time, merges the wallet's vkey witnesses into it, adds the admins'
+    witnesses and forwards the assembled tx to Blockfrost.
 
     The tx_body bytes are preserved byte-for-byte (we only rewrite the
-    witness_set element of the outer CBOR array) so the wallet's
-    signature over the body remains valid.
+    witness_set element of the outer CBOR array) so every signature over
+    the body remains valid.
 
     The pool tip advances ONLY here, after Blockfrost returns a mempool-accept
     hash — never at build time. The datum guard runs against the pool output[1]
@@ -1805,6 +1929,15 @@ async def submit_surrender(req: SubmitRequest):
 
     ctx = state.build_ctx.get(tx_hash_hex)
 
+    def abandon() -> None:
+        """Tip unchanged: release the single-flight lock so the next
+        surrender can proceed off the still-confirmed tip."""
+        if ctx and state.tip_mgr is not None:
+            state.tip_mgr.release_build(ctx["build_token"])
+        state.pending_tx_hashes.pop(tx_hash_hex, None)
+        state.pending_tx_cbor.pop(tx_hash_hex, None)
+        state.build_ctx.pop(tx_hash_hex, None)
+
     try:
         merged_tx_bytes = _merge_wallet_witnesses(original_cbor, wallet_ws_bytes)
     except Exception as e:
@@ -1812,16 +1945,16 @@ async def submit_surrender(req: SubmitRequest):
         raise HTTPException(400, "Malformed witness set CBOR")
 
     try:
+        merged_tx_bytes = await asyncio.to_thread(_signed_by_admins, tx_hash_hex, merged_tx_bytes)
+    except HTTPException:
+        abandon()
+        raise
+
+    try:
         submitted_hash = await asyncio.to_thread(state.bf.submit_tx, merged_tx_bytes)
     except Exception as e:
-        # Submit rejected — tip unchanged, release the single-flight lock so
-        # the next surrender can proceed off the still-confirmed tip.
         logger.error("Submit failed for tx %s: %s", tx_hash_hex[:16], e)
-        if ctx and state.tip_mgr is not None:
-            state.tip_mgr.release_build(ctx["build_token"])
-        state.pending_tx_hashes.pop(tx_hash_hex, None)
-        state.pending_tx_cbor.pop(tx_hash_hex, None)
-        state.build_ctx.pop(tx_hash_hex, None)
+        abandon()
         raise HTTPException(400, "Transaction submission failed")
 
     # Mempool-accept. Advance the tip, running the datum + balance guards
@@ -1887,7 +2020,8 @@ def evaluate_surrender(req: BuildSurrenderRequest):
 
     Identical to build-surrender but instead of returning CBOR for signing,
     it runs Blockfrost evaluate_tx to verify the Plutus script executes
-    correctly with real mainnet UTxOs.  Returns execution units and fee.
+    correctly with real mainnet UTxOs.  Returns execution units and fee. The
+    co-signer is never asked: evaluation runs scripts, not signature checks.
 
     Use this to validate the full pipeline before opening the window.
     """
@@ -1904,29 +2038,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     if not SCRIPT_ADDRESS or not CMATRA_POLICY_HEX or not CMATRA_ASSET_HEX or not QUARANTINE_ADDRESS:
         raise HTTPException(503, "Service not fully configured")
 
-    asset_lookup = _build_asset_lookup()
-
-    total_cmatra = 0
-    redemption_summary: dict[str, dict[str, Any]] = {}
-    all_legacy_assets: list[dict[str, Any]] = []
-
-    for item in req.assets:
-        try:
-            cmatra_amount = compute_redemption(
-                state.rate_table, item.asset_key, item.quantity_base,
-            )
-        except (KeyError, ValueError) as e:
-            raise HTTPException(400, str(e))
-        total_cmatra += cmatra_amount
-        redemption_summary[item.asset_key] = {
-            "quantity_base": item.quantity_base,
-            "cmatra_base": cmatra_amount,
-            "cmatra_display": cmatra_amount / (10 ** FLUX_DECIMALS),
-        }
-        legacy = _resolve_legacy_assets(
-            item.asset_key, item.quantity_base, item.nft_units, asset_lookup,
-        )
-        all_legacy_assets.extend(legacy)
+    total_cmatra, redemption_summary, all_legacy_assets = _price_request(req.assets)
 
     pool_utxos = find_pool_utxos(
         state.bf, SCRIPT_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
@@ -1945,7 +2057,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     # diagnostic that never submits, so it reads the pool directly (not the
     # chained tip) and discards the built pool output.
     try:
-        tx_cbor_hex, tx_hash_hex, _, _ = _build_cosigned_surrender_tx(
+        tx_cbor_hex, tx_hash_hex, _, _ = _build_surrender_tx(
             user_address=req.user_address,
             total_cmatra=total_cmatra,
             legacy_assets=all_legacy_assets,
@@ -1960,6 +2072,11 @@ def evaluate_surrender(req: BuildSurrenderRequest):
             raise size_exc
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")
+    except CosignRejected as e:
+        raise HTTPException(422, {"code": e.code, "message": e.detail})
+    except ChainUnavailable as e:
+        logger.error("Evaluate: chain view unavailable for %s: %s", req.user_address[:24], e)
+        raise HTTPException(503, _CHAIN_UNAVAILABLE)
     except Exception:
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")

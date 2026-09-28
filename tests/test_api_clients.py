@@ -3,7 +3,12 @@
 import pytest
 import responses
 
-from tools.api_clients import BlockfrostClient, TapToolsClient, _request_with_retry
+from tools.api_clients import (
+    BlockfrostClient,
+    BlockfrostUnavailable,
+    TapToolsClient,
+    _request_with_retry,
+)
 
 
 class TestRetryLogic:
@@ -36,7 +41,7 @@ class TestRetryLogic:
     def test_exhausted_retries_raises(self):
         for _ in range(6):
             responses.add(responses.GET, "https://example.com/api", status=429)
-        with pytest.raises(RuntimeError, match="Exhausted retries"):
+        with pytest.raises(BlockfrostUnavailable, match="Exhausted retries"):
             _request_with_retry(
                 "GET", "https://example.com/api", {}, max_retries=5,
             )
@@ -70,6 +75,56 @@ class TestBlockfrostClient:
         client = BlockfrostClient(project_id="test")
         result = client.get_asset_info("unit123")
         assert result["quantity"] == "1000000"
+
+    @responses.activate
+    def test_get_tx_cbor_returns_the_raw_transaction_bytes(self):
+        responses.add(
+            responses.GET,
+            "https://cardano-mainnet.blockfrost.io/api/v0/txs/ab12/cbor",
+            json={"cbor": "84a0a0f5f6"},
+        )
+        client = BlockfrostClient(project_id="test")
+        assert client.get_tx_cbor("ab12") == bytes.fromhex("84a0a0f5f6")
+
+    @responses.activate
+    def test_get_tx(self):
+        responses.add(
+            responses.GET,
+            "https://cardano-mainnet.blockfrost.io/api/v0/txs/ab12",
+            json={"slot": 42},
+        )
+        client = BlockfrostClient(project_id="test")
+        assert client.get_tx("ab12")["slot"] == 42
+
+    @responses.activate
+    def test_get_address_transactions_pages_oldest_first(self):
+        base = "https://cardano-mainnet.blockfrost.io/api/v0/addresses/addr1x/transactions"
+        responses.add(responses.GET, base, json=[{"tx_hash": f"t{i}"} for i in range(100)])
+        responses.add(responses.GET, base, json=[{"tx_hash": "last"}])
+        client = BlockfrostClient(project_id="test")
+        rows = client.get_address_transactions("addr1x")
+        assert len(rows) == 101
+        assert all("order=asc" in call.request.url for call in responses.calls)
+
+    @responses.activate
+    def test_get_asset_history_pages_oldest_first(self):
+        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/u1/history"
+        responses.add(responses.GET, base, json=[{"tx_hash": f"t{i}"} for i in range(100)])
+        responses.add(responses.GET, base, json=[{"tx_hash": "last", "action": "burned"}])
+        client = BlockfrostClient(project_id="test")
+        rows = client.get_asset_history("u1")
+        assert len(rows) == 101 and rows[-1]["action"] == "burned"
+        assert all("order=asc" in call.request.url for call in responses.calls)
+
+    @responses.activate
+    def test_get_epoch_parameters(self):
+        responses.add(
+            responses.GET,
+            "https://cardano-mainnet.blockfrost.io/api/v0/epochs/640/parameters",
+            json={"epoch": 640},
+        )
+        client = BlockfrostClient(project_id="test")
+        assert client.get_epoch_parameters(640)["epoch"] == 640
 
     @responses.activate
     def test_pagination(self):

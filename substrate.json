@@ -1,0 +1,61 @@
+{
+  "repo": "matra-token-merger",
+  "primitives": [
+    {
+      "id": "cmatra-mint-policy",
+      "name": "cMATRA mint policy",
+      "desc": "One-shot parameterized mint policy for the 1B cMATRA supply, with an invariant rejecting datum-less script outputs.",
+      "kind": "contract",
+      "paths": [
+        "onchain/flux_mint_policy"
+      ],
+      "consumes": [],
+      "status": "live"
+    },
+    {
+      "id": "cmatra-claim-validator",
+      "name": "cMATRA claim validator",
+      "desc": "Dual-admin surrender pool: seven legacy assets in at TWAP-locked rates, cMATRA out, with a fixed redemption deadline.",
+      "kind": "contract",
+      "paths": [
+        "onchain/claim_validator"
+      ],
+      "consumes": [
+        "cmatra-mint-policy"
+      ],
+      "status": "live"
+    },
+    {
+      "id": "cmatra-quarantine-validator",
+      "name": "cMATRA quarantine validator",
+      "desc": "Quarantine script for surrendered legacy assets.",
+      "kind": "contract",
+      "paths": [
+        "onchain/quarantine_validator"
+      ],
+      "consumes": [],
+      "status": "live"
+    },
+    {
+      "id": "surrender-api",
+      "name": "Surrender API",
+      "desc": "Wallet-driven surrender flow: CIP-30 partial-sign, a co-signer that signs only after the claimant has, re-verifying every transaction against a strict surrender policy (golden-tested on every mainnet surrender), its own chain view (every input unspent on chain, no unit above its pinned supply) and a per-signer ledger that refuses approvals that can never land and holds each legacy unit to its pinned remaining supply and the pool to a 24-hour cap, pool-tip tracking and UTxO defrag tooling.",
+      "kind": "api",
+      "paths": [
+        "services/surrender_api.py",
+        "services/cosigner_api.py",
+        "services/cosign_policy.py",
+        "services/chain_check.py",
+        "services/redemption_ledger.py",
+        "services/pool_tip.py",
+        "services/defrag.py",
+        "tools",
+        "scripts/pin_redemption.py"
+      ],
+      "consumes": [
+        "cmatra-claim-validator"
+      ],
+      "status": "live"
+    }
+  ]
+}

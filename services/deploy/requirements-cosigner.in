@@ -1,0 +1,11 @@
+# What services/cosigner_api.py imports at run time, plus the server that runs
+# it. Compiled with hashes against the versions the test suite runs on:
+#   pip freeze > constraints.txt   (in the CI/test environment)
+#   pip-compile --generate-hashes --allow-unsafe --strip-extras \
+#       -c constraints.txt -o requirements-cosigner.txt requirements-cosigner.in
+pycardano
+cbor2
+fastapi
+requests
+python-dotenv
+uvicorn
