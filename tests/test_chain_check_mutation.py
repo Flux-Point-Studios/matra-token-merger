@@ -80,6 +80,9 @@ OPERATOR_MUTANTS = {
     ),
     "only_the_last_entry_read": ("for event in history:", "for event in history[-1:]:"),
     "a_history_hash_matched_by_its_prefix": ("_TX_HASH.fullmatch(tx_hash)", "_TX_HASH.match(tx_hash)"),
+    "a_bool_slot_read_as_a_number": ("type(slot) is not int", "not isinstance(slot, int)"),
+    "a_float_slot_read_as_a_number": ("type(slot) is not int", "type(slot) not in (int, float)"),
+    "only_a_missing_slot_refused": ("type(slot) is not int", "slot is None"),
     "the_whole_history_read_before_refusing": (
         "next(mints_and_burns_after(unit, cfg.supply_slot, chain), None)",
         "next(iter(list(mints_and_burns_after(unit, cfg.supply_slot, chain))), None)",

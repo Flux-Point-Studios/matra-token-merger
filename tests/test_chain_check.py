@@ -231,6 +231,11 @@ BASE = BLOCKFROST_BASE_URLS["mainnet"]
 RECORDED_INPUTS = ((RECORDED_ID, 0), (RECORDED_ID, 1))
 
 
+def _change_hash(unit: str, action: str, slot: int) -> str:
+    """The transaction hash :meth:`Blockfrost.event` gives a mint or burn."""
+    return blake(f"{unit} {action} {slot}".encode()).hex()
+
+
 class Blockfrost:
     """Blockfrost mainnet as a BlockfrostClient sees it: the recorded history
     (``pages[unit]``, one answer per page of 100) and transactions
@@ -248,7 +253,7 @@ class Blockfrost:
     def event(self, unit: str, action: str, slot: int) -> dict:
         """A history entry for a new mint or burn of ``unit`` at ``slot``,
         with the /txs answer for its transaction."""
-        tx_hash = blake(f"{unit} {action} {slot}".encode()).hex()
+        tx_hash = _change_hash(unit, action, slot)
         template = next(iter(RECORDED["txs"].values()))
         self.txs[tx_hash] = {"json": {**template, "hash": tx_hash, "slot": slot}}
         return {"tx_hash": tx_hash, "action": action, "amount": "1" if action == "minted" else "-1"}
@@ -422,6 +427,24 @@ def a_history_transaction_without_a_slot(confirm):
     chain = Blockfrost()
     del chain.txs[_recorded_mint(T1_PASS)]["json"]["slot"]
     chain.confirm(confirm, {T1_PASS: 1})
+
+
+def _a_mint_after_the_pin_placed_at(slot: object) -> Callable:
+    def run(confirm):
+        chain = Blockfrost()
+        minted = chain.add(T1_PASS, "minted", PIN.supply_slot + 1)
+        chain.txs[minted]["json"]["slot"] = slot
+        chain.confirm(confirm, {T1_PASS: 1})
+    return run
+
+
+# A slot is a whole number. JSON true reads as 1 in Python and 1.0 compares
+# as 1, so either, taken as a number, would place a mint after the pin
+# before it.
+for _name, _slot in (("true", True), ("a_float", 1.0)):
+    PROBES.append(Probe(f"a_mint_after_the_pin_placed_at_{_name}", "unavailable",
+                        _a_mint_after_the_pin_placed_at(_slot),
+                        _change_hash(T1_PASS, "minted", PIN.supply_slot + 1)))
 
 
 @probe("unavailable", detail=T1_PASS)
