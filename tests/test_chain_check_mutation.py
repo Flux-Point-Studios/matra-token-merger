@@ -73,8 +73,8 @@ def _history_asked_before_the_inputs(source: str) -> str:
 
 
 OPERATOR_MUTANTS = {
-    "the_pins_own_slot_read_as_after_it": ("slot > cfg.supply_slot", "slot >= cfg.supply_slot"),
-    "the_slot_after_the_pin_read_as_inside_it": ("slot > cfg.supply_slot", "slot > cfg.supply_slot + 1"),
+    "the_pins_own_slot_read_as_after_it": ("tx_slot > slot", "tx_slot >= slot"),
+    "the_slot_after_the_pin_read_as_inside_it": ("tx_slot > slot", "tx_slot > slot + 1"),
     "fungible_histories_asked_too": (
         "cfg.redeemable_nfts.intersection(approval.units)", "approval.units",
     ),
