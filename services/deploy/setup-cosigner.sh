@@ -5,7 +5,7 @@
 #
 # Run this ON the GMKTec machine. It will:
 #   1. Generate admin key pair 2 (the key NEVER leaves this machine)
-#   2. Create the .env.cosigner file
+#   2. Create .env.cosigner, or add the settings an existing one lacks
 #   3. Build and start the Docker container
 #   4. Print the PKH for you to configure on Server A
 #
@@ -100,53 +100,74 @@ echo "    2. Validator compile: aiken blueprint apply (2nd param)"
 echo ""
 echo "============================================"
 
-# --- Step 3: Create .env.cosigner ---
+# --- Step 3: Write the settings .env.cosigner lacks ---
 # The co-signer refuses to start without its policy. Export these before
 # running this script (values for the deployed pool are in the ceremony
 # record): COSIGNER_PRIMARY_ADMIN_PKH, SURRENDER_SCRIPT_ADDRESS,
 # QUARANTINE_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
 # SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY, and
-# BLOCKFROST_PROJECT_ID (this host's own view of the chain).
-if [[ ! -f "$SCRIPT_DIR/.env.cosigner" ]]; then
-    : "${COSIGNER_PRIMARY_ADMIN_PKH:?export the admin_1 key hash}"
-    : "${SURRENDER_SCRIPT_ADDRESS:?export the pool script address}"
-    : "${QUARANTINE_ADDRESS:?export the quarantine address}"
-    : "${CMATRA_POLICY_HEX:?export the cMATRA policy id}"
-    : "${CMATRA_ASSET_HEX:?export the cMATRA asset name hex}"
-    : "${SURRENDER_DEADLINE_POSIX_MS:?export the pool deadline}"
-    : "${MAX_CMATRA_PER_TX:?export the per-transaction cap in base units}"
-    : "${MAX_CMATRA_PER_DAY:?export the 24-hour cap in base units}"
-    : "${BLOCKFROST_PROJECT_ID:?export the Blockfrost project id for this host}"
-    SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-    (
-        umask 177
-        cat > "$SCRIPT_DIR/.env.cosigner" <<ENVFILE
-COSIGNER_SKEY_PATH=/app/keys/admin_2.skey
-COSIGNER_API_SECRET=$SECRET
-COSIGNER_LEDGER_PATH=/app/data/cosigned.sqlite3
-COSIGNER_PRIMARY_ADMIN_PKH=$COSIGNER_PRIMARY_ADMIN_PKH
-NETWORK=${NETWORK:-mainnet}
-SURRENDER_SCRIPT_ADDRESS=$SURRENDER_SCRIPT_ADDRESS
-QUARANTINE_ADDRESS=$QUARANTINE_ADDRESS
-CMATRA_POLICY_HEX=$CMATRA_POLICY_HEX
-CMATRA_ASSET_HEX=$CMATRA_ASSET_HEX
-SURRENDER_DEADLINE_POSIX_MS=$SURRENDER_DEADLINE_POSIX_MS
-MAX_CMATRA_PER_TX=$MAX_CMATRA_PER_TX
-MAX_CMATRA_PER_DAY=$MAX_CMATRA_PER_DAY
-BLOCKFROST_PROJECT_ID=$BLOCKFROST_PROJECT_ID
-ENVFILE
-    )
-    unset SECRET
-    mkdir -p -m 700 "$SCRIPT_DIR/data"
-    NEW_SIGNER=1
-    echo ""
-    echo "Created .env.cosigner (mode 600) with a generated API secret."
-    echo "Copy COSIGNER_API_SECRET from it into Server A's environment file"
-    echo "without displaying it, e.g. over SSH into a mode-600 file."
-    echo ""
-else
-    echo ".env.cosigner already exists — skipping."
+# BLOCKFROST_PROJECT_ID (this host's own view of the chain). A setting already
+# in .env.cosigner is kept as it is, so on a host an earlier version set up
+# only the settings it lacks are added and its API secret stays.
+ENV_FILE="$SCRIPT_DIR/.env.cosigner"
+EXPORTED=(COSIGNER_PRIMARY_ADMIN_PKH SURRENDER_SCRIPT_ADDRESS QUARANTINE_ADDRESS
+          CMATRA_POLICY_HEX CMATRA_ASSET_HEX SURRENDER_DEADLINE_POSIX_MS
+          MAX_CMATRA_PER_TX MAX_CMATRA_PER_DAY BLOCKFROST_PROJECT_ID)
+has_setting() { [[ -f "$ENV_FILE" ]] && grep -q "^$1=" "$ENV_FILE"; }
+
+UNSET=()
+for name in "${EXPORTED[@]}"; do
+    has_setting "$name" || [[ -n "${!name:-}" ]] || UNSET+=("$name")
+done
+if (( ${#UNSET[@]} )); then
+    echo "ERROR: .env.cosigner does not set ${UNSET[*]}; export them and run this again." >&2
+    exit 1
 fi
+
+ADDED=()
+NEW_SECRET=0
+# A co-signer whose settings name no ledger never kept one, so it gets its
+# first. One that names a ledger must find it.
+FIRST_LEDGER=0
+add_setting() {
+    has_setting "$1" && return
+    echo "$1=$2" >> "$ENV_NEXT"
+    ADDED+=("$1")
+}
+ENV_NEXT=$(mktemp "$SCRIPT_DIR/.env.cosigner.XXXXXX")
+trap 'rm -f "$ENV_NEXT"' EXIT
+if [[ -f "$ENV_FILE" ]]; then
+    cat "$ENV_FILE" > "$ENV_NEXT"
+    # A last line without a newline would run into the first added setting.
+    [[ -z "$(tail -c1 "$ENV_FILE")" ]] || echo >> "$ENV_NEXT"
+fi
+add_setting COSIGNER_SKEY_PATH /app/keys/admin_2.skey
+if ! has_setting COSIGNER_API_SECRET; then
+    SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    add_setting COSIGNER_API_SECRET "$SECRET"
+    unset SECRET
+    NEW_SECRET=1
+fi
+has_setting COSIGNER_LEDGER_PATH || FIRST_LEDGER=1
+add_setting COSIGNER_LEDGER_PATH /app/data/cosigned.sqlite3
+add_setting NETWORK "${NETWORK:-mainnet}"
+for name in "${EXPORTED[@]}"; do
+    add_setting "$name" "${!name:-}"
+done
+
+echo ""
+if (( ${#ADDED[@]} )); then
+    mv "$ENV_NEXT" "$ENV_FILE"
+    echo "Added to .env.cosigner (mode 600): ${ADDED[*]}"
+else
+    echo ".env.cosigner already has every setting."
+fi
+if (( NEW_SECRET )); then
+    echo "It holds a generated API secret. Copy COSIGNER_API_SECRET from it into"
+    echo "Server A's environment file without displaying it, e.g. over SSH into a"
+    echo "mode-600 file."
+fi
+mkdir -p -m 700 "$SCRIPT_DIR/data"
 
 # --- Step 4: Build and start ---
 echo ""
@@ -159,8 +180,8 @@ docker compose -f docker-compose.cosigner.yml build
 # approval and with them the caps.
 LEDGER="$SCRIPT_DIR/data/cosigned.sqlite3"
 if [[ ! -f "$LEDGER" ]]; then
-    if [[ "${NEW_SIGNER:-0}" != 1 ]]; then
-        echo "ERROR: $LEDGER is missing, but this co-signer was set up before." >&2
+    if (( ! FIRST_LEDGER )); then
+        echo "ERROR: $LEDGER is missing, but this co-signer has kept a ledger." >&2
         echo "Restore the ledger it has been using; do not start it on a new one." >&2
         exit 1
     fi
