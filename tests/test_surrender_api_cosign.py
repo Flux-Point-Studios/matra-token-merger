@@ -617,6 +617,9 @@ WRONG_ANSWERS = {
     "short_signature": lambda world, answer, body_hash: {
         **answer, "signature_hex": answer["signature_hex"][:-2],
     },
+    "long_signature": lambda world, answer, body_hash: {
+        **answer, "signature_hex": answer["signature_hex"] + "00",
+    },
 }
 
 

@@ -35,6 +35,9 @@ MUTANTS = {
         "_get_cosigner_witness", " and signature_verifies(vkey, body_hash, signature)", "",
     ),
     "signature_length_not_checked": ("_get_cosigner_witness", "len(signature) == 64 and ", ""),
+    "a_long_signature_passed_to_the_verifier": (
+        "_get_cosigner_witness", "len(signature) == 64", "len(signature) >= 64",
+    ),
     "body_hash_taken_from_the_answer": (
         "_get_cosigner_witness",
         "hashlib.blake2b(split_tx(tx_cbor)[0], digest_size=32).digest()",
