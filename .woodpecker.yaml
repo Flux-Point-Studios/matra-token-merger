@@ -1,8 +1,11 @@
 # One file, not a .woodpecker/ directory: main's branch protection requires the
 # single status ci/woodpecker/pr/woodpecker that this file posts.
+# On a pull_request event `branch` is the base, so pull requests run whatever
+# their base is: one stacked on another gets the same checks.
 when:
-  - event: [push, pull_request]
+  - event: push
     branch: main
+  - event: pull_request
 
 steps:
   - name: aiken-claim_validator

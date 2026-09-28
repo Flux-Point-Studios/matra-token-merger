@@ -29,13 +29,15 @@ policy reads the complete transaction and approves only a surrender:
 
 ``require_claimant_signature`` then checks that the claimant's payment key
 signed the body. services.chain_check confirms against the signer's own view
-of the chain that the inputs exist and no unit's supply grew, and the per-day
-cap and each unit's remaining redemptions are enforced against every signer's
-own record by services.redemption_ledger.
+of the chain that the inputs exist, no unit's supply grew and no NFT unit was
+minted or burned since the pin, and the per-day cap and each unit's remaining
+redemptions are enforced against every signer's own record by
+services.redemption_ledger.
 
 Decoding is strict and self-contained: a duplicated map key anywhere, trailing
-bytes, floats or undefined simple values are refused, and CBOR booleans and
-tags never compare equal to integers or arrays, so the policy never reads a
+bytes, floats or undefined simple values are refused, CBOR booleans and tags
+never compare equal to integers or arrays, and an output's policy ids must be
+28 bytes and its asset names at most 32, so the policy never reads a
 different value than the ledger would.
 """
 
@@ -301,9 +303,16 @@ def _value(raw: Any) -> tuple[int, dict[bytes, dict[bytes, int]]]:
     for policy, names in assets.items():
         if not isinstance(policy, bytes) or not isinstance(names, dict):
             raise CosignRejected("output_shape", "malformed asset bundle")
+        # The ledger's own limits: a policy id is a 28-byte script hash and
+        # an asset name at most 32 bytes. Units are keyed as policy + name
+        # hex, which only these lengths keep unambiguous.
+        if len(policy) != 28:
+            raise CosignRejected("output_shape", f"policy id of {len(policy)} bytes")
         for name, quantity in names.items():
             if not isinstance(name, bytes) or not _uint(quantity):
                 raise CosignRejected("output_shape", "malformed asset quantity")
+            if len(name) > 32:
+                raise CosignRejected("output_shape", f"asset name of {len(name)} bytes")
     return coin, assets
 
 
@@ -382,6 +391,7 @@ class CosignConfig:
     redeemable_nfts: frozenset[str]
     redemption_limits: Mapping[str, int]
     pinned_supply: Mapping[str, int]
+    supply_slot: int
     max_payout_per_tx: int
 
 
@@ -414,6 +424,7 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         redeemable_nfts=pin.nft_units,
         redemption_limits=pin.remaining,
         pinned_supply=pin.supply,
+        supply_slot=pin.supply_slot,
         max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
     )
 
@@ -620,9 +631,17 @@ def require_claimant_signature(tx_cbor: bytes, approval: Approval) -> None:
             raise CosignRejected("witness_shape", "malformed vkey witness")
         vkey, signature = entry
         if blake2b_224(vkey) == approval.claimant[1:29]:
-            try:
-                VerifyKey(vkey).verify(approval.tx_hash, signature)
-            except BadSignatureError as exc:
-                raise CosignRejected("claimant_witness", "claimant signature does not verify") from exc
+            if not signature_verifies(vkey, approval.tx_hash, signature):
+                raise CosignRejected("claimant_witness", "claimant signature does not verify")
             return
     raise CosignRejected("claimant_witness", "the claimant has not signed")
+
+
+def signature_verifies(vkey: bytes, message: bytes, signature: bytes) -> bool:
+    """``signature`` (64 bytes) is the Ed25519 signature of ``message`` by
+    the public key ``vkey`` (32 bytes)."""
+    try:
+        VerifyKey(vkey).verify(message, signature)
+    except BadSignatureError:
+        return False
+    return True

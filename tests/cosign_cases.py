@@ -72,6 +72,7 @@ MAINNET = CosignConfig(
     redeemable_nfts=REDEEMABLE,
     redemption_limits=PIN.remaining,
     pinned_supply=PIN.supply,
+    supply_slot=PIN.supply_slot,
     max_payout_per_tx=20_000_000 * 10**6,
 )
 # The pin's limits before any surrender landed (nothing quarantined), so the
@@ -309,12 +310,18 @@ def not_found() -> requests.HTTPError:
     return requests.HTTPError("404 Client Error: Not Found", response=response)
 
 
+# The transaction a unit's history names unless a test adds to it: a mint in
+# the pin's own slot, which the pinned supply includes.
+MINTED_AT_THE_PIN = "5e" * 32
+
+
 class FakeChain:
     """A signer's view of the chain: the BlockfrostClient calls
     services.chain_check makes. The transactions whose bodies it holds are on
     chain, their outputs unspent unless listed in ``spent``; each unit's
-    supply is the pinned one unless ``supply`` says otherwise; ``failure``,
-    when set, is raised by every call."""
+    supply is the pinned one unless ``supply`` says otherwise, and its history
+    one mint at the pin unless ``history`` says otherwise; ``failure``, when
+    set, is raised by every call."""
 
     def __init__(self, bodies: Mapping[str, bytes] | None = None,
                  supply: Mapping[str, int] | None = None,
@@ -322,7 +329,19 @@ class FakeChain:
         self.bodies = dict(bodies or {})
         self.spent: dict[tuple[str, int], str] = {}
         self.supply = {**PIN.supply, **(supply or {})}
+        self.history: dict[str, list[dict]] = {}
+        self.slots: dict[str, int] = {MINTED_AT_THE_PIN: PIN.supply_slot}
         self.failure = failure
+
+    def change_after_pin(self, unit: str, action: str) -> None:
+        """Add to ``unit``'s history a mint or burn (``action`` "minted" or
+        "burned") in the slot after the pin; its supply stays the pinned one."""
+        tx_hash = blake(f"{unit} {action}".encode()).hex()
+        self.slots[tx_hash] = PIN.supply_slot + 1
+        amount = "1" if action == "minted" else "-1"
+        self.history[unit] = [
+            *self.get_asset_history(unit), {"tx_hash": tx_hash, "action": action, "amount": amount},
+        ]
 
     @classmethod
     def as_at_the_golden_builds(cls) -> "FakeChain":
@@ -356,6 +375,20 @@ class FakeChain:
         if unit not in self.supply:
             raise not_found()
         return {"asset": unit, "quantity": str(self.supply[unit])}
+
+    def get_asset_history(self, unit: str) -> list[dict]:
+        self._answer()
+        if unit not in self.supply:
+            raise not_found()
+        return self.history.get(unit, [
+            {"tx_hash": MINTED_AT_THE_PIN, "action": "minted", "amount": str(self.supply[unit])},
+        ])
+
+    def get_tx(self, tx_hash: str) -> dict:
+        self._answer()
+        if tx_hash not in self.slots:
+            raise not_found()
+        return {"hash": tx_hash, "slot": self.slots[tx_hash]}
 
 
 @contextmanager
@@ -765,6 +798,21 @@ def output_asset_bundle_malformed(d):
     d.body[1][PAYOUT][1][1][CMATRA_POLICY] = [CMATRA_NAME]
 
 
+@case("output_shape")
+def output_policy_id_of_27_bytes(d):
+    _add_asset(d.body[1][CHANGE], b"\xee" * 27, b"x", 1)
+
+
+@case("output_shape")
+def output_policy_id_of_29_bytes(d):
+    _add_asset(d.body[1][CHANGE], b"\xee" * 29, b"x", 1)
+
+
+@case("output_shape")
+def output_asset_name_of_33_bytes(d):
+    _add_asset(d.body[1][CHANGE], b"\xee" * 28, b"\x01" * 33, 1)
+
+
 @case("pool_datum")
 def pool_datum_altered(d):
     d.body[1][CONTINUATION][2] = [1, Tag(24, bytes.fromhex("d87a80"))]
@@ -834,6 +882,20 @@ def quarantined_nft_under_a_foreign_policy(d):
     _add_asset(d.body[1][QUARANTINE_OUT], policy, name, -1)
     _add_asset(d.body[1][QUARANTINE_OUT], b"\xee" * 28, b"junk", 1)
     d.move_cmatra(CONTINUATION, PAYOUT, 99 * T1_RATE)
+
+
+@case("output_shape")
+def quarantined_pass_split_across_policy_and_name(d):
+    """The pass with its policy id cut to 27 bytes and the 28th byte moved
+    into its name, in the claimant's input and in quarantine: an asset the
+    ledger cannot hold, whose policy and name spell the pass's unit."""
+    policy = bytes.fromhex(T1_ADAM_PASS.policy_id)
+    name = _quarantine_nft(d)
+    held = next(r for r in d.inputs() if name in d.parent_output(r)[1][1].get(policy, {}))
+    for output in (split := copy.deepcopy(d.parent_output(held))), d.body[1][QUARANTINE_OUT]:
+        _add_asset(output, policy, name, -1)
+        _add_asset(output, policy[:27], policy[27:] + name, 1)
+    d.replace_parent_output(held, split)
 
 
 @case("quarantine_assets")
@@ -1121,6 +1183,13 @@ DECODE_ACCEPTED: list[tuple[bytes, Any]] = [
     (b"\xf5", Simple.TRUE),
     (b"\xf4", Simple.FALSE),
     (b"\xf6", None),
+]
+
+# Outputs at the limits of an asset id that the ledger accepts: a 28-byte
+# policy id with a 32-byte or an empty asset name.
+OUTPUTS_ACCEPTED: list[tuple[str, list]] = [
+    ("asset_name_of_32_bytes", [ATTACKER, [2_000_000, {b"\xee" * 28: {b"\x01" * 32: 1}}]]),
+    ("empty_asset_name", [ATTACKER, [2_000_000, {b"\xee" * 28: {b"": 1}}]]),
 ]
 
 # Transactions whose final item is cut short: the decoder must say "cbor"

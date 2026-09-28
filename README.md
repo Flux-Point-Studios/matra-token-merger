@@ -232,17 +232,25 @@ The threat model is **dual-admin compromise**:
   no pool draining for the same reason. The cosigner service additionally
   refuses to sign anything that doesn't match the expected transaction
   pattern (this is defense-in-depth on top of the dual-signature requirement).
+- The surrender API adds admin_1's signature only once the co-signer's answer
+  is admin_2's key and that key's signature of the exact transaction body;
+  admin_1's own witness is merged first, so no answer can stand in for it.
 - Each legacy unit redeems at most what remained of it at the redemption pin
   (`audit_pack/2026-09-27/redemption_pin.json`: its supply at the pin, less
   the team waiver, less what quarantine already held), so units minted or
   surrendered before the pin are never paid for again.
 - Neither signer redeems a unit whose supply on chain is above its supply at
   the pin: editions of one name are indistinguishable, so a later edition
-  stops that unit's redemptions until the admins decide. Each signer asks its
-  own Blockfrost project, from its own host, before it records an approval,
-  and also confirms there that every input is an unspent output on chain or
-  an output of a surrender it recorded, so nothing it records rests on
-  outputs that do not exist.
+  stops that unit's redemptions until the admins decide. Nor does either
+  redeem an NFT unit whose mint history shows any mint or burn after the
+  pin's supply slot, read in a query of its own after the input lookups, so a
+  lagging supply answer or a mint offset by a burn does not pass. Each signer
+  asks its own Blockfrost project, from its own host, before it records an
+  approval, and also confirms there that every input is an unspent output on
+  chain or an output of a surrender it recorded, so nothing it records rests
+  on outputs that do not exist. An answer it cannot read, or of the wrong
+  shape, stops it from signing. Its project is trusted to list a history in
+  full: an empty page ends a history.
   `python -m scripts.pin_redemption --check <pin>` lists every such unit, any
   redeemable name the pin lacks, and any change in quarantine since the pin.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it

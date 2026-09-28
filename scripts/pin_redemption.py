@@ -16,9 +16,11 @@ surrender it approves after the pin, so a unit is never paid for twice.
         <supply slot> audit_pack/<date>/redemption_pin.json
 
 --check compares the chain tip with a committed pin and exits 1 if any unit
-has more supply now than at the pin, a redeemable name exists that the pin
-lacks, or quarantine holds other amounts than the pin records. Re-pinning at
-the old supply slot cannot show a later mint; this reads current supply.
+has more supply now than at the pin, any NFT was minted or burned after the
+pin's supply slot (which every signer refuses), a redeemable name exists that
+the pin lacks, or quarantine holds other amounts than the pin records.
+Re-pinning at the old supply slot cannot show a later mint; this reads
+current supply and each NFT's own history.
 
     NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
         --check audit_pack/<date>/redemption_pin.json
@@ -32,6 +34,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
+from services.chain_check import mints_and_burns_after
 from tools.api_clients import BlockfrostClient
 from tools.config import (
     CIP68_REFERENCE_TOKEN_PREFIX,
@@ -100,6 +103,11 @@ def drift(doc: dict, bf: Any) -> list[str]:
                 problems.append(
                     f"{asset} {unit}: quarantine holds {held.get(unit, 0)},"
                     f" the pin says {row['quarantined']}")
+            if asset not in fungibles:
+                problems += [
+                    f"{asset} {unit}: {action} in {tx_hash} at slot {slot}, after the pin"
+                    for action, tx_hash, slot in mints_and_burns_after(unit, doc["supply_slot"], bf)
+                ]
         if asset not in fungibles:
             problems += [
                 f"{asset} {policy + name}: redeemable name minted after the pin"
@@ -116,7 +124,8 @@ def check(pin: Path, bf: Any) -> int:
     if problems:
         print(f"PIN NO LONGER HOLDS: {len(problems)} difference(s) from {pin}")
         return 1
-    print(f"pin holds: no unit above its pinned supply, no new name, quarantine as pinned ({pin})")
+    print(f"pin holds: no unit above its pinned supply, no NFT minted or burned since the pin,"
+          f" no new name, quarantine as pinned ({pin})")
     return 0
 
 

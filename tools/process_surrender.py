@@ -211,6 +211,9 @@ class RedemptionPin:
     supply: Mapping[str, int]
     """Per unit: its on-chain supply at the pin. More on chain now means
     editions minted since, which the signers refuse to redeem."""
+    supply_slot: int
+    """The slot the supplies were read at. The signers refuse an NFT unit
+    minted or burned after it."""
 
 
 def load_redemption_pin(path: Path) -> RedemptionPin:
@@ -220,6 +223,9 @@ def load_redemption_pin(path: Path) -> RedemptionPin:
     Raises ValueError otherwise.
     """
     doc = json.loads(Path(path).read_text())
+    supply_slot = doc.get("supply_slot")
+    if type(supply_slot) is not int or supply_slot < 0:
+        raise ValueError(f"{path}: supply_slot must be a slot number, not {supply_slot!r}")
     nft_units: set[str] = set()
     remaining: dict[str, int] = {}
     supply: dict[str, int] = {}
@@ -236,7 +242,7 @@ def load_redemption_pin(path: Path) -> RedemptionPin:
             supply[unit] = row["supply"]
             if not fungible:
                 nft_units.add(unit)
-    return RedemptionPin(frozenset(nft_units), remaining, supply)
+    return RedemptionPin(frozenset(nft_units), remaining, supply, supply_slot)
 
 
 def surrendered_entitlement(

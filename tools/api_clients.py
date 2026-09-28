@@ -33,7 +33,8 @@ _BACKOFF_BASE = 1.5  # seconds
 
 
 class BlockfrostUnavailable(RuntimeError):
-    """Every retry got a transient error (429 or 5xx)."""
+    """Every retry got a transient error (429 or 5xx), or a list endpoint
+    answered with something other than a list."""
 
 
 def _request_with_retry(
@@ -109,7 +110,10 @@ class BlockfrostClient:
         page_size: int = 100,
         extra_params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Auto-paginate a Blockfrost list endpoint."""
+        """Auto-paginate a Blockfrost list endpoint. A page that is not a
+        list raises :class:`BlockfrostUnavailable`, so no other answer can
+        end a listing. An empty or short page ends it: the provider is
+        trusted to end a listing only where it ends."""
         results: list[dict[str, Any]] = []
         page = 1
         while True:
@@ -119,8 +123,8 @@ class BlockfrostClient:
                 **(extra_params or {}),
             }
             batch = self._get(path, params)
-            if not batch:
-                break
+            if not isinstance(batch, list):
+                raise BlockfrostUnavailable(f"{path} page {page}: {type(batch).__name__}, not a list")
             results.extend(batch)
             if len(batch) < page_size:
                 break

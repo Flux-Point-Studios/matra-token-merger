@@ -20,6 +20,7 @@ from tests.cosign_cases import (
     CASES,
     DECODE_ACCEPTED,
     DECODE_REFUSED,
+    OUTPUTS_ACCEPTED,
     SPLIT_REFUSED,
     WITNESS_CASES,
 )
@@ -100,6 +101,10 @@ OPERATOR_MUTANTS = {
         "start > now_slot",
         "start >= ttl",
     ),
+    "policy_ids_longer_than_28_bytes_read": ("len(policy) != 28", "len(policy) < 28"),
+    "policy_ids_shorter_than_28_bytes_read": ("len(policy) != 28", "len(policy) > 28"),
+    "asset_names_of_33_bytes_read": ("len(name) > 32", "len(name) > 33"),
+    "asset_names_of_32_bytes_refused": ("len(name) > 32", "len(name) > 31"),
 }
 
 
@@ -146,6 +151,10 @@ def _differences(module: types.ModuleType) -> list[str]:
         got = _outcome(lambda: decoded.append(module.decode(raw)))
         if got != "accepted" or decoded != [value]:
             diffs.append(f"decode {raw.hex()}: {value!r} -> {got} {decoded!r}")
+    for name, raw in OUTPUTS_ACCEPTED:
+        got = _outcome(lambda: module.parse_output(raw))
+        if got != "accepted":
+            diffs.append(f"parse_output {name}: accepted -> {got}")
     return diffs
 
 

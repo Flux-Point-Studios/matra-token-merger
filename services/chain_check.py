@@ -8,6 +8,10 @@ Blockfrost project queried from the signer's own host:
     collection policies can still mint, and editions of one name are
     indistinguishable, so a signer cannot tell a pinned edition from a later
     one; while a later edition exists the unit is not redeemed at all;
+  * no surrendered NFT unit has been minted or burned since the pin's supply
+    slot, by its own mint history. That is a separate query, made after the
+    input lookups, so a supply answer that lags a mint, or a mint later
+    offset by a burn, does not pass;
   * every input and collateral input is an unspent output on chain, or an
     output of a surrender this signer has recorded (a chained surrender
     spends outputs still in the mempool). A producing body proves what an
@@ -16,12 +20,19 @@ Blockfrost project queried from the signer's own host:
     ledger holds approvals to.
 
 A view that cannot answer raises :class:`ChainUnavailable`, and nothing is
-signed.
+signed. That includes an answer of the wrong shape: a page of a history that
+is not a list, an entry that does not name a transaction hash, a slot that is
+not a whole number.
+
+The view itself is trusted, as the signer's own provider. A history page that
+is an empty or short list ends the history, and a view that ends it early, or
+leaves an entry out, cannot be told from a complete one.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable
+import re
+from typing import Any, Callable, Iterator
 
 import requests
 
@@ -58,6 +69,44 @@ def _unspent_outputs(answer: dict) -> set[int]:
         raise ChainUnavailable(f"unexpected answer from the chain view: {exc!r}") from exc
 
 
+_TX_HASH = re.compile(r"[0-9a-f]{64}")
+
+
+def _history_tx(unit: str, entry: Any) -> str:
+    """The transaction an /assets/{unit}/history entry names. It goes into a
+    request path, so it must be a transaction hash and nothing else."""
+    tx_hash = entry.get("tx_hash") if isinstance(entry, dict) else None
+    if not (isinstance(tx_hash, str) and _TX_HASH.fullmatch(tx_hash)):
+        raise ChainUnavailable(f"{unit}: unexpected history entry from the chain view: {entry!r:.200}")
+    return tx_hash
+
+
+def _slot(tx_hash: str, answer: Any) -> int:
+    """The slot a /txs/{hash} answer, or None for an unknown hash, places
+    the transaction in."""
+    slot = answer.get("slot") if isinstance(answer, dict) else None
+    if type(slot) is not int:
+        raise ChainUnavailable(f"{tx_hash}: the chain view gives no slot for it")
+    return slot
+
+
+def mints_and_burns_after(unit: str, slot: int, chain: Any) -> Iterator[tuple[str, str, int]]:
+    """Each mint or burn of ``unit`` after ``slot`` by the unit's own history
+    on ``chain`` (a BlockfrostClient), as (action, transaction hash, its
+    slot). One transaction lookup per entry, made only as far as the caller
+    reads, so a history inflated with changes after the first costs a signer
+    nothing more. Raises :class:`ChainUnavailable` once an entry up to that
+    point, or the history itself, cannot be read."""
+    history = _ask(chain.get_asset_history, unit)
+    if not (isinstance(history, list) and history):
+        raise ChainUnavailable(f"{unit}: the chain view gives no mint history")
+    for event in history:
+        tx_hash = _history_tx(unit, event)
+        tx_slot = _slot(tx_hash, _ask(chain.get_tx, tx_hash))
+        if tx_slot > slot:
+            yield event.get("action"), tx_hash, tx_slot
+
+
 def confirm_on_chain(
     approval: Approval, cfg: CosignConfig, chain: Any, recorded: Callable[[bytes], bool],
 ) -> None:
@@ -84,3 +133,14 @@ def confirm_on_chain(
         for ref_tx, index in approval.inputs:
             if ref_tx == tx_id and index not in unspent:
                 raise CosignRejected("input_spent", f"{tx_id.hex()}#{index} is not an unspent output")
+
+    # A query of its own, after the inputs: the supply answer read first may
+    # lag a mint, and a mint offset by a burn leaves the supply as pinned.
+    for unit in sorted(cfg.redeemable_nfts.intersection(approval.units)):
+        change = next(mints_and_burns_after(unit, cfg.supply_slot, chain), None)
+        if change is not None:
+            action, tx_hash, slot = change
+            raise CosignRejected(
+                "minted_after_pin",
+                f"{unit}: {action} in {tx_hash} at slot {slot}, after the pin at slot {cfg.supply_slot}",
+            )

@@ -152,6 +152,12 @@ def test_pin_records_each_units_supply_at_the_pin():
     assert all(pin.supply[unit] >= 1 for unit in pin.nft_units)
 
 
+def test_pin_records_the_slot_its_supplies_were_read_at():
+    """A pinned NFT that has been minted or burned since this slot is not
+    redeemed."""
+    assert load_redemption_pin(PINNED).supply_slot == _doc()["supply_slot"] == 198_922_388
+
+
 def _doc() -> dict:
     return json.loads(PINNED.read_text())
 
@@ -166,6 +172,17 @@ def test_pinned_file_with_a_policy_mismatch_is_refused(tmp_path):
     doc = _doc()
     doc["assets"]["FLUX_PASS"]["policy_id"] = "ee" * 28
     with pytest.raises(ValueError, match="FLUX_PASS"):
+        load_redemption_pin(_write(tmp_path, doc))
+
+
+@pytest.mark.parametrize("slot", ["absent", None, "198922388", -1, True, 1.5])
+def test_a_pin_without_a_supply_slot_is_refused(tmp_path, slot):
+    doc = _doc()
+    if slot == "absent":
+        del doc["supply_slot"]
+    else:
+        doc["supply_slot"] = slot
+    with pytest.raises(ValueError, match="supply_slot"):
         load_redemption_pin(_write(tmp_path, doc))
 
 

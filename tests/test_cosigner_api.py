@@ -452,6 +452,20 @@ def test_refuses_a_unit_whose_supply_grew_after_the_pin(service):
     assert service.rows() == 0
 
 
+@pytest.mark.parametrize("action", ["minted", "burned"])
+def test_refuses_a_pass_minted_or_burned_after_the_pin(service, action):
+    """The supply the chain view reports is still the pinned one; the pass's
+    own history shows the change."""
+    s = golden_scenario(BASE_T1)
+    (t1,) = [u for u in _units(s) if u.startswith("b4689145")]
+    service.chain.change_after_pin(t1, action)
+    resp = _post(service, s)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "minted_after_pin"
+    assert "signature_hex" not in resp.text
+    assert service.rows() == 0
+
+
 def test_an_unreachable_chain_view_is_a_coded_refusal(service):
     service.chain.failure = requests.ConnectionError("no route to host")
     resp = _post(service, golden_scenario(BASE_T1), raise_server_exceptions=False)

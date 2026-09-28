@@ -15,8 +15,8 @@ Signing flow:
   5. Frontend wallet adds the user's signature via CIP-30 signTx
   6. Frontend sends the wallet's witnesses back; the server checks the user's
      signature, gets admin key 2's from the co-signer (which checks everything
-     again), records the surrender in its own ledger, signs with admin key 1
-     and submits
+     again) and checks that it is that key's signature of the body, records
+     the surrender in its own ledger, signs with admin key 1 and submits
 A build needs nothing but an address, so it carries no admin signature and
 nothing is counted against either signer's cap or a unit's redemption limit
 until the user has signed.
@@ -77,7 +77,6 @@ from pycardano import (
     UTxO,
     Value,
     VerificationKey,
-    VerificationKeyWitness,
 )
 from pycardano.exception import InvalidTransactionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId, VerificationKeyHash
@@ -104,6 +103,7 @@ from services.cosign_policy import (
     CosignRejected,
     load_config,
     require_claimant_signature,
+    signature_verifies,
     slot_at,
     split_tx,
 )
@@ -974,13 +974,16 @@ async def build_surrender(req: BuildSurrenderRequest):
 
 def _get_cosigner_witness(
     tx_cbor: bytes, parent_bodies: list[bytes], language_views: bytes,
-) -> VerificationKeyWitness:
+) -> list[bytes]:
     """Ask the co-signer to verify and sign the claimant-signed transaction.
     It re-checks the whole transaction against its own policy and ledger, so
     it gets the transaction, the bodies that produced its inputs and the
     language views that close its script_data_hash.
 
-    Returns a VerificationKeyWitness ready to merge into the witness set.
+    Returns its [key, signature] witness, refused with 503 unless the key
+    hashes to COSIGNER_PKH and the signature is that key's signature of the
+    transaction body: any other answer could not land, or could stand in for
+    admin 1's own witness.
     """
     try:
         resp = httpx.post(
@@ -996,17 +999,22 @@ def _get_cosigner_witness(
         )
         resp.raise_for_status()
         data = resp.json()
-
-        vk = VerificationKey.from_primitive(bytes.fromhex(data["vkey_hex"]))
-        sig = bytes.fromhex(data["signature_hex"])
-        return VerificationKeyWitness(vk, sig)
-
+        vkey, signature = bytes.fromhex(data["vkey_hex"]), bytes.fromhex(data["signature_hex"])
     except httpx.HTTPStatusError as e:
         logger.error("Co-signer returned %d: %s", e.response.status_code, e.response.text[:200])
         raise HTTPException(503, "Co-signer service error")
     except Exception as e:
         logger.error("Co-signer call failed: %s", e)
         raise HTTPException(503, "Co-signer service unavailable")
+
+    body_hash = hashlib.blake2b(split_tx(tx_cbor)[0], digest_size=32).digest()
+    if not (hashlib.blake2b(vkey, digest_size=28).digest() == state.cosigner_pkh.payload
+            and len(signature) == 64 and signature_verifies(vkey, body_hash, signature)):
+        logger.error("Co-signer answered %s with a witness that is not its signature of the body",
+                     body_hash.hex()[:16])
+        raise HTTPException(503, {"code": "cosigner_witness",
+                                  "message": "The co-signer's signature did not verify."})
+    return [vkey, signature]
 
 
 _TX_SIZE_RE = re.compile(
@@ -1100,21 +1108,20 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
     except sqlite3.Error as exc:
         logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
         raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})
-    return [witness.vkey.payload, witness.signature]
+    return witness
 
 
 def _signed_by_admins(tx_hash_hex: str, tx: bytes) -> bytes:
-    """The claimant-signed ``tx`` with the admins' witnesses: the
-    co-signer's when one is configured, then admin 1's over the same body.
-    With a co-signer, admin 1 signs only once this service has checked the
-    claimant's signature and recorded the surrender in its own ledger."""
-    witnesses = [_cosign(tx_hash_hex, tx)] if COSIGNER_URL else []
+    """The claimant-signed ``tx`` with the admins' witnesses: admin 1's over
+    the body and the co-signer's when one is configured. With a co-signer,
+    admin 1 signs only once this service has checked the claimant's
+    signature and the co-signer's, and recorded the surrender in its own
+    ledger. Admin 1's pair goes first: the merge keeps the first of repeated
+    keys, so no pair the co-signer step returns displaces it."""
+    cosigner = [_cosign(tx_hash_hex, tx)] if COSIGNER_URL else []
     body_hash = hashlib.blake2b(split_tx(tx)[0], digest_size=32).digest()
-    witnesses.append([
-        VerificationKey.from_signing_key(state.admin_sk).payload,
-        state.admin_sk.sign(body_hash),
-    ])
-    return _merge_vkey_witnesses(tx, witnesses, 258 if TAG_SETS_258 else None)
+    own = [VerificationKey.from_signing_key(state.admin_sk).payload, state.admin_sk.sign(body_hash)]
+    return _merge_vkey_witnesses(tx, [own, *cosigner], 258 if TAG_SETS_258 else None)
 
 
 def _producing_bodies(tx_body: TransactionBody) -> list[bytes]:
