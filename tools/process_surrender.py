@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -207,7 +208,9 @@ class RedemptionPin:
     """Every NFT unit (policy hex + asset-name hex) that existed at the pin."""
     remaining: Mapping[str, int]
     """Per unit, NFT or fungible: its supply at the pin, less the team waiver,
-    less what the quarantine address already held (never below zero)."""
+    less what the quarantine address already held (never below zero).
+    Treasury units already in quarantine are not subtracted twice: those the
+    pin records come off the waiver."""
     supply: Mapping[str, int]
     """Per unit: its on-chain supply at the pin. More on chain now means
     editions minted since, which the signers refuse to redeem."""
@@ -216,9 +219,41 @@ class RedemptionPin:
     minted or burned after it."""
 
 
+def waived_already_quarantined(row: Mapping[str, Any]) -> int:
+    """The waived units a pin row records as already in quarantine, with the
+    transaction that sent them there; 0 when it records none.
+
+    They are in the row's waiver and in its quarantine count at once, so the
+    record can exceed neither. Raises ValueError for a record above either,
+    or of any shape but {"quantity": a positive whole number, "tx_hash": 64
+    lowercase hex digits}.
+    """
+    if "waived_already_quarantined" not in row:
+        return 0
+    record = row["waived_already_quarantined"]
+    if not (
+        isinstance(record, dict) and set(record) == {"quantity", "tx_hash"}
+        and type(record["quantity"]) is int and record["quantity"] > 0
+        and isinstance(record["tx_hash"], str) and re.fullmatch(r"[0-9a-f]{64}", record["tx_hash"])
+    ):
+        raise ValueError(
+            "waived_already_quarantined must be a positive whole quantity and the hash of"
+            f" the transaction that quarantined it, not {record!r:.200}"
+        )
+    quantity = record["quantity"]
+    if quantity > row["waiver"]:
+        raise ValueError(f"waived_already_quarantined {quantity} is more than the waiver {row['waiver']}")
+    if quantity > row["quarantined"]:
+        raise ValueError(
+            f"waived_already_quarantined {quantity} is more than the quarantined {row['quarantined']}"
+        )
+    return quantity
+
+
 def load_redemption_pin(path: Path) -> RedemptionPin:
     """Load a redemption pin, checking every merge asset is pinned under its
-    configured policy and a fungible only as its configured token.
+    configured policy, a fungible only as its configured token, and every
+    record of waived units already in quarantine.
 
     Raises ValueError otherwise.
     """
@@ -238,7 +273,11 @@ def load_redemption_pin(path: Path) -> RedemptionPin:
             raise ValueError(f"{path}: {asset.name} must pin exactly {asset.asset_name_hex}")
         for name, row in entry["units"].items():
             unit = asset.policy_id + name
-            remaining[unit] = max(0, row["supply"] - row["waiver"] - row["quarantined"])
+            try:
+                already = waived_already_quarantined(row)
+            except ValueError as exc:
+                raise ValueError(f"{path}: {asset.name} {unit}: {exc}") from exc
+            remaining[unit] = max(0, row["supply"] - (row["waiver"] - already) - row["quarantined"])
             supply[unit] = row["supply"]
             if not fungible:
                 nft_units.add(unit)

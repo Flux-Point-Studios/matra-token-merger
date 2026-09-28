@@ -238,7 +238,11 @@ The threat model is **dual-admin compromise**:
 - Each legacy unit redeems at most what remained of it at the redemption pin
   (`audit_pack/2026-09-27/redemption_pin.json`: its supply at the pin, less
   the team waiver, less what quarantine already held), so units minted or
-  surrendered before the pin are never paid for again.
+  surrendered before the pin are never paid for again. Treasury units already
+  in quarantine are not subtracted twice: the pin records them per unit, with
+  the transaction that sent them there, and they come off the waiver. A record
+  can exceed neither the waiver nor the quarantine count, so no unit redeems
+  more than its supply less its waiver.
 - Neither signer redeems a unit whose supply on chain is above its supply at
   the pin: editions of one name are indistinguishable, so a later edition
   stops that unit's redemptions until the admins decide. Nor does either
@@ -252,7 +256,9 @@ The threat model is **dual-admin compromise**:
   shape, stops it from signing. Its project is trusted to list a history in
   full: an empty page ends a history.
   `python -m scripts.pin_redemption --check <pin>` lists every such unit, any
-  redeemable name the pin lacks, and any change in quarantine since the pin.
+  redeemable name the pin lacks, any change in quarantine since the pin, and
+  any record of treasury units in quarantine that the transaction it names
+  does not bear out on chain.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it
   cannot mint or drain. The front-end never holds either admin key.
 - Compromising a user's wallet is out of scope: it affects that user only.

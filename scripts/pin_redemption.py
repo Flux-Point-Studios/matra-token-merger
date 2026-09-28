@@ -8,9 +8,15 @@ supply. For every unit that existed at the supply slot the pin records:
   supply       its on-chain quantity at that slot (later mints do not count)
   waiver       the team supply the rate table carves out of it
   quarantined  what the quarantine address holds now; nothing leaves it
+  waived_already_quarantined
+               waived treasury units among the quarantined ones, with the
+               transaction that sent them there (only where there are any)
 
-A signer redeems at most supply - waiver - quarantined of a unit across every
-surrender it approves after the pin, so a unit is never paid for twice.
+A signer redeems at most supply - (waiver - waived_already_quarantined) -
+quarantined of a unit across every surrender it approves after the pin, so a
+unit is never paid for twice, and treasury units already in quarantine are
+not subtracted twice. Pinning refuses to write a record the chain does not
+bear out.
 
     NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
         <supply slot> audit_pack/<date>/redemption_pin.json
@@ -18,9 +24,12 @@ surrender it approves after the pin, so a unit is never paid for twice.
 --check compares the chain tip with a committed pin and exits 1 if any unit
 has more supply now than at the pin, any NFT was minted or burned after the
 pin's supply slot (which every signer refuses), a redeemable name exists that
-the pin lacks, or quarantine holds other amounts than the pin records.
-Re-pinning at the old supply slot cannot show a later mint; this reads
-current supply and each NFT's own history.
+the pin lacks, quarantine holds other amounts than the pin records, or a
+record of waived units already in quarantine is not borne out: it exceeds its
+waiver or its quarantine count, or the transaction it names created no
+outputs, came after the pin's quarantine count, or sent fewer of the unit to
+quarantine. Re-pinning at the old supply slot cannot show a later mint; this
+reads current supply and each NFT's own history.
 
     NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
         --check audit_pack/<date>/redemption_pin.json
@@ -34,6 +43,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
+import requests
+
 from services.chain_check import mints_and_burns_after
 from tools.api_clients import BlockfrostClient
 from tools.config import (
@@ -42,11 +53,18 @@ from tools.config import (
     LEGACY_TOKENS,
     NFT_COLLECTIONS,
 )
-from tools.process_surrender import load_rate_table
+from tools.process_surrender import load_rate_table, waived_already_quarantined
 
 ROOT = Path(__file__).resolve().parent.parent
 RATE_TABLE = ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"
 QUARANTINE_ADDRESS = "addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl"
+
+# Waived treasury units a surrender sent to quarantine: token -> (the
+# transaction that sent them, how many). The waiver and the quarantine count
+# both hold them, so the pin records them and they are not subtracted twice.
+WAIVED_ALREADY_QUARANTINED = {
+    "AGENT": ("6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580", 15_735_514),
+}
 
 
 def redeemable_names(policy_assets: list[dict]) -> list[str]:
@@ -84,6 +102,57 @@ def quarantine_holdings(bf: Any) -> dict[str, int]:
     return held
 
 
+def sent_to_quarantine(tx_hash: str, unit: str, bf: Any) -> tuple[int, int] | None:
+    """(slot, quantity of ``unit`` sent to the quarantine address) for
+    transaction ``tx_hash``, or None when the chain has no such transaction
+    or its scripts failed, so it created none of its outputs. A valid
+    transaction's collateral return is listed with them but never created."""
+    try:
+        tx = bf.get_tx(tx_hash)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            return None
+        raise
+    if tx["valid_contract"] is not True:
+        return None
+    sent = sum(
+        int(amount["quantity"])
+        for out in bf.get_tx_utxos(tx_hash)["outputs"]
+        if out["address"] == QUARANTINE_ADDRESS and out["collateral"] is False
+        for amount in out["amount"] if amount["unit"] == unit
+    )
+    return tx["slot"], sent
+
+
+def already_quarantined_problems(
+    asset: str, unit: str, row: dict, quarantine_slot: int, bf: Any,
+) -> list[str]:
+    """Every way ``row``'s record of waived units already in quarantine is
+    not borne out: a record the signers refuse to load, or a transaction that
+    created no outputs, came after ``quarantine_slot`` (where the pin's
+    quarantine count was read) or sent fewer of ``unit`` to quarantine."""
+    try:
+        quantity = waived_already_quarantined(row)
+    except ValueError as exc:
+        return [f"{asset} {unit}: {exc}"]
+    if not quantity:
+        return []
+    tx_hash = row["waived_already_quarantined"]["tx_hash"]
+    answer = sent_to_quarantine(tx_hash, unit, bf)
+    if answer is None:
+        return [f"{asset} {unit}: the pin records waived units quarantined by {tx_hash},"
+                " which created no outputs on chain"]
+    slot, sent = answer
+    problems = []
+    if slot > quarantine_slot:
+        problems.append(f"{asset} {unit}: {tx_hash} is at slot {slot},"
+                        f" after the quarantine count at slot {quarantine_slot}")
+    if sent < quantity:
+        problems.append(f"{asset} {unit}: {tx_hash} sent {sent} to quarantine,"
+                        f" fewer than the {quantity} waived units the pin records")
+    return problems
+
+
 def drift(doc: dict, bf: Any) -> list[str]:
     """Every way the chain tip differs from pin ``doc`` in what may still be
     redeemed; empty while the pin holds."""
@@ -103,6 +172,7 @@ def drift(doc: dict, bf: Any) -> list[str]:
                 problems.append(
                     f"{asset} {unit}: quarantine holds {held.get(unit, 0)},"
                     f" the pin says {row['quarantined']}")
+            problems += already_quarantined_problems(asset, unit, row, doc["quarantine_slot"], bf)
             if asset not in fungibles:
                 problems += [
                     f"{asset} {unit}: {action} in {tx_hash} at slot {slot}, after the pin"
@@ -125,7 +195,8 @@ def check(pin: Path, bf: Any) -> int:
         print(f"PIN NO LONGER HOLDS: {len(problems)} difference(s) from {pin}")
         return 1
     print(f"pin holds: no unit above its pinned supply, no NFT minted or burned since the pin,"
-          f" no new name, quarantine as pinned ({pin})")
+          f" no new name, quarantine as pinned, treasury units it records in quarantine"
+          f" borne out on chain ({pin})")
     return 0
 
 
@@ -142,9 +213,11 @@ def main(supply_slot: int, out: Path) -> None:
 
     assets: dict[str, dict] = {}
     for token in LEGACY_TOKENS:
-        assets[token.name] = {"policy_id": token.policy_id, "units": {
-            token.asset_name_hex: {"supply": supply(token.unit), "waiver": waivers[token.name]},
-        }}
+        row = {"supply": supply(token.unit), "waiver": waivers[token.name]}
+        if token.name in WAIVED_ALREADY_QUARANTINED:
+            tx_hash, quantity = WAIVED_ALREADY_QUARANTINED[token.name]
+            row["waived_already_quarantined"] = {"quantity": quantity, "tx_hash": tx_hash}
+        assets[token.name] = {"policy_id": token.policy_id, "units": {token.asset_name_hex: row}}
     for nft in NFT_COLLECTIONS:
         listing = [
             {"asset": row["asset"], "quantity": supply(row["asset"])}
@@ -160,6 +233,14 @@ def main(supply_slot: int, out: Path) -> None:
     for entry in assets.values():
         for name, row in entry["units"].items():
             row["quarantined"] = held.get(entry["policy_id"] + name, 0)
+
+    problems = [
+        problem
+        for asset, entry in sorted(assets.items()) for name, row in sorted(entry["units"].items())
+        for problem in already_quarantined_problems(asset, entry["policy_id"] + name, row, tip["slot"], bf)
+    ]
+    if problems:
+        sys.exit("\n".join(problems))
 
     doc = {"supply_slot": supply_slot, "quarantine_slot": tip["slot"], "assets": assets}
     out.parent.mkdir(parents=True, exist_ok=True)

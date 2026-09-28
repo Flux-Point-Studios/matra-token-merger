@@ -6,6 +6,10 @@
     "54616c6f73": {
      "quarantined": 525552157,
      "supply": 1000000000,
+     "waived_already_quarantined": {
+      "quantity": 15735514,
+      "tx_hash": "6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580"
+     },
      "waiver": 29644656
     }
    }

@@ -8,7 +8,9 @@ under the collection policy" would include units minted after the pin.
 
 The pin also records how much of each unit remains redeemable (its supply at
 the pin, less the team waiver, less what quarantine already holds); the
-signers' ledgers hold every approval to it."""
+signers' ledgers hold every approval to it. Treasury units already in
+quarantine are not subtracted twice: the pin records them, with the
+transaction that sent them there, and they come off the waiver."""
 
 from __future__ import annotations
 
@@ -17,8 +19,9 @@ from pathlib import Path
 
 import pytest
 
+import tools.process_surrender as process_surrender
 from scripts.pin_redemption import redeemable_names, supply_at
-from tests.cosign_cases import QUARANTINE, SURRENDER_HASHES, golden_scenario
+from tests.cosign_cases import SURRENDER_HASHES, golden, sent_to_quarantine
 from tools.config import (
     AGENT,
     FLUX_PASS,
@@ -27,7 +30,6 @@ from tools.config import (
     SHARDS,
     T1_ADAM_PASS,
 )
-from services.cosign_policy import decode, parse_output, split_tx
 from tools.process_surrender import (
     compute_redemption,
     load_rate_table,
@@ -216,16 +218,116 @@ def test_the_pin_counts_every_unit_the_pool_has_already_paid_for():
     quarantined count, so no past surrender can be redeemed again."""
     paid: dict[str, int] = {}
     for tx_hash in SURRENDER_HASHES:
-        for raw in decode(split_tx(golden_scenario(tx_hash).tx)[0])[1]:
-            out = parse_output(raw)
-            if out.address == QUARANTINE:
-                for policy, names in out.assets.items():
-                    for name, quantity in names.items():
-                        unit = (policy + name).hex()
-                        paid[unit] = paid.get(unit, 0) + quantity
+        for unit, quantity in sent_to_quarantine(tx_hash).items():
+            paid[unit] = paid.get(unit, 0) + quantity
     doc = _doc()
     pinned = {
         entry["policy_id"] + name: row["quarantined"]
         for entry in doc["assets"].values() for name, row in entry["units"].items()
     }
     assert paid and all(pinned[unit] >= quantity for unit, quantity in paid.items())
+
+
+# --- treasury units already in quarantine -------------------------------------
+
+RECORDED_TX = "6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580"
+ABSENT = object()
+REFUSED = "refused"
+
+
+def _record(quantity: object = 15, tx_hash: object = "ab" * 32, **extra: object) -> dict:
+    return {"quantity": quantity, "tx_hash": tx_hash, **extra}
+
+
+# name -> (the AGENT row's record of waived units already quarantined, or
+# ABSENT; changes to the row supply 100, waiver 30, quarantined 20; the
+# remaining the loader gives AGENT, or REFUSED)
+RECORD_PROBES: dict[str, tuple[object, dict, object]] = {
+    "none_recorded": (ABSENT, {}, 50),
+    "recorded": (_record(15), {}, 65),
+    "as_many_as_quarantine_holds": (_record(20), {}, 70),
+    "as_many_as_the_waiver": (_record(30), {"quarantined": 40}, 60),
+    "never_below_zero": (_record(10), {"quarantined": 100}, 0),
+    "more_than_the_waiver": (_record(31), {"quarantined": 40}, REFUSED),
+    "more_than_quarantine_holds": (_record(21), {}, REFUSED),
+    "zero": (_record(0), {}, REFUSED),
+    "negative": (_record(-1), {}, REFUSED),
+    "true": (_record(True), {}, REFUSED),
+    "a_float": (_record(15.0), {}, REFUSED),
+    "a_string_quantity": (_record("15"), {}, REFUSED),
+    "no_quantity": ({"tx_hash": "ab" * 32}, {}, REFUSED),
+    "no_transaction": ({"quantity": 15}, {}, REFUSED),
+    "an_uppercase_hash": (_record(tx_hash="AB" * 32), {}, REFUSED),
+    "a_short_hash": (_record(tx_hash="ab" * 31), {}, REFUSED),
+    "a_hash_with_a_path_after_it": (_record(tx_hash="ab" * 32 + "/utxos"), {}, REFUSED),
+    "a_hash_that_is_not_a_string": (_record(tx_hash=None), {}, REFUSED),
+    "a_field_besides": (_record(slot=1), {}, REFUSED),
+    "null": (None, {}, REFUSED),
+    "a_bare_quantity": (15, {}, REFUSED),
+}
+
+
+def remaining_with(tmp_path: Path, record: object, changes: dict) -> object:
+    """What the loader both signers use gives AGENT once its row is supply
+    100, waiver 30, quarantined 20 with ``changes`` and ``record``; REFUSED
+    when it refuses the record."""
+    doc = _doc()
+    row = {"supply": 100, "waiver": 30, "quarantined": 20, **changes}
+    if record is not ABSENT:
+        row["waived_already_quarantined"] = record
+    doc["assets"]["AGENT"]["units"][AGENT.asset_name_hex] = row
+    try:
+        return process_surrender.load_redemption_pin(_write(tmp_path, doc)).remaining[AGENT.unit]
+    except ValueError as exc:
+        if f"AGENT {AGENT.unit}: waived_already_quarantined" in str(exc):
+            return REFUSED
+        raise
+
+
+@pytest.mark.parametrize("name", RECORD_PROBES)
+def test_waived_units_already_quarantined_come_off_the_waiver(tmp_path, name):
+    record, changes, expected = RECORD_PROBES[name]
+    assert remaining_with(tmp_path, record, changes) == expected
+
+
+def test_the_committed_pin_records_the_treasury_units_already_in_quarantine():
+    """With the transaction that sent them there, and on AGENT only."""
+    records = {
+        asset: row["waived_already_quarantined"]
+        for asset, entry in _doc()["assets"].items()
+        for row in entry["units"].values() if "waived_already_quarantined" in row
+    }
+    assert records == {"AGENT": {"quantity": 15_735_514, "tx_hash": RECORDED_TX}}
+
+
+def test_the_committed_pin_leaves_agent_its_waiver_less_the_units_already_quarantined():
+    row = _doc()["assets"]["AGENT"]["units"][AGENT.asset_name_hex]
+    remaining = load_redemption_pin(PINNED).remaining
+    assert remaining[AGENT.unit] == 460_538_701 == (
+        row["supply"] - (row["waiver"] - 15_735_514) - row["quarantined"]
+    )
+    for entry in _doc()["assets"].values():
+        for name, row in entry["units"].items():
+            if entry["policy_id"] + name != AGENT.unit:
+                assert remaining[entry["policy_id"] + name] == max(
+                    0, row["supply"] - row["waiver"] - row["quarantined"])
+
+
+def test_no_unit_redeems_more_than_the_rate_tables_bucket():
+    """The recorded units are in the quarantine count, so taking them off
+    the waiver never lifts a unit above its supply less its waiver."""
+    remaining = load_redemption_pin(PINNED).remaining
+    for entry in _doc()["assets"].values():
+        for name, row in entry["units"].items():
+            assert remaining[entry["policy_id"] + name] <= row["supply"] - row["waiver"]
+
+
+def test_the_recorded_surrender_quarantined_at_least_the_recorded_units():
+    """Checked offline against the golden set; scripts.pin_redemption --check
+    confirms it with the chain."""
+    doc = _doc()
+    record = doc["assets"]["AGENT"]["units"][AGENT.asset_name_hex]["waived_already_quarantined"]
+    (row,) = [t for t in golden()["transactions"] if t["tx_hash"] == record["tx_hash"]]
+    assert row["kind"] == "surrender"
+    assert row["slot"] <= doc["quarantine_slot"]
+    assert sent_to_quarantine(record["tx_hash"])[AGENT.unit] >= record["quantity"]
