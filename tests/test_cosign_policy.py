@@ -35,6 +35,7 @@ from tests.cosign_cases import (
     BASE_T1,
     Draft,
     Scenario,
+    _elements,
     blake,
     golden,
     golden_scenario,
@@ -55,8 +56,7 @@ def _pool_outflow(s: Scenario) -> int:
         value = output[1]
         return value[1].get(MAINNET.cmatra_policy, {}).get(MAINNET.cmatra_name, 0) if isinstance(value, list) else 0
 
-    refs = body[0].value if hasattr(body[0], "tag") else body[0]
-    pool_in = sum(cmatra(produced[t][i]) for t, i in refs if produced[t][i][0] == MAINNET.pool_address)
+    pool_in = sum(cmatra(produced[t][i]) for t, i in _elements(body[0]) if produced[t][i][0] == MAINNET.pool_address)
     pool_out = sum(cmatra(o) for o in body[1] if o[0] == MAINNET.pool_address)
     return pool_in - pool_out
 
@@ -76,6 +76,11 @@ def test_every_mainnet_surrender_is_approved_at_its_real_payout(tx_hash):
     approval = _evaluate(scenario)
     assert approval.tx_hash.hex() == tx_hash
     assert approval.payout == _pool_outflow(scenario) > 0
+    body = decode(split_tx(scenario.tx)[0])
+    spent = {tuple(ref) for ref in _elements(body[0])}
+    collateral = {tuple(ref) for ref in _elements(body.get(13, []))}
+    assert set(approval.spends) == spent
+    assert set(approval.inputs) == spent | collateral
 
 
 @pytest.mark.parametrize("tx_hash", SURRENDERS)

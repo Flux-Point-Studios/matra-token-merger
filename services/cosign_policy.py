@@ -428,6 +428,9 @@ class Approval:
     """The legacy units the transaction quarantines (unit hex -> quantity)."""
     inputs: tuple[tuple[bytes, int], ...]
     """Every output it spends or offers as collateral, the pool's included."""
+    spends: tuple[tuple[bytes, int], ...]
+    """The outputs it consumes when it lands, the pool's included. Its
+    collateral is consumed only if a script fails, when nothing else is."""
 
 
 def evaluate_surrender(
@@ -599,6 +602,7 @@ def evaluate_surrender(
         tx_hash=blake2b_256(body_raw), payout=payout, claimant=claimant,
         pool_input=pool_ref, units=quarantined,
         inputs=tuple(sorted({pool_ref, *spent, *(ref for ref, _ in collateral)})),
+        spends=tuple(sorted([pool_ref, *spent])),
     )
 
 

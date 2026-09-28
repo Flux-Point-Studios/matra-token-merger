@@ -1,9 +1,10 @@
 """services.redemption_ledger counts what the approved surrenders could take
-from the pool if they landed, and refuses an approval that would pass the
-daily cap or a unit's pinned limit.
+from the pool if they landed, and refuses an approval that could never land
+or that would pass the daily cap or a unit's pinned limit.
 
-Approvals here are synthetic: the ledger sees only the pool output a
-transaction spends, its payout and the units it quarantines."""
+Approvals here are synthetic, apart from the replay of every mainnet
+surrender: the ledger sees only the outputs a transaction spends or offers as
+collateral, its payout and the units it quarantines."""
 
 from __future__ import annotations
 
@@ -17,8 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from services.cosign_policy import Approval, CosignRejected
+from services.cosign_policy import Approval, CosignRejected, evaluate_surrender
 from services.redemption_ledger import DAY_S, RedemptionLedger, create_ledger
+from tests.cosign_cases import golden, golden_scenario
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -31,18 +33,26 @@ def _tx(n: int) -> bytes:
     return n.to_bytes(32, "big")
 
 
-def approval(n: int, spends: tuple[bytes, int], payout: int = 10, units=None) -> Approval:
-    """Transaction ``n``, spending pool output ``spends``, whose pool
-    continuation is ``(_tx(n), 1)``."""
+def approval(n: int, spends: tuple[bytes, int], payout: int = 10, units=None,
+             claimant_inputs=(), collateral=()) -> Approval:
+    """Transaction ``n``, spending pool output ``spends`` and
+    ``claimant_inputs`` and offering ``collateral``, whose pool continuation
+    is ``(_tx(n), 1)``."""
+    spent = (spends, *claimant_inputs)
     return Approval(
         tx_hash=_tx(n), payout=payout, claimant=b"\x61" + b"\x01" * 28,
         pool_input=spends, units={UNIT: 1} if units is None else units,
-        inputs=(spends,),
+        inputs=tuple(sorted({*spent, *collateral})), spends=tuple(sorted(spent)),
     )
 
 
 def after(n: int) -> tuple[bytes, int]:
     return (_tx(n), 1)
+
+
+def change(n: int) -> tuple[bytes, int]:
+    """Transaction ``n``'s output back to its claimant."""
+    return (_tx(n), 2)
 
 
 @pytest.fixture
@@ -131,6 +141,101 @@ def test_daily_cap_rolls_over_but_unit_limits_do_not(ledger):
     assert err.value.code == "redemption_limit"
 
 
+# ---------------------------------------------------------------------------
+# An approval that can never land is refused, so it counts against nothing
+# ---------------------------------------------------------------------------
+
+CLAIMANT_UTXO = (b"\x0c" * 32, 0)
+OTHER_UTXO = (b"\x0d" * 32, 0)
+
+
+@pytest.mark.parametrize("generations", [1, 2])
+def test_spending_what_a_transaction_it_builds_on_spent_is_refused(ledger, generations):
+    """Its pool input exists only once the earlier transaction lands, and by
+    then the claimant's output is gone."""
+    ledger.record(approval(1, POOL_ROOT, units={}, claimant_inputs=[CLAIMANT_UTXO]), 1000.0, LIMITS)
+    if generations == 2:
+        ledger.record(approval(2, after(1), units={}, claimant_inputs=[OTHER_UTXO]), 1000.0, LIMITS)
+    with pytest.raises(CosignRejected) as err:
+        ledger.record(approval(3, after(generations), units={}, claimant_inputs=[CLAIMANT_UTXO]),
+                      1000.0, LIMITS)
+    assert err.value.code == "input_conflict"
+    assert CLAIMANT_UTXO[0].hex() in err.value.detail
+    assert rows(ledger) == generations
+
+
+def test_collateral_a_transaction_it_builds_on_spent_is_refused(ledger):
+    """Collateral must still be unspent when the transaction is validated."""
+    ledger.record(approval(1, POOL_ROOT, units={}, claimant_inputs=[CLAIMANT_UTXO]), 1000.0, LIMITS)
+    with pytest.raises(CosignRejected) as err:
+        ledger.check(approval(2, after(1), units={}, collateral=[CLAIMANT_UTXO]), 1000.0, LIMITS)
+    assert err.value.code == "input_conflict"
+
+
+def test_collateral_of_a_transaction_it_builds_on_stays_available(ledger):
+    """A transaction that lands leaves its collateral unspent; three mainnet
+    surrenders reuse an earlier one's collateral this way."""
+    ledger.record(approval(1, POOL_ROOT, units={}, collateral=[CLAIMANT_UTXO]), 1000.0, LIMITS)
+    ledger.record(approval(2, after(1), units={}, collateral=[CLAIMANT_UTXO]), 1000.0, LIMITS)
+    ledger.record(approval(3, after(2), units={}, claimant_inputs=[CLAIMANT_UTXO]), 1000.0, LIMITS)
+    assert rows(ledger) == 3
+
+
+def test_an_output_of_the_transaction_it_builds_on_can_be_spent(ledger):
+    """A chained surrender spends the claimant's change from the one before."""
+    ledger.record(approval(1, POOL_ROOT, units={}), 1000.0, LIMITS)
+    ledger.record(approval(2, after(1), units={}, claimant_inputs=[change(1)]), 1000.0, LIMITS)
+    assert rows(ledger) == 2
+
+
+@pytest.mark.parametrize("builds_on", ["the_sibling", "its_descendant"])
+def test_needing_an_output_of_a_competing_transaction_is_refused(ledger, builds_on):
+    """1 and 2 both spend the root, so at most one lands; 3 builds on 1 and
+    needs 2's change, or the change of 4, which builds on 2."""
+    ledger.record(approval(1, POOL_ROOT, units={}), 1000.0, LIMITS)
+    ledger.record(approval(2, POOL_ROOT, units={}), 1000.0, LIMITS)
+    ledger.record(approval(4, after(2), units={}), 1000.0, LIMITS)
+    needed = change(2) if builds_on == "the_sibling" else change(4)
+    with pytest.raises(CosignRejected) as err:
+        ledger.record(approval(3, after(1), units={}, claimant_inputs=[needed]), 1000.0, LIMITS)
+    assert err.value.code == "input_conflict"
+    assert rows(ledger) == 3
+
+
+def test_an_output_of_a_transaction_on_another_pool_output_can_be_spent(ledger):
+    """Transactions spending different pool outputs can both land."""
+    ledger.record(approval(1, (b"\x09" * 32, 0), units={}), 1000.0, LIMITS)
+    ledger.record(approval(2, (b"\x09" * 32, 1), units={}, claimant_inputs=[change(1)]), 1000.0, LIMITS)
+    assert rows(ledger) == 2
+
+
+def test_an_approval_that_cannot_land_leaves_the_daily_cap_to_one_that_can(ledger):
+    """Counted along 1's chain, 2 would take 80 of the 100 and leave no room
+    for 3, a surrender of another pool output."""
+    ledger.record(approval(1, POOL_ROOT, payout=40, units={}, claimant_inputs=[CLAIMANT_UTXO]),
+                  1000.0, LIMITS)
+    with pytest.raises(CosignRejected) as err:
+        ledger.record(approval(2, after(1), payout=40, units={}, claimant_inputs=[CLAIMANT_UTXO]),
+                      1000.0, LIMITS)
+    assert err.value.code == "input_conflict"
+    ledger.record(approval(3, (b"\x09" * 32, 0), payout=40, units={}), 1000.0, LIMITS)
+    assert rows(ledger) == 2
+
+
+def test_every_mainnet_surrender_replays_through_a_ledger(tmp_path):
+    """In the order they landed, each chained on the one before: none spends
+    what an earlier one spent, three reuse an earlier one's collateral."""
+    path = str(tmp_path / "replay.sqlite3")
+    create_ledger(path)
+    ledger = RedemptionLedger(path, max_per_day=10**30)
+    landed = sorted((t["slot"], t["tx_hash"]) for t in golden()["transactions"] if t["kind"] == "surrender")
+    for _, tx_hash in landed:
+        s = golden_scenario(tx_hash)
+        approved = evaluate_surrender(s.tx, s.language_views, s.parents, s.now_slot, s.cfg)
+        ledger.record(approved, 1000.0, {unit: 10**30 for unit in approved.units})
+    assert rows(ledger) == len(landed) == 266
+
+
 def test_an_approval_already_recorded_is_admitted_again_unchanged(ledger):
     ledger.record(approval(1, POOL_ROOT, payout=100), 1000.0, LIMITS)
     ledger.record(approval(1, POOL_ROOT, payout=100), 1001.0, LIMITS)
@@ -161,11 +266,15 @@ def test_the_record_survives_a_restart(ledger):
 
 
 def test_a_long_chain_is_counted_without_recursion(ledger):
+    def pool_input(n: int) -> tuple[bytes, int]:
+        return after(n - 1) if n > 1 else POOL_ROOT
+
     with sqlite3.connect(ledger.path) as conn:
         conn.executemany(
-            "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?)",
-            [(_tx(n), (_tx(n - 1) if n > 1 else POOL_ROOT[0]), 1 if n > 1 else 0, 0,
-              '{"%s": 1}' % OTHER if n == 5 else "{}", 1000.0) for n in range(1, 5001)],
+            "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(_tx(n), *pool_input(n), 0, '{"%s": 1}' % OTHER if n == 5 else "{}",
+              '[["%s", %d]]' % (pool_input(n)[0].hex(), pool_input(n)[1]), 1000.0)
+             for n in range(1, 5001)],
         )
     with pytest.raises(CosignRejected) as err:
         ledger.check(approval(5001, after(5000), units={OTHER: 5}), 1000.0, LIMITS)
@@ -220,6 +329,20 @@ def test_a_database_without_the_approvals_table_is_refused(tmp_path):
     path = tmp_path / "other.sqlite3"
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE unrelated (x)")
+    with pytest.raises(ValueError, match="not a redemption ledger"):
+        RedemptionLedger(str(path), max_per_day=100)
+
+
+def test_a_ledger_that_does_not_record_spent_outputs_is_refused(tmp_path):
+    """Without them no approval can be checked against what the transactions
+    it builds on spend."""
+    path = tmp_path / "earlier.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE approvals ("
+            " tx_hash BLOB PRIMARY KEY, pool_tx BLOB NOT NULL, pool_index INTEGER NOT NULL,"
+            " payout INTEGER NOT NULL, units TEXT NOT NULL, signed_at REAL NOT NULL)"
+        )
     with pytest.raises(ValueError, match="not a redemption ledger"):
         RedemptionLedger(str(path), max_per_day=100)
 

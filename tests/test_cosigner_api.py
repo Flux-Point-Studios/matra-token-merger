@@ -17,20 +17,26 @@ from fastapi.testclient import TestClient
 from pycardano import PaymentSigningKey
 
 import services.cosigner_api as cosigner
-from services.cosign_policy import SLOT_OFFSET_S, evaluate_surrender, split_tx
+from services.cosign_policy import SLOT_OFFSET_S, decode, evaluate_surrender, split_tx
 from services.redemption_ledger import create_ledger
 from tests.cosign_cases import (
     ADMIN_1,
+    BASE_FUNGIBLE,
     BASE_T1,
     CASES,
     CHANGE,
+    CMATRA_NAME,
+    CMATRA_POLICY,
+    CONTINUATION,
     MAINNET,
     MAINNET_BEFORE_SURRENDERS,
     Draft,
     FakeChain,
     Scenario,
+    _add_asset,
     _add_coin,
     another_pool_utxo,
+    blake,
     golden_scenario,
     ledger_refusing_writes,
     throwaway_key,
@@ -361,6 +367,40 @@ def test_signatures_that_cannot_both_land_count_once_against_the_daily_cap(servi
         client.__exit__(None, None, None)
     assert again.status_code == 200, again.text
     assert service.rows() == 2
+
+
+def test_a_surrender_spending_what_the_one_it_builds_on_spent_is_refused(service):
+    """The same surrender rebuilt on the pool continuation of the first,
+    which the co-signer has recorded: its claimant outputs are spent once the
+    first lands, and before that its pool input does not exist. It can never
+    land, so it is neither signed nor counted."""
+    key = throwaway_key(4)
+    a = Draft(golden_scenario(BASE_FUNGIBLE))
+    a.sign_as(key)
+    first = a.build()
+    first_body_raw = split_tx(first.tx)[0]
+    b = Draft(first)
+    pool_ref = b.pool_ref()
+    pool_coin = b.parent_output(pool_ref)[1][0]
+    b.parents.append(decode(first_body_raw))
+    b.drop_parents.add(pool_ref[0])
+    b.set_inputs([[blake(first_body_raw), CONTINUATION] if r == pool_ref else r for r in b.inputs()])
+    _add_asset(b.body[1][CONTINUATION], CMATRA_POLICY, CMATRA_NAME, -_payout(first))
+    _add_coin(b.body[1][CHANGE], b.body[1][CONTINUATION][1][0] - pool_coin)
+    b.signer = key
+    second = b.build()
+    service.chain.publish(*first.parents)
+
+    client = service.start(service.client(first.now_slot))
+    try:
+        assert client.post("/cosign", json=_request(first), headers=HEADERS).status_code == 200
+        refused = client.post("/cosign", json=_request(second), headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["detail"]["code"] == "input_conflict"
+    assert "signature_hex" not in refused.text
+    assert service.rows() == 1
 
 
 def test_malformed_transaction_is_a_coded_refusal(service):

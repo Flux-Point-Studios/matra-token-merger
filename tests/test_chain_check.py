@@ -39,7 +39,7 @@ def _chain(**kwargs) -> FakeChain:
 def _approval(units: dict[str, int], inputs=((PARENT_ID, 0), (PARENT_ID, 1))) -> Approval:
     return Approval(
         tx_hash=b"\x01" * 32, payout=1, claimant=CLAIMANT,
-        pool_input=inputs[0], units=units, inputs=tuple(inputs),
+        pool_input=inputs[0], units=units, inputs=tuple(inputs), spends=tuple(inputs),
     )
 
 
