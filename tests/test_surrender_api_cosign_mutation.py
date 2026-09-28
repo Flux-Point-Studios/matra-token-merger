@@ -7,12 +7,12 @@ no test red is a condition nothing notices, and this test names it."""
 
 from __future__ import annotations
 
-import inspect
 from typing import Callable
 
 import pytest
 
 import services.surrender_api as api
+from tests.mutation import recompiled
 from tests.test_surrender_api_cosign import (
     WRONG_ANSWERS,
     World,
@@ -47,14 +47,6 @@ MUTANTS = {
 }
 
 
-def _mutant(function: str, original: str, changed: str) -> Callable:
-    source = inspect.getsource(getattr(api, function))
-    assert source.count(original) == 1, f"{original!r} is no longer in {function}"
-    namespace: dict = {}
-    exec(compile(source.replace(original, changed), api.__file__, "exec"), vars(api), namespace)
-    return namespace[function]
-
-
 def _red(tmp_path, replace: tuple[str, Callable] | None) -> list[str]:
     """The tests that fail with ``replace`` (a function's name and its
     stand-in) in place, each on a world of its own."""
@@ -81,4 +73,6 @@ def test_the_unmutated_functions_turn_no_test_red(tmp_path):
 @pytest.mark.parametrize("name", MUTANTS)
 def test_every_mutant_turns_a_test_red(tmp_path, name):
     function, original, changed = MUTANTS[name]
-    assert _red(tmp_path, (function, _mutant(function, original, changed))), f"{name} turns no test red"
+    assert _red(tmp_path, (function, recompiled(getattr(api, function), original, changed))), (
+        f"{name} turns no test red"
+    )

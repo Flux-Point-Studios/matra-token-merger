@@ -248,7 +248,9 @@ The threat model is **dual-admin compromise**:
   asks its own Blockfrost project, from its own host, before it records an
   approval, and also confirms there that every input is an unspent output on
   chain or an output of a surrender it recorded, so nothing it records rests
-  on outputs that do not exist.
+  on outputs that do not exist. An answer it cannot read, or of the wrong
+  shape, stops it from signing. Its project is trusted to list a history in
+  full: an empty page ends a history.
   `python -m scripts.pin_redemption --check <pin>` lists every such unit, any
   redeemable name the pin lacks, and any change in quarantine since the pin.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it

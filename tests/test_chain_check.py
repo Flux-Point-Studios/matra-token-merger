@@ -365,6 +365,8 @@ def entries_after_the_first_change_after_the_pin(confirm):
 
 @probe("confirmed")
 def a_full_first_page_and_an_empty_second(confirm):
+    """An empty list is how a history ends. That the provider lists every
+    entry before it is part of trusting the provider."""
     chain = Blockfrost()
     chain.full_first_page(T1_PASS)
     chain.confirm(confirm, {T1_PASS: 1})
@@ -406,6 +408,26 @@ def a_second_page_answered_with_server_errors(confirm):
     chain.full_first_page(T1_PASS)
     chain.pages[T1_PASS][1] = {"status": 500}
     chain.confirm(confirm, {T1_PASS: 1})
+
+
+def _a_second_page_answered_with(answer: dict) -> Callable:
+    def run(confirm):
+        chain = Blockfrost()
+        chain.full_first_page(T1_PASS)
+        chain.pages[T1_PASS][1] = answer
+        chain.confirm(confirm, {T1_PASS: 1})
+    return run
+
+
+# Every page of a history is a list. Only an empty or short one ends it.
+NOT_A_PAGE = {
+    "null": {"body": "null", "content_type": "application/json"},
+    "an_empty_object": {"json": {}},
+    "an_empty_string": {"json": ""},
+}
+for _name, _answer in NOT_A_PAGE.items():
+    PROBES.append(Probe(f"a_second_page_answered_with_{_name}", "unavailable",
+                        _a_second_page_answered_with(_answer), T1_PASS))
 
 
 @probe("unavailable", detail=_recorded_mint(T1_PASS))

@@ -20,7 +20,13 @@ Blockfrost project queried from the signer's own host:
     ledger holds approvals to.
 
 A view that cannot answer raises :class:`ChainUnavailable`, and nothing is
-signed.
+signed. That includes an answer of the wrong shape: a page of a history that
+is not a list, an entry that does not name a transaction hash, a slot that is
+not a whole number.
+
+The view itself is trusted, as the signer's own provider. A history page that
+is an empty or short list ends the history, and a view that ends it early, or
+leaves an entry out, cannot be told from a complete one.
 """
 
 from __future__ import annotations

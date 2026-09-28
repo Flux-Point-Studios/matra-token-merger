@@ -1,10 +1,11 @@
-"""Mutation test for services.chain_check: every probe in
-tests/test_chain_check.py against one broken copy of the module at a time.
+"""Mutation test for services.chain_check and the Blockfrost pager it reads
+histories through: every probe in tests/test_chain_check.py against one broken
+copy of either at a time.
 
 Each ``raise`` of CosignRejected or ChainUnavailable is a check; a mutant
-replaces one of them with ``pass``. Changed conditions and a reordering are
-listed below. A mutant that still answers every probe as expected is a check
-nothing notices, and this test names it."""
+replaces one of them with ``pass``. Changed conditions, changes to the pager
+and a reordering are listed below. A mutant that still answers every probe as
+expected is a check nothing notices, and this test names it."""
 
 from __future__ import annotations
 
@@ -16,7 +17,9 @@ from pathlib import Path
 import pytest
 
 import services.chain_check as chain_check
+from tests.mutation import recompiled
 from tests.test_chain_check import PROBES, outcome
+from tools.api_clients import BlockfrostClient
 
 SOURCE_PATH = Path(chain_check.__file__)
 SOURCE = SOURCE_PATH.read_text()
@@ -90,6 +93,19 @@ OPERATOR_MUTANTS = {
 }
 
 
+PAGER_MUTANTS = {
+    "a_page_that_is_not_a_list_ending_the_listing": (
+        'raise BlockfrostUnavailable(f"{path} page {page}: {type(batch).__name__}, not a list")', "break",
+    ),
+    "a_falsy_page_ending_the_listing": (
+        "batch = self._get(path, params)\n",
+        "batch = self._get(path, params)\n        if not batch:\n            break\n",
+    ),
+    "only_a_null_page_refused": ("not isinstance(batch, list)", "batch is None"),
+    "an_empty_page_refused": ("not isinstance(batch, list)", "not (isinstance(batch, list) and batch)"),
+}
+
+
 def _differences(module: types.ModuleType) -> list[str]:
     return [
         f"{p.name}: {p.expected} -> {got}"
@@ -126,3 +142,17 @@ def test_changing_the_condition_turns_a_probe_red(name):
 def test_asking_the_history_before_the_inputs_turns_a_probe_red():
     mutant = _load(_history_asked_before_the_inputs(SOURCE), "chain_check_history_first")
     assert _differences(mutant), "asking the history first changes no probe outcome"
+
+
+def test_the_recompiled_pager_matches_every_probe(monkeypatch):
+    """The control: the pager compiled from its source, with nothing changed."""
+    unchanged = recompiled(BlockfrostClient._get_all_pages, "page += 1", "page += 1")
+    monkeypatch.setattr(BlockfrostClient, "_get_all_pages", unchanged)
+    assert _differences(chain_check) == []
+
+
+@pytest.mark.parametrize("name", PAGER_MUTANTS)
+def test_changing_the_pager_turns_a_probe_red(monkeypatch, name):
+    changed = recompiled(BlockfrostClient._get_all_pages, *PAGER_MUTANTS[name])
+    monkeypatch.setattr(BlockfrostClient, "_get_all_pages", changed)
+    assert _differences(chain_check), f"{name} changes no probe outcome"

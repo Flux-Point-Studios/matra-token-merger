@@ -148,6 +148,22 @@ class TestBlockfrostClient:
         result = client.get_asset_addresses("u")
         assert result == []
 
+    @pytest.mark.parametrize("page", [1, 2])
+    @pytest.mark.parametrize("answer", [
+        {"body": "null", "content_type": "application/json"}, {"json": {}}, {"json": ""},
+    ], ids=["null", "object", "string"])
+    @responses.activate
+    def test_a_page_that_is_not_a_list_is_unavailable(self, page, answer):
+        """Only an empty or short list ends a listing; any other answer would
+        cut it short unnoticed."""
+        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/u/addresses"
+        if page == 2:
+            responses.add(responses.GET, base, json=[{"address": f"a{i}"} for i in range(100)])
+        responses.add(responses.GET, base, **answer)
+        client = BlockfrostClient(project_id="test")
+        with pytest.raises(BlockfrostUnavailable, match=f"page {page}"):
+            client.get_asset_addresses("u")
+
     @responses.activate
     def test_project_id_header(self):
         responses.add(
