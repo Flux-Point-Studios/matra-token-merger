@@ -571,6 +571,38 @@ def ttl_after_deadline(d):
     d.cfg = replace(d.cfg, deadline_slot=d.body[3] - 1)
 
 
+@case("validity_start")
+def validity_start_at_the_ttl(d):
+    """An empty validity interval: no slot admits the transaction."""
+    d.body[8] = d.body[3]
+
+
+@case("validity_start")
+def validity_start_after_the_signers_slot(d):
+    d.body[8] = d.now + 1
+
+
+@case("validity_start")
+def validity_start_is_bytes(d):
+    d.body[8] = b"\x01"
+
+
+@case("validity_start")
+def validity_start_is_text(d):
+    d.body[8] = "x"
+
+
+@case("validity_start")
+def validity_start_is_a_tagged_bignum(d):
+    """The ledger reads a slot as a plain unsigned integer only."""
+    d.body[8] = Tag(2, d.now.to_bytes(8, "big"))
+
+
+@case("validity_start")
+def validity_start_is_negative(d):
+    d.body[8] = -1
+
+
 @case("total_collateral")
 def total_collateral_above_cap(d):
     d.body[17] = 5_000_001

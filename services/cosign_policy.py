@@ -20,9 +20,9 @@ policy reads the complete transaction and approves only a surrender:
     reference script, metadata or extra required signer;
   * one redeemer, ProcessSurrender, on the pool input, bound to the body
     through script_data_hash;
-  * bounded fee, collateral and validity interval, still open when checked and
-    closing before the surrender deadline (so an AdminWithdraw spend can never
-    validate);
+  * bounded fee, collateral and validity interval, already open when checked
+    and closing before the surrender deadline (so an AdminWithdraw spend can
+    never validate);
   * a per-transaction payout cap;
   * the inputs hold exactly what the outputs and the fee take, so no output
     holds anything its transaction did not bring in.
@@ -470,6 +470,11 @@ def evaluate_surrender(
         raise CosignRejected("expired", f"ttl {ttl} has passed")
     if ttl > cfg.deadline_slot:
         raise CosignRejected("after_deadline", "validity interval reaches past the surrender deadline")
+    # With ttl > now_slot, a start at or before now_slot leaves the interval
+    # open now and nonempty.
+    start = body.get(8, 0)
+    if not _uint(start) or start > now_slot:
+        raise CosignRejected("validity_start", f"validity start {start!r} is not open at slot {now_slot}")
     total_collateral = body.get(17)
     if not _uint(total_collateral) or total_collateral > MAX_TOTAL_COLLATERAL_LOVELACE:
         raise CosignRejected("total_collateral", f"total collateral {total_collateral!r}")

@@ -96,6 +96,10 @@ OPERATOR_MUTANTS = {
         'witness[5] + witness.get(4, b"") + language_views',
         "witness[5] + language_views",
     ),
+    "validity_start_only_kept_below_the_ttl": (
+        "start > now_slot",
+        "start >= ttl",
+    ),
 }
 
 

@@ -175,6 +175,19 @@ def test_garbage_anywhere_is_refused_with_a_code(base):
             pass
 
 
+@pytest.mark.parametrize("opens", ["long_before", "absent"])
+def test_a_validity_interval_already_open_is_approved(opens):
+    """Every mainnet surrender starts 1000 slots before its builder's tip; a
+    start further back, or none, leaves the interval open when checked."""
+    s = golden_scenario(BASE_T1)
+    d = Draft(s)
+    if opens == "absent":
+        del d.body[8]
+    else:
+        d.body[8] -= 100_000
+    assert _evaluate(d.build()).payout == _evaluate(s).payout
+
+
 @pytest.mark.parametrize("tx_hash", CEREMONIES)
 def test_pool_ceremonies_are_not_surrenders(tx_hash):
     with pytest.raises(CosignRejected):
