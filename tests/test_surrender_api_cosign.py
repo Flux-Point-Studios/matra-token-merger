@@ -224,6 +224,8 @@ class World:
         self.client = TestClient(cosigner.app)
         self.client.__enter__()
         self.signed_by_admin: list[bytes] = []
+        # The primary ledger's approvals at each admin_1 signature.
+        self.primary_rows_when_signed: list[int] = []
         self.cosign_calls = 0
         self._wire_surrender_api(env)
         create_ledger(str(tmp_path / "primary.sqlite3"))
@@ -246,6 +248,7 @@ class World:
         class _SigningSpy:
             def sign(self, data):
                 world.signed_by_admin.append(data)
+                world.primary_rows_when_signed.append(world.primary_rows())
                 return world.admin_sk.sign(data)
 
             def __getattr__(self, name):
@@ -323,8 +326,10 @@ class World:
         self.client.__exit__(None, None, None)
 
     def cosigned_rows(self) -> int:
-        with sqlite3.connect(self.ledger) as conn:
-            return conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0]
+        return _rows(self.ledger)
+
+    def primary_rows(self) -> int:
+        return _rows(self.primary_ledger.path)
 
     def build(self, total: int, legacy_qty: int = 1_000, pool_utxo=None, user_inputs=None):
         legacy = [{"policy_hex": AGENT_POLICY, "asset_hex": AGENT_NAME, "quantity": legacy_qty}]
@@ -363,9 +368,14 @@ def _entitlement(qty: int) -> int:
     return surrendered_entitlement(RATES, {AGENT.unit: qty}, REDEEMABLE)
 
 
+def _rows(ledger_path: str) -> int:
+    with sqlite3.connect(ledger_path) as conn:
+        return conn.execute("SELECT COUNT(*) FROM approvals").fetchone()[0]
+
+
 def _vkey_witnesses(tx_hex: str) -> list:
     ws = decode(split_tx(bytes.fromhex(tx_hex))[1])
-    vkeys = ws[0]
+    vkeys = ws.get(0, [])
     return list(vkeys.value) if hasattr(vkeys, "tag") else vkeys
 
 
@@ -373,14 +383,53 @@ def _vk(key: PaymentSigningKey) -> bytes:
     return bytes(key.to_verification_key().payload)
 
 
-def test_a_build_asks_the_cosigner_for_nothing(world):
-    """/build-surrender needs nothing but an address, so what it returns never
-    carries the second signature and never spends the co-signer's budget."""
+def _assert_signed_by(tx: bytes, tx_hash: str, *keys: PaymentSigningKey) -> None:
+    """``tx`` carries exactly one witness for each of ``keys``, each a valid
+    signature over ``tx_hash``."""
+    pairs = [(bytes(vk), bytes(sig)) for vk, sig in _vkey_witnesses(tx.hex())]
+    assert sorted(vk for vk, _ in pairs) == sorted(_vk(key) for key in keys)
+    for vkey, signature in pairs:
+        nacl.signing.VerifyKey(vkey).verify(bytes.fromhex(tx_hash), signature)
+
+
+def test_chained_builds_carry_no_signature_past_the_primary_cap(world, monkeypatch, tmp_path):
+    """/build-surrender needs nothing but an address, so what it returns
+    carries neither admin's signature: builds chained past the primary's own
+    daily cap obtain nothing that either ledger has not recorded."""
+    e = _entitlement(1_000)
+    create_ledger(str(tmp_path / "small-cap.sqlite3"))
+    small_cap = RedemptionLedger(str(tmp_path / "small-cap.sqlite3"), int(1.5 * e))
+    monkeypatch.setattr(api.state, "ledger", small_cap)
+    pool, user_inputs = world.pool_utxo, None
     for _ in range(3):
-        tx_hex, _, _, _ = world.build(_entitlement(1_000))
-        assert {bytes(vk) for vk, _ in _vkey_witnesses(tx_hex)} == {_vk(world.admin_sk)}
+        tx_hex, tx_hash, pool_out, user_inputs = world.build(e, pool_utxo=pool, user_inputs=user_inputs)
+        assert _vkey_witnesses(tx_hex) == []
+        # Whoever holds the other key puts the build on chain; the next one chains on it.
+        world.chain[tx_hash] = split_tx(bytes.fromhex(tx_hex))[0]
+        pool = {"tx_hash": tx_hash, "output_index": 1,
+                "cmatra_amount": pool["cmatra_amount"] - e, "ada_amount": pool_out["ada_amount"]}
+    assert world.signed_by_admin == []
     assert world.cosign_calls == 0
     assert world.cosigned_rows() == 0
+    assert _rows(small_cap.path) == 0
+
+
+def test_admin_1_signs_only_after_its_own_ledger_records_the_surrender(world):
+    built = world.build_route(1_000)
+    assert world.signed_by_admin == []
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert world.signed_by_admin == [bytes.fromhex(built.tx_hash)]
+    assert world.primary_rows_when_signed == [1]
+
+
+def test_without_a_cosigner_admin_1_signs_once_the_claimant_has(world, monkeypatch):
+    monkeypatch.setattr(api, "COSIGNER_URL", "")
+    built = world.build_route(1_000)
+    assert _vkey_witnesses(built.tx_cbor_hex) == []
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    (tx,) = world.submitted
+    _assert_signed_by(tx, built.tx_hash, world.user_sk, world.admin_sk)
+    assert world.cosign_calls == 0
 
 
 def test_submit_cosigns_after_the_claimant_signs(world):
@@ -391,10 +440,42 @@ def test_submit_cosigns_after_the_claimant_signs(world):
     assert world.cosign_calls == 1
     assert world.cosigned_rows() == 1
     (tx,) = world.submitted
-    witnesses = {bytes(vk): bytes(sig) for vk, sig in _vkey_witnesses(tx.hex())}
-    assert set(witnesses) == {_vk(world.user_sk), _vk(world.admin_sk), _vk(world.cosigner_sk)}
-    for vkey, signature in witnesses.items():
-        nacl.signing.VerifyKey(vkey).verify(bytes.fromhex(built.tx_hash), signature)
+    _assert_signed_by(tx, built.tx_hash, world.user_sk, world.admin_sk, world.cosigner_sk)
+
+
+@pytest.mark.parametrize("signer", ["cosigner_sk", "admin_sk"])
+@pytest.mark.parametrize("junk_first", [False, True], ids=["after", "before"])
+def test_a_wallet_witness_under_an_admin_key_never_reaches_the_node(world, signer, junk_first):
+    built = world.build_route(1_000)
+    claimant = [_vk(world.user_sk), world.user_sk.sign(bytes.fromhex(built.tx_hash))]
+    junk = [_vk(getattr(world, signer)), bytes(64)]
+    wallet = [junk, claimant] if junk_first else [claimant, junk]
+    world.submit_route(built.tx_hash, api.cbor2.dumps({0: wallet}).hex())
+    (tx,) = world.submitted
+    _assert_signed_by(tx, built.tx_hash, world.user_sk, world.admin_sk, world.cosigner_sk)
+    assert world.cosigned_rows() == 1
+
+
+@pytest.mark.parametrize("entry", [
+    [1 << 20, bytes(64)],
+    [bytes(31), bytes(64)],
+    [bytes(33), bytes(64)],
+    [bytes(32), bytes(63)],
+    [bytes(32), 7],
+    [bytes(32), bytes(64), b""],
+    [bytes(32)],
+    bytes(32),
+], ids=["integer_key", "short_key", "long_key", "short_signature", "integer_signature",
+        "three_items", "one_item", "bare_bytes"])
+def test_a_malformed_wallet_witness_is_refused_before_it_is_read(world, entry):
+    built = world.build_route(1_000)
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, api.cbor2.dumps({0: [entry]}).hex())
+    assert err.value.status_code == 400
+    assert err.value.detail == "Malformed witness set CBOR"
+    assert world.cosign_calls == 0
+    assert world.signed_by_admin == []
+    assert world.submitted == []
 
 
 def test_submit_signed_by_another_key_is_refused_before_the_cosigner(world):
@@ -476,6 +557,7 @@ def test_unwritable_primary_ledger_refuses_with_a_code(world):
         world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
     assert err.value.status_code == 503
     assert err.value.detail["code"] == "ledger_unavailable"
+    assert world.signed_by_admin == []
     assert world.submitted == []
     world.build_route(1_000)  # the pool tip was released
 
@@ -562,5 +644,5 @@ def test_an_output_of_a_build_that_was_never_cosigned_is_refused(world):
     with pytest.raises(CosignRejected) as err:
         world.build(_entitlement(1_000), pool_utxo=orphan)
     assert err.value.code == "input_unknown"
-    assert len(world.signed_by_admin) == 1  # the first build only
+    assert world.signed_by_admin == []
     assert world.cosign_calls == 0

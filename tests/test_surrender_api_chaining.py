@@ -109,6 +109,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(api, "_build_tx_blocking", good_build)
     monkeypatch.setattr(api, "_merge_wallet_witnesses",
                         lambda orig, wallet: b"\x84merged")
+    monkeypatch.setattr(api, "_signed_by_admins", lambda tx_hash, tx: tx)
 
     # Fresh manager + clean stashes (no watchdog task in these tests).
     api.state.tip_mgr = PoolTipManager(

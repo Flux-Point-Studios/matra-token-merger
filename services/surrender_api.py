@@ -3,21 +3,23 @@
 FastAPI microservice for the cMATRA merger portal.
 
 Wraps tools/process_surrender.py to provide HTTP endpoints for:
-  - Building partially-signed surrender transactions (admin co-signs)
-  - Submitting fully-signed transactions
+  - Building unsigned surrender transactions
+  - Submitting them once the user has signed, with both admins' signatures
   - Pool status queries
 
 Signing flow:
   1. Frontend sends user's address + assets to surrender
   2. Server builds tx: pool UTxO (script) + user UTxOs → cMATRA to user + legacy to quarantine
-  3. Server checks it with the co-signer's policy and signs with admin key 1
-  4. Returns the partially-signed CBOR hex to the frontend
+  3. Server checks it with the co-signer's policy
+  4. Returns the unsigned CBOR hex to the frontend
   5. Frontend wallet adds the user's signature via CIP-30 signTx
   6. Frontend sends the wallet's witnesses back; the server checks the user's
      signature, gets admin key 2's from the co-signer (which checks everything
-     again) and submits
-A build needs nothing but an address, so nothing is counted against the
-co-signer's cap or a unit's redemption limit until the user has signed.
+     again), records the surrender in its own ledger, signs with admin key 1
+     and submits
+A build needs nothing but an address, so it carries no admin signature and
+nothing is counted against either signer's cap or a unit's redemption limit
+until the user has signed.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ import sqlite3
 import sys
 import time
 import uuid
+from collections import UserList
 from pathlib import Path
 from typing import Any
 
@@ -365,10 +368,10 @@ class AppState:
     # Tracks tx hashes built by this service.  submit-surrender only allows
     # submitting txs whose hash is in this set.  Entries expire after 10 min.
     pending_tx_hashes: dict[str, float] = {}  # tx_hash_hex -> created_at
-    # Mirror map keyed by the same tx_hash, holding the admin-signed CBOR
-    # bytes verbatim. At submit time we merge the wallet's partial witness
-    # set into THIS exact byte sequence (preserving the body bytes the
-    # wallet signed), then forward to Blockfrost.
+    # Mirror map keyed by the same tx_hash, holding the built CBOR bytes
+    # verbatim. At submit time we merge the wallet's partial witness set and
+    # the admins' witnesses into THIS exact byte sequence (preserving the
+    # body bytes every signature covers), then forward to Blockfrost.
     pending_tx_cbor: dict[str, bytes] = {}
     TX_HASH_TTL: float = 600.0  # 10 minutes
 
@@ -437,13 +440,13 @@ class BuildSurrenderResponse(BaseModel):
 class SubmitRequest(BaseModel):
     # Wallet-side partial witness set CBOR hex (what CIP-30 signTx with
     # partialSign=true returns). Holds the user's vkey witness only. The
-    # server merges it into the admin-signed tx body stashed at build time.
+    # server merges it into the tx stashed at build time.
     tx_cbor_hex: str = Field(
         ..., description="Wallet partial witness set CBOR hex",
         min_length=8, max_length=32_768, pattern=r"^[0-9a-fA-F]+$",
     )
     # tx_hash returned by /build-surrender. Required so the server can
-    # locate the matching admin-signed tx body to merge into.
+    # locate the matching built tx to merge into.
     tx_hash: str = Field(
         ..., description="tx_hash from the build-surrender response",
         min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]+$",
@@ -821,14 +824,15 @@ def _build_tx_blocking(
 
 @app.post("/build-surrender", response_model=BuildSurrenderResponse)
 async def build_surrender(req: BuildSurrenderRequest):
-    """Build a partially-signed surrender transaction against the pool TIP.
+    """Build an unsigned surrender transaction against the pool TIP.
 
     The server reads the in-memory pool tip (chained off the prior surrender's
     pending change output — no Blockfrost re-query, so chunk N+1 sees chunk N
-    immediately), builds the full transaction, signs with the admin key, and
-    returns the CBOR for the wallet to co-sign. The single-flight lock is held
-    from here through /submit-surrender so two surrenders never target the same
-    tip; the tip advances ONLY after submit returns mempool-accept.
+    immediately), builds the full transaction and returns the CBOR for the
+    wallet to sign; the admins sign at /submit-surrender. The single-flight
+    lock is held from here through /submit-surrender so two surrenders never
+    target the same tip; the tip advances ONLY after submit returns
+    mempool-accept.
     """
     # Validate user address format
     if not req.user_address.startswith("addr1") and not req.user_address.startswith("addr_test1"):
@@ -945,7 +949,7 @@ async def build_surrender(req: BuildSurrenderRequest):
         raise HTTPException(422, "Transaction preflight failed. Please retry.")
 
     # Register the tx hash so submit-surrender will accept it, stash the exact
-    # admin-signed CBOR (so the wallet's witness merge preserves the body), and
+    # built CBOR (so the witness merges preserve the body), and
     # stash the tip-advance context (delivered amount + the pool output the
     # datum guard will check at submit time).
     _prune_expired_tx_hashes()
@@ -1074,9 +1078,10 @@ def _check_locally(
     return approval
 
 
-def _cosign(tx_hash_hex: str, tx: bytes) -> bytes:
-    """The claimant-signed ``tx`` with the co-signer's witness added, once
-    both this service and the co-signer have checked and recorded it."""
+def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
+    """The co-signer's [key, signature] witness for the claimant-signed
+    ``tx``, once both this service and the co-signer have checked it and
+    both have recorded it."""
     inputs = state.cosign_inputs.get(tx_hash_hex)
     if inputs is None:
         raise HTTPException(409, {"code": "build_expired", "message": "Please build the surrender again."})
@@ -1095,8 +1100,21 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> bytes:
     except sqlite3.Error as exc:
         logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
         raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})
-    witnesses = cbor2.dumps({0: [[witness.vkey.payload, witness.signature]]})
-    return _merge_wallet_witnesses(tx, witnesses)
+    return [witness.vkey.payload, witness.signature]
+
+
+def _signed_by_admins(tx_hash_hex: str, tx: bytes) -> bytes:
+    """The claimant-signed ``tx`` with the admins' witnesses: the
+    co-signer's when one is configured, then admin 1's over the same body.
+    With a co-signer, admin 1 signs only once this service has checked the
+    claimant's signature and recorded the surrender in its own ledger."""
+    witnesses = [_cosign(tx_hash_hex, tx)] if COSIGNER_URL else []
+    body_hash = hashlib.blake2b(split_tx(tx)[0], digest_size=32).digest()
+    witnesses.append([
+        VerificationKey.from_signing_key(state.admin_sk).payload,
+        state.admin_sk.sign(body_hash),
+    ])
+    return _merge_vkey_witnesses(tx, witnesses, 258 if TAG_SETS_258 else None)
 
 
 def _producing_bodies(tx_body: TransactionBody) -> list[bytes]:
@@ -1339,7 +1357,7 @@ def _build_surrender_tx(
     pool_utxo: dict[str, Any],
     user_inputs: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str, dict[str, Any] | None, list[dict[str, Any]]]:
-    """Build a surrender tx and sign it with admin key 1.
+    """Build an unsigned surrender tx.
 
     Transaction structure:
       Inputs:
@@ -1351,9 +1369,9 @@ def _build_surrender_tx(
         3. Legacy assets to quarantine_address
       Required signers: both admin PKHs
 
-    The builder auto-selects user UTxOs for the legacy assets + fees. Admin 1
-    signs the script spend; the user adds their signature via wallet, and
-    /submit-surrender then gets admin 2's from the co-signer.
+    The builder auto-selects user UTxOs for the legacy assets + fees. The
+    user adds their signature via wallet; /submit-surrender then gets admin
+    2's from the co-signer and adds admin 1's.
 
     ``user_inputs`` (chained path): the user's pending change UTxOs from the
     prior chunk, added as EXPLICIT inputs instead of Blockfrost address
@@ -1570,15 +1588,16 @@ def _build_surrender_tx(
         witness_set = builder.build_witness_set()
         tx_body = _canonicalize_body_and_index_redeemer(tx_body, witness_set, tx_in)
 
-    # TAG_SETS_258: re-frame the body's set fields uniformly as tag-258 FIRST —
-    # all three signatures (admin_1, the cosigner, and the user's HW/software
-    # wallet) must cover the hash of the exact bytes that go on the wire.
+    # TAG_SETS_258: re-frame the body's set fields uniformly as tag-258 before
+    # anyone signs — all three signatures (the user's HW/software wallet, the
+    # cosigner and admin_1) must cover the hash of the exact bytes that go on
+    # the wire.
     body_bytes = _wrap_body_sets_258(tx_body.to_cbor()) if TAG_SETS_258 else tx_body.to_cbor()
     tx_hash = hashlib.blake2b(body_bytes, digest_size=32).digest()
     _keep_recent(state.built_bodies, tx_hash.hex(), body_bytes)
 
     # Check the transaction with the co-signer's own policy and limits before
-    # admin 1 signs it; the co-signer is asked only once the claimant signs.
+    # handing it out; both admins sign only at submit, once the claimant has.
     if COSIGNER_URL:
         unsigned_tx = b"\x84" + body_bytes + witness_set.to_cbor() + b"\xf5\xf6"
         parent_bodies = _producing_bodies(tx_body)
@@ -1586,20 +1605,9 @@ def _build_surrender_tx(
         _check_locally(unsigned_tx, parent_bodies, language_views, time.time(), signed=False)
         _keep_recent(state.cosign_inputs, tx_hash.hex(), (parent_bodies, language_views))
 
-    # Create admin 1 witness (Server A — local key) over the canonical body.
-    admin_signature = state.admin_sk.sign(tx_hash)
-    admin_vk_witness = VerificationKeyWitness(
-        VerificationKey.from_signing_key(state.admin_sk),
-        admin_signature,
-    )
-
-    if witness_set.vkey_witnesses is None:
-        witness_set.vkey_witnesses = []
-    witness_set.vkey_witnesses.append(admin_vk_witness)
-
     tx_hash_hex = tx_hash.hex()
 
-    # Assemble the partially-signed transaction. The pycardano Transaction is
+    # Assemble the unsigned transaction. The pycardano Transaction is
     # used for structural reads (outputs) only; the wire bytes come from raw
     # assembly on the tag-258 path — a pycardano re-serialization would re-emit
     # the body with mixed framing and desync the signed hash from the wire.
@@ -1644,7 +1652,7 @@ def _build_surrender_tx(
         })
 
     logger.info(
-        "Built co-signed surrender tx: %d cMATRA → %s (tx: %s, pool_out=%s, "
+        "Built surrender tx: %d cMATRA → %s (tx: %s, pool_out=%s, "
         "user_change_outs=%d)",
         total_cmatra,
         user_address[:24] + "...",
@@ -1803,34 +1811,69 @@ def _prune_expired_tx_hashes() -> None:
         state.pending_tx_cbor.pop(h, None)
 
 
+def _vkey_witness_pairs(value: Any) -> tuple[list[list[bytes]], int | None]:
+    """A witness set's vkey witnesses (``value``, its key-0 field) as
+    [public key, signature] pairs, and the set tag they were framed in.
+
+    Conway encodes the list bare or as a tag-258 set; duck-type the tag,
+    since isinstance is False across cbor2's C/pure class split. Every entry
+    must be a 32-byte key and a 64-byte signature, checked before anything is
+    converted or hashed from any entry."""
+    tag = getattr(value, "tag", None)
+    if tag not in (None, 258):
+        raise ValueError(f"vkey witnesses framed in tag {tag}")
+    entries = value.value if tag else value
+    if not isinstance(entries, (list, UserList)):
+        raise ValueError("vkey witnesses are not an array")
+    for entry in entries:
+        if not (isinstance(entry, (list, UserList)) and len(entry) == 2
+                and isinstance(entry[0], bytes) and len(entry[0]) == 32
+                and isinstance(entry[1], bytes) and len(entry[1]) == 64):
+            raise ValueError("malformed vkey witness")
+    return [[entry[0], entry[1]] for entry in entries], tag
+
+
+def _merge_vkey_witnesses(tx: bytes, added: list[list[bytes]], tag: int | None) -> bytes:
+    """``tx`` with the [public key, signature] pairs in ``added`` among its
+    vkey witnesses, each in place of any witness already there under the
+    same key (the first of repeated keys in ``added`` is kept). The vkeys are
+    tag-258 framed if they were already or ``tag`` is 258.
+
+    The outer tx is a CBOR array of 4: `[tx_body, witness_set, is_valid,
+    aux]`. Only the witness_set is decoded, merged and re-encoded; the body
+    and tail bytes are kept verbatim, so every signature over
+    blake2b-256(tx_body) stays valid. Pure-cbor2 throughout: the C extension
+    decodes a tag-258 vkey set to a Python set of tuples and its dumps()
+    cannot serialize pure-class CBORTag values at all."""
+    body_bytes, ws_bytes, tail_bytes = split_tx(tx)
+    witness_set = _pure_loads(ws_bytes)
+    if not isinstance(witness_set, dict):
+        raise ValueError("witness_set is not a CBOR map")
+    present, present_tag = _vkey_witness_pairs(witness_set.get(0, []))
+
+    by_key: dict[bytes, bytes] = {}
+    for key, signature in added:
+        by_key.setdefault(key, signature)
+    vkeys = [pair for pair in present if pair[0] not in by_key]
+    vkeys += [[key, signature] for key, signature in by_key.items()]
+
+    set_tag = present_tag or tag
+    merged = {0: _PureCBORTag(set_tag, vkeys) if set_tag else vkeys}
+    merged.update((key, value) for key, value in witness_set.items() if key != 0)
+    return b"\x84" + body_bytes + _pure_dumps(merged) + tail_bytes
+
+
 def _merge_wallet_witnesses(
     original_tx_cbor: bytes, wallet_witness_cbor: bytes,
 ) -> bytes:
     """Merge the wallet's partial witness set (CIP-30 signTx partialSign
-    output, typically `{0: [[pk, sig]]}`) into the admin-signed tx CBOR
-    produced by /build-surrender, and return the assembled tx bytes
-    ready for submission.
+    output, typically `{0: [[pk, sig]]}`) into the tx CBOR stashed by
+    /build-surrender, keeping the body bytes the wallet signed.
 
-    The outer tx is a CBOR array of 4: `[tx_body, witness_set, is_valid,
-    aux]`. We walk the original CBOR stream to capture the exact byte
-    range of each element, decode-merge-re-encode ONLY the witness_set,
-    and reassemble. tx_body bytes are preserved verbatim so the wallet's
-    Ed25519 signature over blake2b-256(tx_body) remains valid.
-
-    Pure-cbor2 throughout: the C extension decodes a tag-258 vkey set to a
-    Python set of tuples — which the merge loop would silently skip,
-    dropping witnesses — and its dumps() cannot serialize pure-class
-    CBORTag values at all.
-
-    Vkey witnesses are deduplicated by public key (some wallets re-emit
-    the admin keys they observed in the original witness set; we keep
-    one instance each).
-    """
-    body_bytes, ws_bytes, tail_bytes = split_tx(original_tx_cbor)
-    original_ws = _pure_loads(ws_bytes)
-    if not isinstance(original_ws, dict):
-        raise ValueError("Original witness_set is not a CBOR map")
-
+    Only well-formed vkey witnesses are taken, and none under a key the body
+    names as a required signer: those are the admins', which this service
+    adds itself once the claimant has signed. Any other witness-set field the
+    wallet returns is ignored."""
     wallet_ws = _pure_loads(wallet_witness_cbor)
     if isinstance(wallet_ws, list) and len(wallet_ws) == 4:
         # HW-wallet stacks may return the ENTIRE signed tx
@@ -1838,34 +1881,16 @@ def _merge_wallet_witnesses(
         wallet_ws = wallet_ws[1]
     if not isinstance(wallet_ws, dict):
         raise ValueError("Wallet partial witness set is not a CBOR map")
+    pairs, tag = _vkey_witness_pairs(wallet_ws.get(0, []))
 
-    # Extract vkey witnesses from both. Conway encodes the vkey list as
-    # either a plain list `[[pk, sig], ...]` or a tag-258 set. Duck-type
-    # the tag — isinstance is False across cbor2's C/pure class split.
-    def _unwrap_vkey_list(value):
-        if getattr(value, "tag", None) is not None:
-            return list(value.value), value.tag
-        return list(value) if value else [], None
-
-    orig_vkeys, orig_tag = _unwrap_vkey_list(original_ws.get(0))
-    wallet_vkeys, wallet_tag = _unwrap_vkey_list(wallet_ws.get(0))
-    set_tag = orig_tag or wallet_tag  # preserve set tag if either side used it
-
-    seen: set[bytes] = set()
-    merged_vkeys: list = []
-    for vw in (*orig_vkeys, *wallet_vkeys):
-        if not (isinstance(vw, (list, tuple)) and len(vw) == 2):
-            continue
-        pk = bytes(vw[0])
-        if pk in seen:
-            continue
-        seen.add(pk)
-        merged_vkeys.append(list(vw))
-
-    original_ws[0] = _PureCBORTag(set_tag, merged_vkeys) if set_tag else merged_vkeys
-    merged_ws_bytes = _pure_dumps(original_ws)
-
-    return b"\x84" + body_bytes + merged_ws_bytes + tail_bytes
+    body = _pure_loads(split_tx(original_tx_cbor)[0])
+    required = body.get(14, [])
+    required_signers = set(required.value if getattr(required, "tag", None) == 258 else required)
+    claimant_side = [
+        pair for pair in pairs
+        if hashlib.blake2b(pair[0], digest_size=28).digest() not in required_signers
+    ]
+    return _merge_vkey_witnesses(original_tx_cbor, claimant_side, tag)
 
 
 @app.post("/submit-surrender", response_model=SubmitResponse)
@@ -1875,13 +1900,13 @@ async def submit_surrender(req: SubmitRequest):
     CIP-30 `signTx(cbor, partialSign=true)` returns only the wallet's
     partial witness set (typically `{0: [[pk, sig]]}`), not the full
     signed transaction. This endpoint takes that partial witness set
-    plus the build-time `tx_hash`, looks up the admin-signed tx CBOR
-    stashed at build time, merges the wallet's vkey witnesses into the
-    existing witness set, and forwards the assembled tx to Blockfrost.
+    plus the build-time `tx_hash`, looks up the tx CBOR stashed at build
+    time, merges the wallet's vkey witnesses into it, adds the admins'
+    witnesses and forwards the assembled tx to Blockfrost.
 
     The tx_body bytes are preserved byte-for-byte (we only rewrite the
-    witness_set element of the outer CBOR array) so the wallet's
-    signature over the body remains valid.
+    witness_set element of the outer CBOR array) so every signature over
+    the body remains valid.
 
     The pool tip advances ONLY here, after Blockfrost returns a mempool-accept
     hash — never at build time. The datum guard runs against the pool output[1]
@@ -1919,12 +1944,11 @@ async def submit_surrender(req: SubmitRequest):
         logger.warning("Witness merge failed for tx %s: %s", tx_hash_hex[:16], e)
         raise HTTPException(400, "Malformed witness set CBOR")
 
-    if COSIGNER_URL:
-        try:
-            merged_tx_bytes = await asyncio.to_thread(_cosign, tx_hash_hex, merged_tx_bytes)
-        except HTTPException:
-            abandon()
-            raise
+    try:
+        merged_tx_bytes = await asyncio.to_thread(_signed_by_admins, tx_hash_hex, merged_tx_bytes)
+    except HTTPException:
+        abandon()
+        raise
 
     try:
         submitted_hash = await asyncio.to_thread(state.bf.submit_tx, merged_tx_bytes)

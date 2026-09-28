@@ -116,13 +116,14 @@ The merger has **two on-chain pieces** and **two operator services**.
 
 Server A and Server B are deployed on **separate physical machines** so that
 compromising one does not yield minting or pool-drain authority. A surrender
-is built and signed by admin 1, signed by the claimant's wallet, and only then
-sent to the co-signer. Both servers check the whole transaction against
-`services/cosign_policy.py` (a pool payout equal to the rate-table price of
-exactly the legacy units moved to quarantine, and the claimant's own
-signature), and each keeps a ledger (`services/redemption_ledger.py`) that
-holds its approvals to a 24-hour cap and to what the redemption pin says
-remains of each legacy unit.
+is built unsigned by Server A, signed by the claimant's wallet, and only then
+sent to the co-signer; admin 1 signs last. Both servers check the whole
+transaction against `services/cosign_policy.py` (a pool payout equal to the
+rate-table price of exactly the legacy units moved to quarantine, and the
+claimant's own signature), and each keeps a ledger
+(`services/redemption_ledger.py`) that holds its approvals to a 24-hour cap
+and to what the redemption pin says remains of each legacy unit, and records
+an approval before its signature leaves.
 
 ---
 
@@ -246,8 +247,7 @@ The threat model is **dual-admin compromise**:
   redeemable name the pin lacks, and any change in quarantine since the pin.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it
   cannot mint or drain. The front-end never holds either admin key.
-- Compromising user wallets is out of scope — that's a per-user problem,
-  not a protocol-level one.
+- Compromising a user's wallet is out of scope: it affects that user only.
 
 Once the surrender deadline passes, the only on-chain operation the admins
 can perform is the sweep of unclaimed cMATRA. They cannot mint more, they

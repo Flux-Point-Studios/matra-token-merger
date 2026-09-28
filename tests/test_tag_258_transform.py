@@ -17,9 +17,11 @@ bytes the signatures cover.
 
 ``tests/fixtures/mixed_set_tags_tx.hex`` is a deterministic real pycardano
 build (fixed admin key, fixed synthetic UTxOs, offline context) captured from
-the pre-fix path — byte-for-byte what the kill switch (TAG_SETS_258=off) must
-keep producing. Its shape replicates the live evidence tx: body keys
-{0,1,2,3,8,11,13,14,16,17}, ws keys {0,5,7}, exactly 3 tag-258 framings.
+the pre-fix path, signed by admin_1. Its shape replicates the live evidence
+tx: body keys {0,1,2,3,8,11,13,14,16,17}, ws keys {0,5,7}, exactly 3 tag-258
+framings. The build returns it without ws key 0: admin_1 signs at submit,
+once the claimant has. With the kill switch (TAG_SETS_258=off) the build plus
+admin_1's witness is the fixture byte for byte.
 """
 
 from __future__ import annotations
@@ -166,6 +168,14 @@ def build_real_surrender_tx(tag_sets_on: bool) -> tuple[str, str]:
     return tx_cbor_hex, tx_hash_hex
 
 
+def signed_by_admin_1(tx_hex: str, tx_hash_hex: str, tag_sets_on: bool) -> bytes:
+    """The build with admin_1's witness added as /submit-surrender adds it
+    without a co-signer."""
+    with mock.patch.object(api, "COSIGNER_URL", ""), \
+         mock.patch.object(api, "TAG_SETS_258", tag_sets_on):
+        return api._signed_by_admins(tx_hash_hex, bytes.fromhex(tx_hex))
+
+
 # ---------------------------------------------------------------------------
 # Pure-cbor2 helper trio + startup invariant
 # ---------------------------------------------------------------------------
@@ -216,8 +226,8 @@ class TestMixedFixture:
         assert tail == b"\xf5\xf6"
 
     def test_fixture_regenerates_byte_identical_with_flag_off(self):
-        tx_hex, _ = build_real_surrender_tx(tag_sets_on=False)
-        assert tx_hex == MIXED_TX_HEX
+        tx_hex, tx_hash_hex = build_real_surrender_tx(tag_sets_on=False)
+        assert signed_by_admin_1(tx_hex, tx_hash_hex, tag_sets_on=False) == MIXED_TX
 
 
 # ---------------------------------------------------------------------------
@@ -374,21 +384,24 @@ class TestBuildPath:
         ws = _pure_loads(ws_bytes)
         for k in (0, 13, 14):
             assert _is_tag258(body[k]), f"body[{k}] not tag-258 on the wire"
-        assert _is_tag258(ws[0]), "vkey witnesses not tag-258 on the wire"
+        assert 0 not in ws, "the build carries no vkey witness"
         assert _is_tag258(ws[7])
         assert tail == b"\xf5\xf6"
+        signed_ws = _pure_loads(split_tx(signed_by_admin_1(tx_hex, tx_hash_hex, tag_sets_on=True))[1])
+        assert _is_tag258(signed_ws[0]), "vkey witnesses not tag-258 on the wire"
 
     def test_flag_on_signatures_cover_the_wire_body_hash(self):
         from nacl.signing import VerifyKey
 
         tx_hex, tx_hash_hex = build_real_surrender_tx(tag_sets_on=True)
-        body_bytes, ws_bytes, _ = split_tx(bytes.fromhex(tx_hex))
+        body_bytes, _, _ = split_tx(bytes.fromhex(tx_hex))
         # the returned tx_hash IS blake2b-256 of the exact wire body bytes —
         # the single key for stash/cosigner/submit/chaining
         assert tx_hash_hex == hashlib.blake2b(body_bytes, digest_size=32).hexdigest()
-        # and the admin witness actually verifies over that hash
-        vkeys = _pure_loads(ws_bytes)[0].value
-        vk, sig = vkeys[0]
+        # and the admin witness added at submit verifies over that hash
+        signed = signed_by_admin_1(tx_hex, tx_hash_hex, tag_sets_on=True)
+        assert split_tx(signed)[0] == body_bytes
+        (vk, sig), = _pure_loads(split_tx(signed)[1])[0].value
         VerifyKey(bytes(vk)).verify(
             bytes.fromhex(tx_hash_hex), bytes(sig)
         )  # raises BadSignatureError on mismatch
@@ -402,8 +415,12 @@ class TestBuildPath:
         assert inputs[spend_idx] == (bytes.fromhex(_POOL_HASH), 1)
 
     def test_flag_off_reverts_byte_exactly_to_legacy_wire(self):
-        # the kill switch: TAG_SETS_258=off must reproduce today's exact bytes
+        # the kill switch: TAG_SETS_258=off must reproduce the legacy bytes
         tx_hex, tx_hash_hex = build_real_surrender_tx(tag_sets_on=False)
-        assert tx_hex == MIXED_TX_HEX
-        body_bytes, _, _ = split_tx(bytes.fromhex(tx_hex))
+        body_bytes, ws_bytes, tail = split_tx(bytes.fromhex(tx_hex))
+        legacy_body, legacy_ws, legacy_tail = split_tx(MIXED_TX)
+        assert (body_bytes, tail) == (legacy_body, legacy_tail)
+        legacy_entries = map_entry_bytes(legacy_ws)
+        del legacy_entries[0]
+        assert map_entry_bytes(ws_bytes) == legacy_entries
         assert tx_hash_hex == hashlib.blake2b(body_bytes, digest_size=32).hexdigest()
