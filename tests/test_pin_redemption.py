@@ -110,6 +110,16 @@ def test_an_nft_minted_or_burned_after_the_pin_is_drift(action):
     assert f"slot {PIN.supply_slot + 1}" in problem
 
 
+def test_every_change_after_the_pin_is_drift():
+    """A signer stops at the first change after the pin; the check lists
+    them all."""
+    tip = TipView(_doc())
+    for action in ("minted", "burned"):
+        tip.chain.change_after_pin(T1_ADAM_PASS.policy_id + T1_NAME, action)
+    minted, burned = drift(_doc(), tip)
+    assert "minted in " in minted and "burned in " in burned
+
+
 def test_an_nft_minted_in_the_pins_own_slot_is_not_drift():
     """The pin's supplies are read at its slot, so a mint there is part of them."""
     tip = TipView(_doc())

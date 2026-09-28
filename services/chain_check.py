@@ -26,7 +26,7 @@ signed.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import requests
 
@@ -84,21 +84,21 @@ def _slot(tx_hash: str, answer: Any) -> int:
     return slot
 
 
-def mints_and_burns_after(unit: str, slot: int, chain: Any) -> list[tuple[str, str, int]]:
-    """Every mint or burn of ``unit`` after ``slot`` by the unit's own
-    history on ``chain`` (a BlockfrostClient), as (action, transaction hash,
-    its slot). Raises :class:`ChainUnavailable` unless the whole history, and
-    the slot of every transaction in it, can be read."""
+def mints_and_burns_after(unit: str, slot: int, chain: Any) -> Iterator[tuple[str, str, int]]:
+    """Each mint or burn of ``unit`` after ``slot`` by the unit's own history
+    on ``chain`` (a BlockfrostClient), as (action, transaction hash, its
+    slot). One transaction lookup per entry, made only as far as the caller
+    reads, so a history inflated with changes after the first costs a signer
+    nothing more. Raises :class:`ChainUnavailable` once an entry up to that
+    point, or the history itself, cannot be read."""
     history = _ask(chain.get_asset_history, unit)
     if not (isinstance(history, list) and history):
         raise ChainUnavailable(f"{unit}: the chain view gives no mint history")
-    changes = []
     for event in history:
         tx_hash = _history_tx(unit, event)
         tx_slot = _slot(tx_hash, _ask(chain.get_tx, tx_hash))
         if tx_slot > slot:
-            changes.append((event.get("action"), tx_hash, tx_slot))
-    return changes
+            yield event.get("action"), tx_hash, tx_slot
 
 
 def confirm_on_chain(
@@ -131,9 +131,9 @@ def confirm_on_chain(
     # A query of its own, after the inputs: the supply answer read first may
     # lag a mint, and a mint offset by a burn leaves the supply as pinned.
     for unit in sorted(cfg.redeemable_nfts.intersection(approval.units)):
-        changes = mints_and_burns_after(unit, cfg.supply_slot, chain)
-        if changes:
-            action, tx_hash, slot = changes[0]
+        change = next(mints_and_burns_after(unit, cfg.supply_slot, chain), None)
+        if change is not None:
+            action, tx_hash, slot = change
             raise CosignRejected(
                 "minted_after_pin",
                 f"{unit}: {action} in {tx_hash} at slot {slot}, after the pin at slot {cfg.supply_slot}",

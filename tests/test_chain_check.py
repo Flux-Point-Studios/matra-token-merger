@@ -31,7 +31,7 @@ import responses
 from responses.matchers import query_param_matcher
 
 from services.chain_check import confirm_on_chain
-from services.cosign_policy import Approval
+from services.cosign_policy import Approval, CosignRejected
 from tests.cbor_encode import encode
 from tests.cosign_cases import MAINNET, PIN, FakeChain, blake
 from tools.api_clients import BlockfrostClient, BlockfrostUnavailable
@@ -242,6 +242,8 @@ class Blockfrost:
         self.pages = {unit: [{"json": copy.deepcopy(events)}] for unit, events in RECORDED["history"].items()}
         self.txs = {tx_hash: {"json": copy.deepcopy(tx)} for tx_hash, tx in RECORDED["txs"].items()}
         self.other: dict[str, dict] = {}
+        self.requests: list[str] = []
+        """The URL of every request made in :meth:`confirm`."""
 
     def event(self, unit: str, action: str, slot: int) -> dict:
         """A history entry for a new mint or burn of ``unit`` at ``slot``,
@@ -252,16 +254,20 @@ class Blockfrost:
         return {"tx_hash": tx_hash, "action": action, "amount": "1" if action == "minted" else "-1"}
 
     def add(self, unit: str, action: str, slot: int) -> str:
-        """Append a mint or burn of ``unit`` at ``slot`` to its last page."""
+        """Append a mint or burn of ``unit`` at ``slot`` to its last page,
+        opening a new page once that one holds 100."""
         entry = self.event(unit, action, slot)
         self.pages[unit][-1]["json"].append(entry)
+        if len(self.pages[unit][-1]["json"]) == 100:
+            self.pages[unit].append({"json": []})
         return entry["tx_hash"]
 
     def full_first_page(self, unit: str) -> None:
         """Make ``unit``'s history a full page of 100 mints before the pin,
         followed by a second page."""
-        before = [self.event(unit, "minted", PIN.supply_slot - 1_000 - n) for n in range(100)]
-        self.pages[unit] = [{"json": before}, {"json": []}]
+        self.pages[unit] = [{"json": []}]
+        for n in range(100):
+            self.add(unit, "minted", PIN.supply_slot - 1_000 - n)
 
     def confirm(self, confirm: Callable[..., None], units: dict[str, int]) -> None:
         with responses.RequestsMock(assert_all_requests_are_fired=False) as served, \
@@ -277,7 +283,10 @@ class Blockfrost:
             for path, answer in self.other.items():
                 served.get(f"{BASE}{path}", **answer)
             chain = BlockfrostClient("recorded-mainnet", BASE)
-            confirm(_approval(units, RECORDED_INPUTS), MAINNET, chain, {RECORDED_ID}.__contains__)
+            try:
+                confirm(_approval(units, RECORDED_INPUTS), MAINNET, chain, {RECORDED_ID}.__contains__)
+            finally:
+                self.requests = [call.request.url for call in served.calls]
 
 
 def _recorded_mint(unit: str) -> str:
@@ -336,6 +345,16 @@ def a_mint_on_the_second_page_of_history(confirm):
     chain = Blockfrost()
     chain.full_first_page(T1_PASS)
     chain.add(T1_PASS, "minted", PIN.supply_slot + 1)
+    chain.confirm(confirm, {T1_PASS: 1})
+
+
+@probe("minted_after_pin", detail=T1_PASS)
+def entries_after_the_first_change_after_the_pin(confirm):
+    """The first change after the pin is refused without reading on, so an
+    entry after it that the chain view cannot place changes nothing."""
+    chain = Blockfrost()
+    chain.add(T1_PASS, "minted", PIN.supply_slot + 1)
+    del chain.txs[chain.add(T1_PASS, "burned", PIN.supply_slot + 2)]
     chain.confirm(confirm, {T1_PASS: 1})
 
 
@@ -448,3 +467,20 @@ def test_probe(p):
     assert got == p.expected, message
     assert p.detail in message
 
+
+def test_a_history_inflated_after_the_pin_costs_no_lookup_past_its_first_change():
+    """Mints and burns after the pin, each offsetting the last, leave the
+    supply as pinned. The signer looks up each entry's transaction only up to
+    the first of them, however many follow."""
+    chain = Blockfrost()
+    before_the_pin = len(RECORDED["history"][T1_PASS])
+    for n in range(1_000):
+        chain.add(T1_PASS, ("minted", "burned")[n % 2], PIN.supply_slot + 1 + n)
+    with pytest.raises(CosignRejected) as refused:
+        chain.confirm(confirm_on_chain, {T1_PASS: 1})
+    assert refused.value.code == "minted_after_pin"
+    lookups = [url for url in chain.requests if "/txs/" in url]
+    history_pages = [url for url in chain.requests if "/history" in url]
+    assert len(lookups) == before_the_pin + 1
+    assert len(history_pages) == len(chain.pages[T1_PASS])
+    assert len(chain.requests) == 1 + len(history_pages) + len(lookups)
