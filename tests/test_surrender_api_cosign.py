@@ -45,7 +45,7 @@ from services.chain_check import ChainUnavailable
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger, create_ledger
-from tests.cosign_cases import PIN, ledger_refusing_writes, not_found
+from tests.cosign_cases import PIN, FakeChain, ledger_refusing_writes, not_found
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
 from tools.process_surrender import load_rate_table, load_redemption_pin, surrendered_entitlement
@@ -55,6 +55,8 @@ RATES = load_rate_table(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json")
 REDEEMABLE = load_redemption_pin(ROOT / "audit_pack/2026-09-27/redemption_pin.json").nft_units
 T1_UNITS = sorted(u for u in REDEEMABLE if u.startswith(T1_ADAM_PASS.policy_id))
 FLUX_UNIT = next(u for u in sorted(REDEEMABLE) if u.startswith(FLUX_PASS.policy_id))
+# A pinned pass the pin still redeems; the synthetic claimant holds it.
+PASS = next(u for u in T1_UNITS if PIN.remaining[u] > 0)
 MAINNET_USER = (
     "addr1q9s6m9d8yedfcf53yhq5j5zsg0s58wpzamwexrxpfelgz2wgk0s9l9fqc93tyc8zu4z7hp9dlska2kew9trdg8nscjcq3sk5s3"
 )
@@ -181,12 +183,15 @@ class World:
         self.supply: dict[str, int] = dict(PIN.supply)
         self.spent: set[tuple[str, int]] = set()
         self.chain_failure: Exception | None = None
+        # Each unit's mint history, and the slot of each transaction in it.
+        self.history = FakeChain()
         self.submitted: list[bytes] = []
         # Rewrites the co-signer's JSON answer on its way back, when set.
         self.edit_answer: Callable[[dict], dict] | None = None
 
         agent = MultiAsset()
         agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 5_000})
+        agent[ScriptHash(bytes.fromhex(PASS[:56]))] = Asset({AssetName(bytes.fromhex(PASS[56:])): 1})
         user_body = self._produce([
             TransactionOutput(self.user_addr, Value(100_000_000)),
             TransactionOutput(self.user_addr, Value(5_000_000, agent)),
@@ -290,6 +295,12 @@ class World:
                     raise not_found()
                 return {"asset": unit, "quantity": str(world.supply[unit])}
 
+            def get_asset_history(self, unit):
+                return world.history.get_asset_history(unit)
+
+            def get_tx(self, tx_hash):
+                return world.history.get_tx(tx_hash)
+
         def post(url, json, headers, timeout):
             assert url == "http://cosigner.test/cosign"
             world.cosign_calls += 1
@@ -338,18 +349,21 @@ class World:
     def primary_rows(self) -> int:
         return _rows(self.primary_ledger.path)
 
-    def build(self, total: int, legacy_qty: int = 1_000, pool_utxo=None, user_inputs=None):
+    def build(self, total: int, legacy_qty: int = 1_000, pool_utxo=None, user_inputs=None, passes=()):
         legacy = [{"policy_hex": AGENT_POLICY, "asset_hex": AGENT_NAME, "quantity": legacy_qty}]
+        legacy += [{"policy_hex": unit[:56], "asset_hex": unit[56:], "quantity": 1} for unit in passes]
         return api._build_surrender_tx(
             self.user_addr.encode(), total, legacy, pool_utxo or self.pool_utxo, user_inputs,
         )
 
-    def build_route(self, agent: int) -> api.BuildSurrenderResponse:
-        """POST /build-surrender for ``agent`` AGENT from the claimant."""
-        request = api.BuildSurrenderRequest(
-            user_address=self.user_addr.encode(),
-            assets=[api.AssetToSurrender(asset_key="AGENT", quantity_base=agent)],
-        )
+    def build_route(self, agent: int, passes: tuple[str, ...] = ()) -> api.BuildSurrenderResponse:
+        """POST /build-surrender for ``agent`` AGENT and the T1 ``passes``
+        from the claimant."""
+        assets = [api.AssetToSurrender(asset_key="AGENT", quantity_base=agent)]
+        if passes:
+            assets.append(api.AssetToSurrender(
+                asset_key="T1_ADAM_PASS", quantity_base=len(passes), nft_units=list(passes)))
+        request = api.BuildSurrenderRequest(user_address=self.user_addr.encode(), assets=assets)
         # A pool tip left locked by an earlier call would hang here, not fail.
         return asyncio.run(asyncio.wait_for(api.build_surrender(request), timeout=30))
 
@@ -371,8 +385,8 @@ def world(tmp_path, monkeypatch):
     w.close()
 
 
-def _entitlement(qty: int) -> int:
-    return surrendered_entitlement(RATES, {AGENT.unit: qty}, REDEEMABLE)
+def _entitlement(qty: int, passes: tuple[str, ...] = ()) -> int:
+    return surrendered_entitlement(RATES, {AGENT.unit: qty, **dict.fromkeys(passes, 1)}, REDEEMABLE)
 
 
 def _rows(ledger_path: str) -> int:
@@ -679,6 +693,65 @@ def test_cosigner_checks_the_supply_itself_if_the_primary_skips_its_check(world,
         world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
     assert err.value.status_code == 503
     assert world.cosign_calls == 1
+    assert world.cosigned_rows() == 0
+    assert world.submitted == []
+
+
+# ---------------------------------------------------------------------------
+# A pass minted or burned after the pin
+# ---------------------------------------------------------------------------
+
+
+def test_a_pass_whose_history_ends_at_the_pin_is_surrendered(world):
+    built = world.build_route(1_000, passes=(PASS,))
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    (tx,) = world.submitted
+    _assert_signed_by(tx, built.tx_hash, world.user_sk, world.admin_sk, world.cosigner_sk)
+    assert world.cosigned_rows() == world.primary_rows() == 1
+
+
+@pytest.mark.parametrize("action", ["minted", "burned"])
+def test_a_pass_changed_after_the_pin_is_refused_before_either_admin_signs(world, action):
+    world.history.change_after_pin(PASS, action)
+    with pytest.raises(CosignRejected) as err:
+        world.build(_entitlement(1_000, (PASS,)), passes=(PASS,))
+    assert err.value.code == "minted_after_pin"
+    assert PASS in err.value.detail
+    assert world.signed_by_admin == []
+    assert world.cosign_calls == 0
+
+
+def test_the_build_route_answers_a_pass_changed_after_the_pin_with_its_code(world):
+    world.history.change_after_pin(PASS, "minted")
+    with pytest.raises(HTTPException) as err:
+        world.build_route(1_000, passes=(PASS,))
+    assert err.value.status_code == 422
+    assert err.value.detail["code"] == "minted_after_pin"
+    assert world.signed_by_admin == []
+    world.build_route(1_000)  # the pool tip was released
+
+
+def test_a_pass_minted_between_build_and_submit_is_refused_before_the_cosigner(world):
+    built = world.build_route(1_000, passes=(PASS,))
+    world.history.change_after_pin(PASS, "minted")
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 400
+    assert err.value.detail["code"] == "minted_after_pin"
+    assert world.cosign_calls == 0
+    assert world.primary_rows() == 0
+    assert world.submitted == []
+
+
+def test_cosigner_checks_the_history_itself_if_the_primary_skips_its_check(world, monkeypatch, caplog):
+    built = world.build_route(1_000, passes=(PASS,))
+    world.history.change_after_pin(PASS, "burned")
+    monkeypatch.setattr(api, "_check_locally", lambda *a, **k: None)
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 503
+    assert world.cosign_calls == 1
+    assert "Refused to co-sign: minted_after_pin" in caplog.text
     assert world.cosigned_rows() == 0
     assert world.submitted == []
 

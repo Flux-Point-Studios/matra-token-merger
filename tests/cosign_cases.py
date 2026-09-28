@@ -72,6 +72,7 @@ MAINNET = CosignConfig(
     redeemable_nfts=REDEEMABLE,
     redemption_limits=PIN.remaining,
     pinned_supply=PIN.supply,
+    supply_slot=PIN.supply_slot,
     max_payout_per_tx=20_000_000 * 10**6,
 )
 # The pin's limits before any surrender landed (nothing quarantined), so the
@@ -309,12 +310,18 @@ def not_found() -> requests.HTTPError:
     return requests.HTTPError("404 Client Error: Not Found", response=response)
 
 
+# The transaction a unit's history names unless a test adds to it: a mint in
+# the pin's own slot, which the pinned supply includes.
+MINTED_AT_THE_PIN = "5e" * 32
+
+
 class FakeChain:
     """A signer's view of the chain: the BlockfrostClient calls
     services.chain_check makes. The transactions whose bodies it holds are on
     chain, their outputs unspent unless listed in ``spent``; each unit's
-    supply is the pinned one unless ``supply`` says otherwise; ``failure``,
-    when set, is raised by every call."""
+    supply is the pinned one unless ``supply`` says otherwise, and its history
+    one mint at the pin unless ``history`` says otherwise; ``failure``, when
+    set, is raised by every call."""
 
     def __init__(self, bodies: Mapping[str, bytes] | None = None,
                  supply: Mapping[str, int] | None = None,
@@ -322,7 +329,19 @@ class FakeChain:
         self.bodies = dict(bodies or {})
         self.spent: dict[tuple[str, int], str] = {}
         self.supply = {**PIN.supply, **(supply or {})}
+        self.history: dict[str, list[dict]] = {}
+        self.slots: dict[str, int] = {MINTED_AT_THE_PIN: PIN.supply_slot}
         self.failure = failure
+
+    def change_after_pin(self, unit: str, action: str) -> None:
+        """Add to ``unit``'s history a mint or burn (``action`` "minted" or
+        "burned") in the slot after the pin; its supply stays the pinned one."""
+        tx_hash = blake(f"{unit} {action}".encode()).hex()
+        self.slots[tx_hash] = PIN.supply_slot + 1
+        amount = "1" if action == "minted" else "-1"
+        self.history[unit] = [
+            *self.get_asset_history(unit), {"tx_hash": tx_hash, "action": action, "amount": amount},
+        ]
 
     @classmethod
     def as_at_the_golden_builds(cls) -> "FakeChain":
@@ -356,6 +375,20 @@ class FakeChain:
         if unit not in self.supply:
             raise not_found()
         return {"asset": unit, "quantity": str(self.supply[unit])}
+
+    def get_asset_history(self, unit: str) -> list[dict]:
+        self._answer()
+        if unit not in self.supply:
+            raise not_found()
+        return self.history.get(unit, [
+            {"tx_hash": MINTED_AT_THE_PIN, "action": "minted", "amount": str(self.supply[unit])},
+        ])
+
+    def get_tx(self, tx_hash: str) -> dict:
+        self._answer()
+        if tx_hash not in self.slots:
+            raise not_found()
+        return {"hash": tx_hash, "slot": self.slots[tx_hash]}
 
 
 @contextmanager

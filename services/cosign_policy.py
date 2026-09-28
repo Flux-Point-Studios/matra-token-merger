@@ -29,9 +29,10 @@ policy reads the complete transaction and approves only a surrender:
 
 ``require_claimant_signature`` then checks that the claimant's payment key
 signed the body. services.chain_check confirms against the signer's own view
-of the chain that the inputs exist and no unit's supply grew, and the per-day
-cap and each unit's remaining redemptions are enforced against every signer's
-own record by services.redemption_ledger.
+of the chain that the inputs exist, no unit's supply grew and no NFT unit was
+minted or burned since the pin, and the per-day cap and each unit's remaining
+redemptions are enforced against every signer's own record by
+services.redemption_ledger.
 
 Decoding is strict and self-contained: a duplicated map key anywhere, trailing
 bytes, floats or undefined simple values are refused, and CBOR booleans and
@@ -382,6 +383,7 @@ class CosignConfig:
     redeemable_nfts: frozenset[str]
     redemption_limits: Mapping[str, int]
     pinned_supply: Mapping[str, int]
+    supply_slot: int
     max_payout_per_tx: int
 
 
@@ -414,6 +416,7 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         redeemable_nfts=pin.nft_units,
         redemption_limits=pin.remaining,
         pinned_supply=pin.supply,
+        supply_slot=pin.supply_slot,
         max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
     )
 
