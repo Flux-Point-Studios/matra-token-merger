@@ -13,7 +13,9 @@ import hashlib
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
+import httpx
 import nacl.signing
 import pytest
 import requests
@@ -180,6 +182,8 @@ class World:
         self.spent: set[tuple[str, int]] = set()
         self.chain_failure: Exception | None = None
         self.submitted: list[bytes] = []
+        # Rewrites the co-signer's JSON answer on its way back, when set.
+        self.edit_answer: Callable[[dict], dict] | None = None
 
         agent = MultiAsset()
         agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 5_000})
@@ -289,7 +293,10 @@ class World:
         def post(url, json, headers, timeout):
             assert url == "http://cosigner.test/cosign"
             world.cosign_calls += 1
-            return world.client.post("/cosign", json=json, headers=headers)
+            response = world.client.post("/cosign", json=json, headers=headers)
+            if world.edit_answer is None:
+                return response
+            return httpx.Response(200, json=world.edit_answer(response.json()), request=response.request)
 
         ctx = _FakeContext(self.user_utxos)
         m.setattr(api, "SCRIPT_ADDRESS", self.pool_addr.encode())
@@ -560,6 +567,72 @@ def test_unwritable_primary_ledger_refuses_with_a_code(world):
     assert world.signed_by_admin == []
     assert world.submitted == []
     world.build_route(1_000)  # the pool tip was released
+
+
+# ---------------------------------------------------------------------------
+# The co-signer's answer, checked before admin 1 signs
+# ---------------------------------------------------------------------------
+
+
+def _flipped(signature: bytes) -> bytes:
+    return signature[:-1] + bytes([signature[-1] ^ 1])
+
+
+def _another_keys_signature(world, answer: dict, body_hash: bytes) -> dict:
+    stranger = PaymentSigningKey.generate()
+    return {**answer, "vkey_hex": _vk(stranger).hex(), "signature_hex": stranger.sign(body_hash).hex()}
+
+
+# Each rewrites the co-signer's answer for ``world``; none of them is the
+# co-signer's key with its signature of the transaction body.
+WRONG_ANSWERS = {
+    "another_key": _another_keys_signature,
+    "junk_signature": lambda world, answer, body_hash: {
+        **answer, "signature_hex": _flipped(bytes.fromhex(answer["signature_hex"])).hex(),
+    },
+    "admin_1_key_with_junk": lambda world, answer, body_hash: {
+        **answer, "vkey_hex": _vk(world.admin_sk).hex(), "signature_hex": bytes(64).hex(),
+    },
+    "signature_of_another_body": lambda world, answer, body_hash: {
+        **answer, "signature_hex": world.cosigner_sk.sign(bytes(32)).hex(),
+    },
+    "signature_of_the_body_the_answer_names": lambda world, answer, body_hash: {
+        **answer, "tx_hash": bytes(32).hex(), "signature_hex": world.cosigner_sk.sign(bytes(32)).hex(),
+    },
+    "short_key": lambda world, answer, body_hash: {**answer, "vkey_hex": answer["vkey_hex"][:-2]},
+    "short_signature": lambda world, answer, body_hash: {
+        **answer, "signature_hex": answer["signature_hex"][:-2],
+    },
+}
+
+
+@pytest.mark.parametrize("wrong", WRONG_ANSWERS)
+def test_a_cosigner_answer_that_is_not_its_signature_of_the_body_is_refused(world, wrong):
+    """admin 1 signs only once the answer carries the co-signer's own key and
+    that key's signature of the body. Anything else could not land, or would
+    stand in for admin 1's own witness."""
+    built = world.build_route(1_000)
+    body_hash = bytes.fromhex(built.tx_hash)
+    world.edit_answer = lambda answer: WRONG_ANSWERS[wrong](world, answer, body_hash)
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 503
+    assert err.value.detail["code"] == "cosigner_witness"
+    assert world.signed_by_admin == []
+    assert world.primary_rows() == 0
+    assert world.submitted == []
+    world.edit_answer = None
+    world.build_route(1_000)  # the pool tip was released
+
+
+def test_no_pair_from_the_cosigner_step_displaces_admin_1s_own_witness(world, monkeypatch):
+    """Behind the check above: whatever [key, signature] pair the co-signer
+    step hands back, admin 1's own witness is the one that reaches the node."""
+    built = world.build_route(1_000)
+    monkeypatch.setattr(api, "_cosign", lambda tx_hash_hex, tx: [_vk(world.admin_sk), bytes(64)])
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    (tx,) = world.submitted
+    _assert_signed_by(tx, built.tx_hash, world.user_sk, world.admin_sk)
 
 
 # ---------------------------------------------------------------------------

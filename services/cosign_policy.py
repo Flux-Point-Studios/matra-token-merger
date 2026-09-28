@@ -620,9 +620,17 @@ def require_claimant_signature(tx_cbor: bytes, approval: Approval) -> None:
             raise CosignRejected("witness_shape", "malformed vkey witness")
         vkey, signature = entry
         if blake2b_224(vkey) == approval.claimant[1:29]:
-            try:
-                VerifyKey(vkey).verify(approval.tx_hash, signature)
-            except BadSignatureError as exc:
-                raise CosignRejected("claimant_witness", "claimant signature does not verify") from exc
+            if not signature_verifies(vkey, approval.tx_hash, signature):
+                raise CosignRejected("claimant_witness", "claimant signature does not verify")
             return
     raise CosignRejected("claimant_witness", "the claimant has not signed")
+
+
+def signature_verifies(vkey: bytes, message: bytes, signature: bytes) -> bool:
+    """``signature`` (64 bytes) is the Ed25519 signature of ``message`` by
+    the public key ``vkey`` (32 bytes)."""
+    try:
+        VerifyKey(vkey).verify(message, signature)
+    except BadSignatureError:
+        return False
+    return True

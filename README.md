@@ -232,6 +232,9 @@ The threat model is **dual-admin compromise**:
   no pool draining for the same reason. The cosigner service additionally
   refuses to sign anything that doesn't match the expected transaction
   pattern (this is defense-in-depth on top of the dual-signature requirement).
+- The surrender API adds admin_1's signature only once the co-signer's answer
+  is admin_2's key and that key's signature of the exact transaction body;
+  admin_1's own witness is merged first, so no answer can stand in for it.
 - Each legacy unit redeems at most what remained of it at the redemption pin
   (`audit_pack/2026-09-27/redemption_pin.json`: its supply at the pin, less
   the team waiver, less what quarantine already held), so units minted or
