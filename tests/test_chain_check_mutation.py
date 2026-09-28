@@ -79,6 +79,7 @@ OPERATOR_MUTANTS = {
         "cfg.redeemable_nfts.intersection(approval.units)", "approval.units",
     ),
     "only_the_last_entry_read": ("for event in history:", "for event in history[-1:]:"),
+    "a_history_hash_matched_by_its_prefix": ("_TX_HASH.fullmatch(tx_hash)", "_TX_HASH.match(tx_hash)"),
     "the_whole_history_read_before_refusing": (
         "next(mints_and_burns_after(unit, cfg.supply_slot, chain), None)",
         "next(iter(list(mints_and_burns_after(unit, cfg.supply_slot, chain))), None)",

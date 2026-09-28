@@ -432,11 +432,13 @@ def a_history_entry_naming_no_transaction(confirm):
 
 
 @probe("unavailable", detail=T1_PASS)
-def a_history_entry_naming_a_path_instead_of_a_hash(confirm):
-    """The name goes into a request path; one that is not a transaction hash
-    would ask another endpoint, here an old block, for the slot."""
+def a_history_entry_naming_a_path_after_its_hash(confirm):
+    """The name goes into a request path. A mint after the pin named by its
+    hash and then a path would have its slot read from another endpoint,
+    here an old block, and pass as a mint before the pin."""
     chain = Blockfrost()
-    chain.pages[T1_PASS][0]["json"][0]["tx_hash"] = "../blocks/" + "b1" * 32
+    minted = chain.add(T1_PASS, "minted", PIN.supply_slot + 1)
+    chain.pages[T1_PASS][-1]["json"][-1]["tx_hash"] = f"{minted}/../../blocks/{'b1' * 32}"
     chain.other["/blocks/" + "b1" * 32] = {"json": {"hash": "b1" * 32, "slot": 1}}
     chain.confirm(confirm, {T1_PASS: 1})
 
