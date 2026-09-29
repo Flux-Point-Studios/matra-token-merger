@@ -9,14 +9,16 @@ supply. For every unit that existed at the supply slot the pin records:
   waiver       the team supply the rate table carves out of it
   quarantined  what the quarantine address holds now; nothing leaves it
   waived_already_quarantined
-               waived treasury units among the quarantined ones, with the
-               transaction that sent them there (only where there are any)
+               waived units among the quarantined ones, with the transaction
+               that sent them there (only where the waived reserve no longer
+               holds them)
 
 A signer redeems at most supply - (waiver - waived_already_quarantined) -
 quarantined of a unit across every surrender it approves after the pin, so a
-unit is never paid for twice, and treasury units already in quarantine are
-not subtracted twice. Pinning refuses to write a record the chain does not
-bear out.
+unit is never paid for twice, and waived units already in quarantine are not
+subtracted twice. Pinning refuses to write a record the chain does not bear
+out, so a pin never promises more of a unit than exists outside its waived
+reserve and quarantine.
 
     NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
         <supply slot> audit_pack/<date>/redemption_pin.json
@@ -26,10 +28,12 @@ has more supply now than at the pin, any NFT was minted or burned after the
 pin's supply slot (which every signer refuses), a redeemable name exists that
 the pin lacks, quarantine holds other amounts than the pin records, or a
 record of waived units already in quarantine is not borne out: it exceeds its
-waiver or its quarantine count, or the transaction it names created no
-outputs, came after the pin's quarantine count, or sent fewer of the unit to
-quarantine. Re-pinning at the old supply slot cannot show a later mint; this
-reads current supply and each NFT's own history.
+waiver or its quarantine count; the transaction it names created no outputs,
+came after the pin's quarantine count, or sent fewer of the unit to
+quarantine; or the waived reserve did not hold the waiver at the snapshot, or
+still holds more than the waiver less the record. Re-pinning at the old
+supply slot cannot show a later mint; this reads current supply and each
+NFT's own history.
 
     NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
         --check audit_pack/<date>/redemption_pin.json
@@ -57,14 +61,16 @@ from tools.process_surrender import load_rate_table, waived_already_quarantined
 
 ROOT = Path(__file__).resolve().parent.parent
 RATE_TABLE = ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"
+# The rate table's waived reserves: per token, the addresses whose holdings at
+# the snapshot are its waiver.
+RESERVES = ROOT / "audit_pack/2026-04-19/allocations_cmatra_summary.json"
 QUARANTINE_ADDRESS = "addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl"
 
-# Waived treasury units a surrender sent to quarantine: token -> (the
-# transaction that sent them, how many). The waiver and the quarantine count
-# both hold them, so the pin records them and they are not subtracted twice.
-WAIVED_ALREADY_QUARANTINED = {
-    "AGENT": ("6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580", 15_735_514),
-}
+# Waived units a surrender sent to quarantine: token -> (the transaction that
+# sent them, how many). The waiver and the quarantine count both hold them, so
+# the pin records them and they are not subtracted twice. Empty while every
+# waived unit is still in its waived reserve.
+WAIVED_ALREADY_QUARANTINED: dict[str, tuple[str, int]] = {}
 
 
 def redeemable_names(policy_assets: list[dict]) -> list[str]:
@@ -124,13 +130,30 @@ def sent_to_quarantine(tx_hash: str, unit: str, bf: Any) -> tuple[int, int] | No
     return tx["slot"], sent
 
 
+def waived_reserve(asset: str, unit: str, bf: Any) -> tuple[int, int]:
+    """(what ``asset``'s waived reserve held at the snapshot, how much of
+    ``unit`` it holds now)."""
+    reserve = json.loads(RESERVES.read_text())["reserve"]["team_treasury"][asset]
+    held = sum(
+        int(amount["quantity"])
+        for entry in reserve["addresses"]
+        for utxo in bf.get_address_utxos(entry["address"], unit)
+        for amount in utxo["amount"] if amount["unit"] == unit
+    )
+    return reserve["total_balance_base"], held
+
+
 def already_quarantined_problems(
     asset: str, unit: str, row: dict, quarantine_slot: int, bf: Any,
 ) -> list[str]:
     """Every way ``row``'s record of waived units already in quarantine is
-    not borne out: a record the signers refuse to load, or a transaction that
+    not borne out: a record the signers refuse to load; a transaction that
     created no outputs, came after ``quarantine_slot`` (where the pin's
-    quarantine count was read) or sent fewer of ``unit`` to quarantine."""
+    quarantine count was read) or sent fewer of ``unit`` to quarantine; or a
+    waived reserve that did not hold the waiver at the snapshot, or still
+    holds more than the waiver less the record. Waived units still in the
+    reserve cannot be in quarantine: a record of them would let the signers
+    redeem more than exists outside the reserve and quarantine."""
     try:
         quantity = waived_already_quarantined(row)
     except ValueError as exc:
@@ -138,18 +161,26 @@ def already_quarantined_problems(
     if not quantity:
         return []
     tx_hash = row["waived_already_quarantined"]["tx_hash"]
+    problems = []
     answer = sent_to_quarantine(tx_hash, unit, bf)
     if answer is None:
-        return [f"{asset} {unit}: the pin records waived units quarantined by {tx_hash},"
-                " which created no outputs on chain"]
-    slot, sent = answer
-    problems = []
-    if slot > quarantine_slot:
-        problems.append(f"{asset} {unit}: {tx_hash} is at slot {slot},"
-                        f" after the quarantine count at slot {quarantine_slot}")
-    if sent < quantity:
-        problems.append(f"{asset} {unit}: {tx_hash} sent {sent} to quarantine,"
-                        f" fewer than the {quantity} waived units the pin records")
+        problems.append(f"{asset} {unit}: the pin records waived units quarantined by {tx_hash},"
+                        " which created no outputs on chain")
+    else:
+        slot, sent = answer
+        if slot > quarantine_slot:
+            problems.append(f"{asset} {unit}: {tx_hash} is at slot {slot},"
+                            f" after the quarantine count at slot {quarantine_slot}")
+        if sent < quantity:
+            problems.append(f"{asset} {unit}: {tx_hash} sent {sent} to quarantine,"
+                            f" fewer than the {quantity} waived units the pin records")
+    at_snapshot, held = waived_reserve(asset, unit, bf)
+    if at_snapshot != row["waiver"]:
+        problems.append(f"{asset} {unit}: the waived reserve held {at_snapshot} at the snapshot,"
+                        f" not the waiver {row['waiver']}")
+    if held > row["waiver"] - quantity:
+        problems.append(f"{asset} {unit}: the waived reserve still holds {held}, more than the"
+                        f" waiver {row['waiver']} less the {quantity} waived units the pin records")
     return problems
 
 
@@ -195,8 +226,8 @@ def check(pin: Path, bf: Any) -> int:
         print(f"PIN NO LONGER HOLDS: {len(problems)} difference(s) from {pin}")
         return 1
     print(f"pin holds: no unit above its pinned supply, no NFT minted or burned since the pin,"
-          f" no new name, quarantine as pinned, treasury units it records in quarantine"
-          f" borne out on chain ({pin})")
+          f" no new name, quarantine as pinned, every record of waived units in quarantine"
+          f" borne out by its transaction and its waived reserve ({pin})")
     return 0
 
 

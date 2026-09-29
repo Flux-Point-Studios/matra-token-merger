@@ -209,8 +209,8 @@ class RedemptionPin:
     remaining: Mapping[str, int]
     """Per unit, NFT or fungible: its supply at the pin, less the team waiver,
     less what the quarantine address already held (never below zero).
-    Treasury units already in quarantine are not subtracted twice: those the
-    pin records come off the waiver."""
+    Waived units the pin records as already in quarantine come off the
+    waiver, so they are not subtracted twice."""
     supply: Mapping[str, int]
     """Per unit: its on-chain supply at the pin. More on chain now means
     editions minted since, which the signers refuse to redeem."""

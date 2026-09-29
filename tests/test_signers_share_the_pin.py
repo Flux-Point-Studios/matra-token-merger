@@ -1,6 +1,6 @@
 """The co-signer and the surrender API hold each legacy unit to the same
-remaining: each starts from the committed pin through the same loader, so
-treasury units already in quarantine come off the waiver on both hosts.
+remaining: each starts from the committed pin through the same loader, so a
+record of waived units already in quarantine counts the same on both hosts.
 
 Each service starts in a process of its own, configured the way its host is,
 with throwaway keys and fresh ledgers, and reports the limits it loaded."""
@@ -67,4 +67,4 @@ def test_both_signers_load_the_same_remaining_for_every_unit(tmp_path):
 
     assert cosigner == surrender_api == dict(load_redemption_pin(PIN_PATH).remaining)
     assert len(cosigner) == 851
-    assert cosigner[AGENT.unit] == 460_538_701
+    assert cosigner[AGENT.unit] == 444_803_187

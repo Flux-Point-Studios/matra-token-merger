@@ -1,15 +1,16 @@
-"""Mutation test for the pin's record of treasury units already in
-quarantine: the loader both signers use (tools.process_surrender) and the pin
-check and pinning (scripts.pin_redemption).
+"""Mutation test for the pin's record of waived units already in quarantine:
+the loader both signers use (tools.process_surrender) and the pin check and
+pinning (scripts.pin_redemption).
 
 Each mutant changes one piece of the arithmetic or of a check on the record,
 in a copy of one function, and every record probe in
 tests/test_surrendered_entitlement.py and tests/test_pin_redemption.py runs
-against it, with the two pinning probes. A mutant that answers every probe as
-expected is a change nothing notices, and this test names it."""
+against it, with the three pinning probes. A mutant that answers every probe
+as expected is a change nothing notices, and this test names it."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -21,10 +22,13 @@ from tests.mutation import recompiled
 from tests.test_pin_redemption import (
     PIN_PATH,
     RECORD_PROBES as CHECK_PROBES,
-    a_recorded_transaction_that_quarantined_one_unit_fewer as quarantined_one_fewer,
     matches,
     record_outcome,
+    recorded_units_left_the_reserve,
+    recorded_units_still_in_the_reserve,
     repin,
+    sample_record,
+    with_the_record,
 )
 from tests.test_surrendered_entitlement import RECORD_PROBES as LOADER_PROBES, remaining_with
 
@@ -33,6 +37,7 @@ RECORD = (process_surrender, "waived_already_quarantined")
 DRIFT = (pin_redemption, "drift")
 PROBLEMS = (pin_redemption, "already_quarantined_problems")
 SENT = (pin_redemption, "sent_to_quarantine")
+RESERVE = (pin_redemption, "waived_reserve")
 PINNING = (pin_redemption, "main")
 
 # name -> ((module, function), the piece of its source, what the mutant has instead)
@@ -74,6 +79,25 @@ MUTANTS: dict[str, tuple[tuple[ModuleType, str], str, str]] = {
     ),
     "a_refused_record_not_reported": (PROBLEMS, 'return [f"{asset} {unit}: {exc}"]', "return []"),
     "an_unknown_transaction_not_reported": (PROBLEMS, "if answer is None:", "if False:"),
+    "a_unit_with_no_record_checked_as_if_it_had_one": (PROBLEMS, "if not quantity:", "if False:"),
+    "the_waived_reserve_not_checked": (PROBLEMS, 'if held > row["waiver"] - quantity:', "if False:"),
+    "the_waived_reserve_held_to_the_waiver_alone": (
+        PROBLEMS, 'held > row["waiver"] - quantity', 'held > row["waiver"]',
+    ),
+    "the_waived_reserve_allowed_one_unit_more": (
+        PROBLEMS, 'held > row["waiver"] - quantity', 'held > row["waiver"] - quantity + 1',
+    ),
+    "the_record_left_in_the_waived_reserve_refused": (
+        PROBLEMS, 'held > row["waiver"] - quantity', 'held >= row["waiver"] - quantity',
+    ),
+    "the_waived_reserve_held_to_exactly_the_record": (
+        PROBLEMS, 'held > row["waiver"] - quantity', 'held != row["waiver"] - quantity',
+    ),
+    "the_waived_reserves_snapshot_not_checked": (PROBLEMS, 'if at_snapshot != row["waiver"]:', "if False:"),
+    "only_the_first_waived_reserve_read": (
+        RESERVE, 'for entry in reserve["addresses"]', 'for entry in reserve["addresses"][:1]',
+    ),
+    "any_unit_counted_at_the_waived_reserve": (RESERVE, ' if amount["unit"] == unit', ""),
     "a_later_transaction_accepted": (PROBLEMS, "slot > quarantine_slot", "False"),
     "the_quarantine_counts_own_slot_refused": (PROBLEMS, "slot > quarantine_slot", "slot >= quarantine_slot"),
     "fewer_accepted": (PROBLEMS, "sent < quantity", "False"),
@@ -98,7 +122,7 @@ def _outcome(run) -> object:
         return f"crash:{type(exc).__name__}"
 
 
-def _differences(tmp_path: Path, mp: pytest.MonkeyPatch) -> list[str]:
+def _differences(tmp_path: Path) -> list[str]:
     """Every probe whose outcome is not the one it expects."""
     red = []
     for name, (record, changes, expected) in LOADER_PROBES.items():
@@ -109,19 +133,27 @@ def _differences(tmp_path: Path, mp: pytest.MonkeyPatch) -> list[str]:
     for p in CHECK_PROBES:
         if not matches(got := record_outcome(p), p.expected):
             red.append(f"check {p.name}: {p.expected} -> {got}")
-    (tmp_path / "unchanged").mkdir()
-    if _outcome(lambda: repin(tmp_path / "unchanged", mp)) != PIN_PATH.read_text():
+    if _pinned(tmp_path / "unchanged") != PIN_PATH.read_text():
         red.append("pinning an unchanged chain no longer writes the committed pin")
-    (tmp_path / "fewer").mkdir()
-    refused = _outcome(lambda: repin(tmp_path / "fewer", mp, quarantined_one_fewer))
-    if not (refused.startswith("refused: ") and "fewer than the" in refused):
-        red.append(f"pinning a record the chain does not bear out: {refused:.200}")
+    borne_out = _pinned(tmp_path / "borne_out", recorded_units_left_the_reserve, sample_record())
+    if borne_out != with_the_record(json.loads(PIN_PATH.read_text())):
+        red.append(f"pinning a record the chain bears out: {borne_out:.200}")
+    refused = _pinned(tmp_path / "still_held", recorded_units_still_in_the_reserve, sample_record())
+    if not (refused.startswith("refused: ") and "still holds" in refused):
+        red.append(f"pinning a record the waived reserve still holds: {refused:.200}")
     return red
 
 
-def test_the_unmutated_code_answers_every_probe(tmp_path):
+def _pinned(tmp_path: Path, *args) -> object:
+    """``repin`` under a monkeypatch of its own, so the records one probe
+    pins with never reach the next; a mutant's patch stays in place."""
+    tmp_path.mkdir()
     with pytest.MonkeyPatch.context() as mp:
-        assert _differences(tmp_path, mp) == []
+        return _outcome(lambda: repin(tmp_path, mp, *args))
+
+
+def test_the_unmutated_code_answers_every_probe(tmp_path):
+    assert _differences(tmp_path) == []
 
 
 @pytest.mark.parametrize("name", MUTANTS)
@@ -135,4 +167,4 @@ def test_every_mutant_turns_a_probe_red(tmp_path, name):
         for bound in (process_surrender, pin_redemption):
             if getattr(bound, function, None) is real:
                 mp.setattr(bound, function, mutant)
-        assert _differences(tmp_path, mp), f"{name} turns no probe red"
+        assert _differences(tmp_path), f"{name} turns no probe red"
