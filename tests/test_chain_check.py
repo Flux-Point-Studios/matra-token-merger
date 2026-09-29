@@ -33,7 +33,7 @@ from responses.matchers import query_param_matcher
 from services.chain_check import confirm_on_chain
 from services.cosign_policy import Approval, CosignRejected
 from tests.cbor_encode import encode
-from tests.cosign_cases import MAINNET, PIN, FakeChain, blake
+from tests.cosign_cases import MAINNET, PIN, FakeChain, blake, http_error
 from tools.api_clients import BlockfrostClient, BlockfrostUnavailable
 from tools.config import AGENT, BLOCKFROST_BASE_URLS, FLUX_PASS, T1_ADAM_PASS, T2_ADAM_PASS
 
@@ -126,17 +126,11 @@ def a_unit_the_chain_view_does_not_know(confirm):
     confirm(_approval({T1_UNIT: 1}), MAINNET, chain, NOTHING_RECORDED)
 
 
-def _forbidden() -> requests.HTTPError:
-    response = requests.Response()
-    response.status_code = 403
-    return requests.HTTPError("403 Forbidden", response=response)
-
-
 FAILURES = {
     "connection_refused": requests.ConnectionError("connection refused"),
     "timeout": requests.Timeout("read timed out"),
     "retries_exhausted": BlockfrostUnavailable("Exhausted retries"),
-    "forbidden": _forbidden(),
+    "forbidden": http_error(403, "Forbidden"),
 }
 
 

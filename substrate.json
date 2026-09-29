@@ -39,7 +39,7 @@
     {
       "id": "surrender-api",
       "name": "Surrender API",
-      "desc": "Wallet-driven surrender flow: CIP-30 partial-sign, a co-signer that signs only after the claimant has and whose witness the primary verifies before it signs, re-verifying every transaction against a strict surrender policy (golden-tested on every mainnet surrender), its own chain view (every input unspent on chain, no unit above its pinned supply, no pinned NFT minted or burned since the pin) and a per-signer ledger that refuses approvals that can never land and holds each legacy unit to its pinned remaining supply and the pool to a 24-hour cap, a pin check against the chain tip that reads supply and NFT history as the signers do, pool-tip tracking and UTxO defrag tooling.",
+      "desc": "Wallet-driven surrender flow: CIP-30 partial-sign, a co-signer that signs only after the claimant has and whose witness the primary verifies before it signs, re-verifying every transaction against a strict surrender policy (golden-tested on every mainnet surrender), its own chain view (every input unspent on chain, no unit above its pinned supply, no pinned NFT minted or burned since the pin) and a per-signer ledger that refuses approvals that can never land and holds each legacy unit to its pinned remaining supply and the pool to a 24-hour cap, a pin check against the chain tip that reads supply and NFT history as the signers do and confirms any record of waived units in quarantine against the transaction that sent them and the waived reserve, pool-tip tracking and UTxO defrag tooling.",
       "kind": "api",
       "paths": [
         "services/surrender_api.py",

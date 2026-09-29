@@ -32,6 +32,7 @@ from services.cosign_policy import (
     Simple,
     Tag,
     decode,
+    parse_output,
     split_tx,
 )
 from tests.cbor_encode import encode
@@ -141,6 +142,19 @@ def golden_scenario(tx_hash: str) -> Scenario:
 
 def _elements(value: Any) -> list:
     return list(value.value) if isinstance(value, Tag) else list(value)
+
+
+def sent_to_quarantine(tx_hash: str) -> dict[str, int]:
+    """Unit -> quantity golden transaction ``tx_hash`` sends to the quarantine address."""
+    sent: dict[str, int] = {}
+    for raw in decode(split_tx(golden_scenario(tx_hash).tx)[0])[1]:
+        out = parse_output(raw)
+        if out.address == QUARANTINE:
+            for policy, names in out.assets.items():
+                for name, quantity in names.items():
+                    unit = (policy + name).hex()
+                    sent[unit] = sent.get(unit, 0) + quantity
+    return sent
 
 
 class Draft:
@@ -303,11 +317,15 @@ def another_pool_utxo(d: Draft) -> None:
     _add_coin(d.body[1][CONTINUATION], 1)
 
 
-def not_found() -> requests.HTTPError:
-    """What BlockfrostClient raises for a 404."""
+def http_error(status: int, reason: str) -> requests.HTTPError:
+    """What BlockfrostClient raises for an HTTP error it does not retry."""
     response = requests.Response()
-    response.status_code = 404
-    return requests.HTTPError("404 Client Error: Not Found", response=response)
+    response.status_code = status
+    return requests.HTTPError(f"{status} {reason}", response=response)
+
+
+def not_found() -> requests.HTTPError:
+    return http_error(404, "Client Error: Not Found")
 
 
 # The transaction a unit's history names unless a test adds to it: a mint in
