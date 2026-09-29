@@ -78,9 +78,9 @@ from pycardano import (
     Value,
     VerificationKey,
 )
-from pycardano.exception import InvalidTransactionException
+from pycardano.exception import InvalidTransactionException, UTxOSelectionException
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId, VerificationKeyHash
-from pycardano.utils import min_lovelace_post_alonzo
+from pycardano.utils import max_tx_fee, min_lovelace_post_alonzo
 from pycardano.plutus import CostModels, RedeemerKey, RedeemerMap, RedeemerTag
 from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenList, default_encoder
 
@@ -197,6 +197,21 @@ DEFRAG_MAX_TOKENS_PER_OUTPUT: int = int(
 # Dedicated collateral UTxO — bounds max collateral loss on phase-2 failure.
 # Format: "txhash#index" (e.g. "abc123...#0"). If unset, pycardano auto-selects.
 COLLATERAL_UTXO: str = os.environ.get("COLLATERAL_UTXO", "")
+
+# The pure-ADA UTxO a wallet sets aside as collateral for script transactions
+# (the 5 ADA that Lace, Eternl and other CIP-30 wallets create). The builder
+# takes a pure-ADA UTxO of at least this much as a surrender's collateral.
+COLLATERAL_TARGET_LOVELACE = 5_000_000
+# pycardano, left to choose collateral itself, offers only UTxOs holding more
+# ADA than this (TransactionBuilder._set_collateral_return).
+_BUILDER_COLLATERAL_FLOOR = 2_000_000
+# The builder errors a claimant's wallet can cause by holding too little ADA
+# or no usable collateral (pycardano's own messages).
+_FUNDING_ERROR_PREFIXES = (
+    "Minimum collateral amount",
+    "Minimum lovelace amount for collateral return",
+    "The input UTxOs cannot cover",
+)
 
 # Co-signer service (Server B) — required for dual-admin validator.
 # The co-signer holds the second admin key on separate infrastructure.
@@ -943,6 +958,10 @@ async def build_surrender(req: BuildSurrenderRequest):
         logger.error("Refused to build a surrender for %s: chain view unavailable: %s",
                      req.user_address[:24], e)
         raise HTTPException(503, _CHAIN_UNAVAILABLE)
+    except WalletShortfall as e:
+        state.tip_mgr.release_build(build_token)
+        logger.info("Wallet %s cannot fund its surrender: %s", req.user_address[:24], e.detail)
+        raise HTTPException(422, e.detail)
     except Exception:
         state.tip_mgr.release_build(build_token)
         logger.exception("Failed to build/preflight surrender tx for %s", req.user_address[:24])
@@ -1295,12 +1314,18 @@ def _canonicalize_via_builder(
 
 
 
-def _select_ada_only_collateral(
-    context: BlockFrostChainContext, user_addr: Address,
-    min_lovelace: int = 5_000_000,
-) -> "UTxO | None":
-    """Return the smallest ADA-only UTxO at ``user_addr`` with at least
-    ``min_lovelace`` (a valid Plutus collateral — token-bearing UTxOs are
+def _address_utxos(context: BlockFrostChainContext, address: Address) -> list[UTxO] | None:
+    """The UTxOs the chain lists at ``address``, or None when it cannot."""
+    try:
+        return context.utxos(address)
+    except Exception as e:
+        logger.warning("UTxO scan failed for %s: %s", str(address)[:24], e)
+        return None
+
+
+def _select_ada_only_collateral(utxos: list[UTxO]) -> UTxO | None:
+    """Return the smallest of ``utxos`` that is ADA-only with at least
+    COLLATERAL_TARGET_LOVELACE (a valid Plutus collateral — token-bearing UTxOs are
     rejected by the ledger with CollateralContainsNonADA), excluding any
     collateral ref already reserved for an in-flight chained surrender.
 
@@ -1310,51 +1335,149 @@ def _select_ada_only_collateral(
     would re-pick — and double-spend — the same collateral. None if the wallet
     has no eligible pure-ADA UTxO (a token-only wallet must supply collateral via
     its CIP-30 wallet on the real frontend)."""
-    try:
-        utxos = context.utxos(user_addr)
-    except Exception as e:
-        logger.warning("Collateral scan failed for %s: %s", str(user_addr)[:24], e)
-        return None
-    candidates = [
-        u for u in utxos
-        if (u.output.amount.multi_asset is None
-            or len(u.output.amount.multi_asset) == 0)
-        and u.output.amount.coin >= min_lovelace
-        and f"{u.input.transaction_id}#{u.input.index}" not in state.reserved_collateral
-    ]
-    if not candidates:
-        return None
+    candidates = _ada_only_utxos(
+        utxos, exclude_reserved=True, min_lovelace=COLLATERAL_TARGET_LOVELACE,
+    )
     # Smallest qualifying UTxO — keeps large ADA free for fees/outputs and
     # bounds the collateral at risk.
-    return min(candidates, key=lambda u: u.output.amount.coin)
+    return min(candidates, key=lambda u: u.output.amount.coin, default=None)
 
 
-def _confirmed_ada_only_utxos(
-    context: BlockFrostChainContext, user_addr: Address,
-    exclude_reserved: bool = False, min_lovelace: int = 2_000_000,
-) -> list["UTxO"]:
-    """Confirmed pure-ADA UTxOs at ``user_addr`` (>= ``min_lovelace``), optionally
-    excluding refs reserved as in-flight collateral. Offered as
-    ``potential_inputs`` on the chained path so pycardano has fee/change ADA
-    beyond the forced pending change without re-selecting the already-spent
-    NFT UTxO from Blockfrost's lagged view."""
+def _ada_only_utxos(
+    utxos: list[UTxO], exclude_reserved: bool = False, min_lovelace: int = 2_000_000,
+) -> list[UTxO]:
+    """The pure-ADA UTxOs among ``utxos`` (>= ``min_lovelace``), optionally
+    excluding refs reserved as in-flight collateral."""
+    return [
+        u for u in utxos
+        if not u.output.amount.multi_asset
+        and u.output.amount.coin >= min_lovelace
+        and not (exclude_reserved
+                 and f"{u.input.transaction_id}#{u.input.index}" in state.reserved_collateral)
+    ]
+
+
+class WalletShortfall(Exception):
+    """The claimant's wallet cannot fund the surrender; ``detail`` is the
+    422 answer telling it what to add."""
+
+    def __init__(self, detail: dict[str, Any]):
+        super().__init__(detail["message"])
+        self.detail = detail
+
+
+def _tenths_of_ada(lovelace: int, round_up: bool) -> str:
+    tenths = -(-lovelace // 100_000) if round_up else lovelace // 100_000
+    return f"{tenths // 10}.{tenths % 10}"
+
+
+def _shortfall_detail(code: str, needed: int, available: int) -> dict[str, Any]:
+    """The 422 detail for ``code`` (wallet_needs_ada or
+    wallet_needs_collateral). The message rounds what the wallet needs up
+    and what it has down, so it never understates the difference."""
+    if code == "wallet_needs_ada":
+        message = (
+            f"Your wallet needs about {_tenths_of_ada(needed, round_up=True)} ADA to redeem "
+            f"(it has {_tenths_of_ada(available, round_up=False)} ADA). Add ADA, then set "
+            "collateral in your wallet (Lace: Settings → Collateral), and try again."
+        )
+    else:
+        message = (
+            f"Your wallet has enough ADA, but it needs {_tenths_of_ada(needed, round_up=True)} ADA "
+            "set aside as collateral to redeem. Set collateral in your wallet "
+            "(Lace: Settings → Collateral), and try again."
+        )
+    return {"code": code, "needed_lovelace": needed, "available_lovelace": available, "message": message}
+
+
+def _posts_collateral(builder: TransactionBuilder, claimant: Address, utxos: list[UTxO]) -> bool:
+    """Whether ``utxos`` pass the builder's collateral check: they hold its
+    collateral amount (collateral_percent of the largest possible fee), and
+    whatever they return to ``claimant`` holds its minimum ADA."""
+    context = builder.context
+    required = (
+        max_tx_fee(context, builder._ref_script_size())
+        * context.protocol_param.collateral_percent // 100
+    )
+    posted = sum((u.output.amount for u in utxos), Value())
+    if posted.coin < required:
+        return False
+    returned = posted - required
+    return not builder._should_add_collateral_return(returned) or returned.coin >= (
+        min_lovelace_post_alonzo(TransactionOutput(claimant, returned), context)
+    )
+
+
+def _wallet_shortfall(
+    builder: TransactionBuilder,
+    claimant: Address,
+    spendable: list[UTxO],
+    address_utxos: list[UTxO] | None,
+    pool_value: Value,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Whether the build must fail for want of the claimant's ADA or
+    collateral, and the 422 detail to answer a failed build with: before it,
+    or on the builder's own balance or collateral error. The detail is None
+    when the wallet is not what fails it.
+
+    Judged on the builder as it stands before building. It holds every
+    output; ``spendable`` is what it may spend of the claimant's and
+    ``address_utxos`` what the chain lists at the claimant's address (None if
+    it could not). Only a claimant holding every unit it surrenders is judged:
+    a missing token is not a question of ADA.
+
+    The build must fail when the wallet's ADA is below what the surrender
+    costs it at the least (the builder's fee estimate for the transaction so
+    far, the ADA of the outputs it pays for, and the minimum ADA of the change
+    carrying the tokens it keeps from UTxOs it must spend), or no set of the
+    UTxOs the builder may offer as collateral passes its collateral check.
+    What the wallet is told to hold adds a COLLATERAL_TARGET_LOVELACE pure-ADA
+    UTxO set aside as collateral; a wallet holding that much but no pure-ADA
+    UTxO that large needs collateral, not ADA."""
+    if address_utxos is None:
+        return False, None
+    context = builder.context
+    held = sum((u.output.amount for u in spendable), Value())
+    paid = sum((out.amount for out in builder.outputs), Value()) - pool_value
+    surrendered = paid.multi_asset.filter(lambda policy, name, quantity: quantity > 0)
+    if not surrendered <= held.multi_asset:
+        return False, None
+
+    must_spend = [u for u in builder.inputs if u.output.address == claimant]
+    for policy, names in surrendered.items():
+        for name in names:
+            holders = [u for u in spendable if u.output.amount.multi_asset.get(policy, {}).get(name)]
+            if len(holders) == 1 and holders[0] not in must_spend:
+                must_spend.append(holders[0])
+    kept = sum((u.output.amount for u in must_spend), Value()).multi_asset - surrendered
+    kept = kept.filter(lambda policy, name, quantity: quantity > 0)
+    change = min_lovelace_post_alonzo(TransactionOutput(claimant, Value(0, kept)), context) if kept else 0
     try:
-        utxos = context.utxos(user_addr)
-    except Exception as e:
-        logger.warning("ADA-only scan failed for %s: %s", str(user_addr)[:24], e)
-        return []
-    out = []
-    for u in utxos:
-        if u.output.amount.multi_asset and len(u.output.amount.multi_asset) > 0:
-            continue
-        if u.output.amount.coin < min_lovelace:
-            continue
-        if exclude_reserved and (
-            f"{u.input.transaction_id}#{u.input.index}" in state.reserved_collateral
-        ):
-            continue
-        out.append(u)
-    return out
+        fee = builder._estimate_fee()
+    except InvalidTransactionException:
+        return False, None  # already too large: the build answers that itself
+    cost = paid.coin + change + fee
+    needed = cost + COLLATERAL_TARGET_LOVELACE
+
+    if builder.collaterals:
+        collateral = _posts_collateral(builder, claimant, list(builder.collaterals))
+    else:
+        # Left to choose, the builder adds the UTxOs it may offer until they
+        # pass. Each brings more ADA than the minimum it adds to what they
+        # return, so it succeeds exactly when all of them together pass.
+        offered = {u.input: u for u in [*spendable, *address_utxos]}.values()
+        collateral = _posts_collateral(
+            builder, claimant, [u for u in offered if u.output.amount.coin > _BUILDER_COLLATERAL_FLOOR],
+        )
+
+    must_fail = held.coin < cost or not collateral
+    if held.coin < needed:
+        return must_fail, _shortfall_detail("wallet_needs_ada", needed, held.coin)
+    # A collateral UTxO held back for another build is not the wallet's doing.
+    largest = max((u.output.amount.coin for u in _ada_only_utxos(address_utxos, min_lovelace=0)), default=0)
+    if not builder.collaterals and largest < COLLATERAL_TARGET_LOVELACE:
+        return must_fail, _shortfall_detail("wallet_needs_collateral", COLLATERAL_TARGET_LOVELACE, largest)
+    return must_fail, None
 
 
 def _build_surrender_tx(
@@ -1453,6 +1576,8 @@ def _build_surrender_tx(
     # IMPORTANT: never add admin_addr as an input source — admin is only a
     # script-spend co-signer; the pool UTxO is added explicitly above.
     user_addr = Address.from_primitive(user_address)
+    address_utxos = _address_utxos(context, user_addr)
+    reserved_ref = None
 
     # Collateral selection FIRST (so it can be excluded from the regular
     # fee/change candidates below). Plutus collateral MUST be ADA-only — if
@@ -1479,13 +1604,13 @@ def _build_surrender_tx(
         # Pick a small ADA-only UTxO from the user's address for collateral,
         # excluding any reserved for an in-flight chained chunk, then reserve it
         # so the next chained chunk does not re-pick (and double-spend) it.
-        ada_only = _select_ada_only_collateral(context, user_addr)
+        ada_only = _select_ada_only_collateral(address_utxos or [])
         if ada_only is not None:
             builder.collaterals.append(ada_only)
-            col_ref = f"{ada_only.input.transaction_id}#{ada_only.input.index}"
-            state.reserved_collateral.add(col_ref)
+            reserved_ref = f"{ada_only.input.transaction_id}#{ada_only.input.index}"
+            state.reserved_collateral.add(reserved_ref)
             logger.info("Collateral set: %s (%d lovelace, ADA-only); reserved=%d",
-                        col_ref[:18], ada_only.output.amount.coin,
+                        reserved_ref[:18], ada_only.output.amount.coin,
                         len(state.reserved_collateral))
         else:
             logger.warning("No unreserved ADA-only collateral UTxO at user "
@@ -1520,10 +1645,13 @@ def _build_surrender_tx(
         # view, so we offer pure-ADA candidates only (never the reserved
         # collateral, selected above). Without this the selector can deplete and
         # the chained build fails with InputUTxODepleted.
-        for c in _confirmed_ada_only_utxos(context, user_addr, exclude_reserved=True):
+        for c in _ada_only_utxos(address_utxos or [], exclude_reserved=True):
             builder.potential_inputs.append(c)
+        spendable = [u for u in builder.inputs if u.output.address == user_addr]
+        spendable += builder.potential_inputs
     else:
         builder.add_input_address(user_addr)
+        spendable = address_utxos or []
 
     # Output 1: cMATRA to user
     user_multi = MultiAsset()
@@ -1572,8 +1700,22 @@ def _build_surrender_tx(
     if COSIGNER_URL:
         builder.required_signers.append(state.cosigner_pkh)
 
-    # Build the transaction — change goes to user.
-    tx_body = builder.build(change_address=user_addr)
+    # Refuse a wallet that cannot fund the surrender before building it, and
+    # answer the builder's own balance and collateral errors the same way.
+    # Nothing is handed out then, so its collateral is free for the next build.
+    must_fail, shortfall = _wallet_shortfall(builder, user_addr, spendable, address_utxos, pool_value)
+    if must_fail and shortfall is not None:
+        state.reserved_collateral.discard(reserved_ref)
+        raise WalletShortfall(shortfall)
+    try:
+        # Build the transaction — change goes to user.
+        tx_body = builder.build(change_address=user_addr)
+    except (UTxOSelectionException, InvalidTransactionException, ValueError) as exc:
+        funding = isinstance(exc, UTxOSelectionException) or str(exc).startswith(_FUNDING_ERROR_PREFIXES)
+        if shortfall is None or not funding:
+            raise
+        state.reserved_collateral.discard(reserved_ref)
+        raise WalletShortfall(shortfall) from exc
 
     # Canonicalize inputs to the ledger's sort order and re-index the SPEND
     # redeemer. Strategy selected by CANON_STRATEGY (0.18.0 re-validation):

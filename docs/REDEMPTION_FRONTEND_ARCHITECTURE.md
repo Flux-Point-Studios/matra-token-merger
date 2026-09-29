@@ -324,6 +324,7 @@ Builds the Plutus transaction server-side. This is the critical security boundar
 | 403 | Redemption window closed (deadline passed) |
 | 409 | Pool UTxO contention (retry) |
 | 422 | User wallet does not hold the claimed assets |
+| 422 | `detail.code` `wallet_needs_ada` or `wallet_needs_collateral`: the wallet cannot fund the surrender; `detail` carries `needed_lovelace`, `available_lovelace` and a `message` to show |
 | 429 | Rate limited |
 | 500 | Transaction build failure |
 | 503 | Pool exhausted -- insufficient cMATRA remaining |
@@ -753,6 +754,7 @@ NEXT_PUBLIC_SURRENDER_DEADLINE_ISO=2025-09-01T00:00:00Z
 | Pool exhausted | API returns 503 | "The redemption pool has been fully claimed. No more cMATRA is available." |
 | Window closed | API returns 403 | "The redemption window has closed. Surrenders are no longer accepted." |
 | UTxO contention | API returns 409 | "Another transaction is in progress. Please wait a moment and try again." |
+| Too little ADA, or no collateral | Build API returns 422 with `detail.code` `wallet_needs_ada` / `wallet_needs_collateral` | `detail.message`, e.g. "Your wallet needs about 9.6 ADA to redeem (it has 4.3 ADA). Add ADA, then set collateral in your wallet (Lace: Settings → Collateral), and try again." |
 | User rejects sign | CIP-30 signTx throws | "Transaction signing was cancelled. No assets were sent." |
 | Tx submission fails | Submit API returns error | "Transaction failed to submit. Your assets are safe. Error: {detail}" |
 | Wallet disconnects mid-flow | accountChange/networkChange event | Reset state, prompt reconnection |
