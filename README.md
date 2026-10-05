@@ -12,7 +12,7 @@ parameterized one-shot mint policy.
 | SE_BRAWLERS | `25c75bbf…dde7eafc` | NFT (242 ct) |
 | BRAWL_PASS_ETD | `d3a197c4…529a02d2` | NFT (44 ct) |
 | T1_ADAM_PASS | `b4689145…a20332f` | NFT (43 ct) |
-| T2_ADAM_PASS | `06a64965…fb1164b9` | NFT (25 ct) |
+| T2_ADAM_PASS | `06a64965…fb1164b9` | NFT (95 ct) |
 
 | Out (new) | Decimals | Supply cap | On-chain symbol |
 |---|---|---|---|
@@ -28,15 +28,15 @@ cMATRA stays Cardano-side in v0. The Materios partner-chain `MATRA` token
 
 | Component | Status |
 |---|---|
-| `claim_validator` (surrender pool, Aiken Plutus V3) | Audited, preprod-rehearsed |
-| `flux_mint_policy` (one-shot mint, Aiken Plutus V3) | Audited, unit-tested, **mainnet mint pending** |
+| `claim_validator` (surrender pool, Aiken Plutus V3) | Live on mainnet; internally audited, continuously red-teamed |
+| `flux_mint_policy` (one-shot mint, Aiken Plutus V3) | Live on mainnet; internally audited, unit-tested |
 | `services/surrender_api.py` (Server A) | Containerized, preprod-tested |
 | `services/cosigner_api.py` (Server B) | Containerized, preprod-tested |
 | `tools/*` (off-chain pipeline) | ~160 pytest tests passing |
 | Preprod rehearsal | 9 / 9 stages + 8 / 8 red-team tests pass |
-| Mainnet deploy | Pending: admin keys, deadline, deploy ceremony |
+| Mainnet deploy | Done: redemption window opened May 28, 2026, closes November 28, 2026 |
 
-**Pre-mainnet readiness:** see [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md).
+**Mainnet runbook:** see [`audit_pack/MAINNET_RUNBOOK.md`](audit_pack/MAINNET_RUNBOOK.md).
 
 ---
 
@@ -291,7 +291,7 @@ is a compile-time parameter of the validator and is baked into the
 script hash — it cannot be changed without redeploying at a new
 address.
 
-Full audit at [`audit_pack/2026-04-14/smart_contract_audit.html`](audit_pack/2026-04-14/smart_contract_audit.html).
+Internal audit report at [`audit_pack/2026-04-14/smart_contract_audit.html`](audit_pack/2026-04-14/smart_contract_audit.html). FPS does not use point-in-time third-party audits; the contracts and services are continuously attacked by AI red-team agents instead.
 
 ---
 
