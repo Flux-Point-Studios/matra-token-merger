@@ -35,7 +35,7 @@ from services.cosign_policy import Approval, CosignRejected
 from tests.cbor_encode import encode
 from tests.cosign_cases import MAINNET, PIN, FakeChain, blake, http_error
 from tools.api_clients import BlockfrostClient, BlockfrostUnavailable
-from tools.config import AGENT, BLOCKFROST_BASE_URLS, FLUX_PASS, T1_ADAM_PASS, T2_ADAM_PASS
+from tools.config import AGENT, chain_api_base_url, FLUX_PASS, T1_ADAM_PASS, T2_ADAM_PASS
 
 ROOT = Path(__file__).resolve().parent.parent
 T1_UNIT = next(u for u in sorted(PIN.nft_units) if u.startswith(T1_ADAM_PASS.policy_id))
@@ -220,7 +220,7 @@ T1_PASS, T2_PASS, FLUX_PASS_UNIT = (
     next(u for u in RECORDED["history"] if u.startswith(nft.policy_id))
     for nft in (T1_ADAM_PASS, T2_ADAM_PASS, FLUX_PASS)
 )
-BASE = BLOCKFROST_BASE_URLS["mainnet"]
+BASE = chain_api_base_url("mainnet")
 # Inputs of a surrender this signer recorded, so no input needs a chain answer.
 RECORDED_INPUTS = ((RECORDED_ID, 0), (RECORDED_ID, 1))
 

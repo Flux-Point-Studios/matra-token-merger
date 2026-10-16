@@ -14,8 +14,8 @@ from typing import Any
 import requests
 
 from tools.config import (
-    BLOCKFROST_BASE_URL,
-    BLOCKFROST_PROJECT_ID,
+    chain_api_base_url,
+    chain_api_key,
     KOIOS_API_KEY,
     KOIOS_BASE_URL,
     TAP_TOOLS_API_KEY,
@@ -92,10 +92,10 @@ class BlockfrostClient:
     def __init__(
         self,
         project_id: str | None = None,
-        base_url: str = BLOCKFROST_BASE_URL,
+        base_url: str | None = None,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.project_id = project_id or BLOCKFROST_PROJECT_ID
+        self.base_url = (base_url or chain_api_base_url()).rstrip("/")
+        self.project_id = project_id or chain_api_key()
         self._headers = {"project_id": self.project_id}
 
     # -- low-level -------------------------------------------------------
@@ -146,7 +146,7 @@ class BlockfrostClient:
 
     def get_asset_addresses(self, unit: str) -> list[dict[str, Any]]:
         """Return all addresses holding *unit* (auto-paged)."""
-        return self._get_all_pages(f"/assets/{unit}/addresses")
+        return sorted(self._get_all_pages(f"/assets/{unit}/addresses"), key=lambda row: row["address"])
 
     # -- transactions ----------------------------------------------------
 
@@ -205,7 +205,7 @@ class BlockfrostClient:
 
     def get_policy_assets(self, policy_id: str) -> list[dict[str, Any]]:
         """Return all assets minted under *policy_id* (auto-paged)."""
-        return self._get_all_pages(f"/assets/policy/{policy_id}")
+        return sorted(self._get_all_pages(f"/assets/policy/{policy_id}"), key=lambda row: row["asset"])
 
     def get_asset_history(self, unit: str) -> list[dict[str, Any]]:
         """Every mint and burn of *unit*, oldest first (auto-paged)."""

@@ -78,6 +78,8 @@ from pycardano.hash import (
     VerificationKeyHash,
 )
 
+from tools.config import chain_api_base_url, chain_api_key
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -352,7 +354,10 @@ def distribute_test_tokens(
         batch = distributions[batch_start : batch_start + batch_size]
 
         # Fresh context each batch to avoid stale UTxO cache
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
 
         builder = TransactionBuilder(ctx)
         builder.add_input_address(admin.address)
@@ -638,7 +643,10 @@ def build_pool_utxos(
         batch_num = batch_start // batch_size
 
         # Fresh context each batch to avoid stale UTxO cache
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
 
         builder = TransactionBuilder(ctx)
         builder.add_input_address(admin.address)
@@ -736,7 +744,10 @@ def process_surrender(
         )
 
     # Fresh context for this transaction
-    ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+    ctx = BlockFrostChainContext(
+        project_id=blockfrost_project_id,
+        base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+    )
 
     asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
     script_addr = Address.from_primitive(script_address)
@@ -841,7 +852,10 @@ def red_team_wrong_signer(
         True if the attack was correctly rejected (expected behavior).
     """
     try:
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
 
         asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
         script_addr = Address.from_primitive(script_address)
@@ -916,7 +930,10 @@ def red_team_post_deadline(
         True if the attack was correctly rejected (expected behavior).
     """
     try:
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
 
         asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
         script_addr = Address.from_primitive(script_address)
@@ -996,7 +1013,10 @@ def red_team_no_admin_sig(
         True if the attack was correctly rejected (expected behavior).
     """
     try:
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
 
         asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
         script_addr = Address.from_primitive(script_address)
@@ -1076,7 +1096,10 @@ def admin_withdraw(
 
     for i, ref in enumerate(pool_utxo_refs):
         # Fresh context each iteration to pick up UTxO changes
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
 
         builder = TransactionBuilder(ctx)
 
@@ -1159,9 +1182,9 @@ def run_preprod_rehearsal(
     data_dir = work_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Let blockfrost-python auto-detect network from project_id prefix
     context = BlockFrostChainContext(
         project_id=blockfrost_project_id,
+        base_url=chain_api_base_url("preprod").removesuffix("/v0"),
     )
 
     state_file = work_dir / "rehearsal_state.json"
@@ -1365,7 +1388,10 @@ def run_preprod_rehearsal(
         logger.info("=" * 60)
 
         # Fresh context after previous stages
-        context = BlockFrostChainContext(project_id=blockfrost_project_id)
+        context = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
         current_slot = context.last_block_slot
         timelock_slot = current_slot + timelock_offset_slots
         logger.info(
@@ -1379,7 +1405,10 @@ def run_preprod_rehearsal(
         for _attempt in range(12):
             time.sleep(15)
             try:
-                _check_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+                _check_ctx = BlockFrostChainContext(
+                    project_id=blockfrost_project_id,
+                    base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+                )
                 _utxos = _check_ctx.utxos(admin.address)
                 _has_cmatra = any(
                     cmatra_policy_id in (utxo.output.amount.multi_asset or {})
@@ -1835,14 +1864,10 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     # Get Blockfrost preprod project ID
-    bf_id = os.environ.get(
-        "BLOCKFROST_PROJECT_ID_PREPROD",
-        os.environ.get("BLOCKFROST_PROJECT_ID", ""),
-    )
-    if not bf_id or not bf_id.startswith("preprod"):
-        logger.error("Need a preprod Blockfrost project ID.")
-        logger.error("Set BLOCKFROST_PROJECT_ID_PREPROD in env.local")
-        logger.error("Get one free at: https://blockfrost.io/")
+    bf_id = chain_api_key("preprod")
+    if not bf_id:
+        logger.error("Need a preprod chain API key.")
+        logger.error("Set CHAIN_API_KEY_FILE for preprod")
         sys.exit(1)
 
     run_preprod_rehearsal(

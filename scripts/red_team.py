@@ -66,6 +66,8 @@ from pycardano import (
 )
 from pycardano.hash import ScriptHash, TransactionId
 
+from tools.config import chain_api_base_url, chain_api_key
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -648,6 +650,7 @@ def run_red_team(
 
     context = BlockFrostChainContext(
         project_id=blockfrost_project_id,
+        base_url=chain_api_base_url("preprod").removesuffix("/v0"),
     )
 
     # Load validator from blueprint
@@ -678,15 +681,9 @@ def run_red_team(
     from scripts.preprod_harness import Wallet
     from tools.api_clients import BlockfrostClient as BfClient
 
-    _BF_BASE_URLS = {
-        "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
-        "preview": "https://cardano-preview.blockfrost.io/api/v0",
-    }
-    bf_network = "preprod" if blockfrost_project_id.startswith("preprod") else \
-                 "preview" if blockfrost_project_id.startswith("preview") else "mainnet"
     bf_client = BfClient(
         project_id=blockfrost_project_id,
-        base_url=_BF_BASE_URLS.get(bf_network, "https://cardano-mainnet.blockfrost.io/api/v0"),
+        base_url=chain_api_base_url("preprod"),
     )
 
     pool_utxos = _query_live_pool_utxos(
@@ -838,7 +835,10 @@ def run_red_team(
     if not deadline_passed:
         logger.info("-" * 40)
         logger.info("TEST 9: Both admins ProcessSurrender (happy path)")
-        ctx9 = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx9 = BlockFrostChainContext(
+            project_id=blockfrost_project_id,
+            base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+        )
         r = test_admin_process_surrender_happy(
             ctx9, admin_1, admin_2, pos_ref_1,
             script_address, script, cmatra_policy_id, cmatra_asset_hex,
@@ -868,7 +868,10 @@ def run_red_team(
         if not fresh_pool:
             logger.warning("No pool UTxOs remaining for test 10.")
         else:
-            ctx10 = BlockFrostChainContext(project_id=blockfrost_project_id)
+            ctx10 = BlockFrostChainContext(
+                project_id=blockfrost_project_id,
+                base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+            )
             r = test_admin_withdraw_happy(
                 ctx10, admin_1, admin_2, fresh_pool[0],
                 script_address, script, cmatra_policy_id, cmatra_asset_hex,
@@ -940,12 +943,9 @@ def main(argv: list[str] | None = None) -> None:
         project_root / "onchain" / "claim_validator" / "plutus.json"
     )
 
-    bf_id = os.environ.get(
-        "BLOCKFROST_PROJECT_ID_PREPROD",
-        os.environ.get("BLOCKFROST_PROJECT_ID", ""),
-    )
-    if not bf_id or not bf_id.startswith("preprod"):
-        logger.error("Need a preprod Blockfrost project ID.")
+    bf_id = chain_api_key("preprod")
+    if not bf_id:
+        logger.error("Need a preprod chain API key.")
         sys.exit(1)
 
     run_red_team(work_dir, bf_id, blueprint_path)

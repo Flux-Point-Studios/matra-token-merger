@@ -59,7 +59,7 @@ from services.cosign_policy import (
 )
 from services.redemption_ledger import RedemptionLedger
 from tools.api_clients import BlockfrostClient
-from tools.config import BLOCKFROST_BASE_URLS
+from tools.config import chain_api_base_url, chain_api_key
 
 logger = logging.getLogger("cosigner_api")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -119,7 +119,10 @@ def startup() -> None:
     primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
     ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")))
     cfg = load_config(os.environ, [primary, vk.hash().payload])
-    chain = BlockfrostClient(_need("BLOCKFROST_PROJECT_ID"), BLOCKFROST_BASE_URLS[cfg.network])
+    api_key = chain_api_key(cfg.network)
+    if not api_key:
+        raise ValueError("CHAIN_API_KEY_FILE or BLOCKFROST_PROJECT_ID must be set")
+    chain = BlockfrostClient(api_key, chain_api_base_url(cfg.network))
 
     state.sk = sk
     state.vkey_hex = vk.payload.hex()

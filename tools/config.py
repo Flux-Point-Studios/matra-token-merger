@@ -7,10 +7,15 @@ Supports network switching via NETWORK env var (mainnet / preprod).
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import stat
+from urllib.parse import urlsplit
+
 from dataclasses import dataclass
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
@@ -39,10 +44,28 @@ assert NETWORK in ("mainnet", "preprod", "preview"), (
 # API keys (network-aware)
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_PROJECT_ID: str = os.environ.get(
-    f"BLOCKFROST_PROJECT_ID_{NETWORK.upper()}",
-    os.environ.get("BLOCKFROST_PROJECT_ID", ""),
-)
+def chain_api_key(network: str | None = None) -> str:
+    network = network or os.environ.get("NETWORK", NETWORK).lower()
+    key_file = os.environ.get("CHAIN_API_KEY_FILE")
+    if key_file is not None:
+        with Path(key_file).expanduser().open() as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)
+                    or info.st_uid != os.geteuid()):
+                raise ValueError("CHAIN_API_KEY_FILE must be owned by the service user with mode 0400 or 0600")
+            key = stream.read().strip()
+        if not key or any(c.isspace() for c in key):
+            raise ValueError("CHAIN_API_KEY_FILE must contain one nonempty key")
+    else:
+        key = os.environ.get(
+            f"BLOCKFROST_PROJECT_ID_{network.upper()}",
+            os.environ.get("BLOCKFROST_PROJECT_ID", ""),
+        )
+    if network == "preprod" and "CHAIN_API_BASE_URL" not in os.environ and key and not key.startswith("preprod"):
+        raise ValueError("Need a preprod Blockfrost key when CHAIN_API_BASE_URL is unset")
+    return key
+
+
 TAP_TOOLS_API_KEY: str = os.environ.get("TAP_TOOLS_API_KEY", "")
 
 # ---------------------------------------------------------------------------
@@ -180,12 +203,44 @@ CLAIM_DEADLINE_POSIX_MS: int = int(os.environ.get("CLAIM_DEADLINE_POSIX_MS", "0"
 # API base URLs (network-aware)
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_BASE_URLS = {
-    "mainnet": "https://cardano-mainnet.blockfrost.io/api/v0",
-    "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
-    "preview": "https://cardano-preview.blockfrost.io/api/v0",
-}
-BLOCKFROST_BASE_URL: str = BLOCKFROST_BASE_URLS[NETWORK]
+def chain_api_base_url(network: str | None = None) -> str:
+    network = network or os.environ.get("NETWORK", NETWORK).lower()
+    if network not in ("mainnet", "preprod", "preview"):
+        raise ValueError("Unsupported chain network")
+    override = os.environ.get("CHAIN_API_BASE_URL")
+    if override is None:
+        return f"https://cardano-{network}.blockfrost.io/api/v0"
+    base = override.rstrip("/")
+    parsed = urlsplit(base)
+    if (parsed.scheme not in ("https", "http") or not parsed.hostname
+            or parsed.path != "/api/v0" or parsed.query or parsed.fragment
+            or parsed.username is not None or parsed.password is not None):
+        raise ValueError("Chain API base must be an HTTP(S) URL ending in /api/v0 without credentials, query or fragment")
+    try:
+        loopback = ipaddress.ip_address(parsed.hostname).is_loopback
+    except ValueError:
+        loopback = parsed.hostname == "localhost"
+    if parsed.scheme == "http" and not loopback:
+        raise ValueError("Chain API HTTP is allowed only on loopback")
+    hosts = {f"cardano-{n}.blockfrost.io": n for n in ("mainnet", "preprod", "preview")}
+    hosts.update({f"{n}.insight.iagon.com": n for n in ("mainnet", "preprod")})
+    if parsed.hostname in hosts:
+        if hosts[parsed.hostname] != network:
+            raise ValueError("Chain API host does not match requested network")
+    else:
+        try:
+            response = requests.get(base + "/genesis", headers={"project_id": chain_api_key(network)},
+                                    timeout=15, allow_redirects=False)
+            if response.status_code != 200:
+                raise ValueError("Chain API network attestation failed")
+            magic = response.json()["network_magic"]
+        except (requests.RequestException, KeyError, TypeError, ValueError):
+            raise ValueError("Chain API network attestation failed") from None
+        if type(magic) is not int or magic != {"mainnet": 764824073, "preprod": 1, "preview": 2}[network]:
+            raise ValueError("Chain API genesis does not match requested network")
+    return base
+
+
 TAPTOOLS_BASE_URL: str = "https://openapi.taptools.io/api/v1"
 
 _KOIOS_BASE_URLS = {

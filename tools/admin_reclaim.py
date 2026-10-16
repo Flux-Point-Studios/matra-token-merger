@@ -274,7 +274,7 @@ def build_reclaim_tx_body(
 
     context = BlockFrostChainContext(
         project_id=bf.project_id,
-        base_url=bf.base_url,
+        base_url=bf.base_url.rstrip("/").removesuffix("/v0"),
     )
     builder = TransactionBuilder(context)
 

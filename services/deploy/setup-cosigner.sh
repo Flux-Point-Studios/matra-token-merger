@@ -106,8 +106,9 @@ echo "============================================"
 # record): COSIGNER_PRIMARY_ADMIN_PKH, SURRENDER_SCRIPT_ADDRESS,
 # QUARANTINE_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
 # SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY, and
-# BLOCKFROST_PROJECT_ID (this host's own view of the chain). A setting already
-# in .env.cosigner is kept as it is, so on a host an earlier version set up
+# BLOCKFROST_PROJECT_ID (this host's own view of the chain; Blockfrost default).
+# Insight provider settings belong to the separately authorized cutover.
+# A setting already in .env.cosigner is kept as it is, so on an existing host
 # only the settings it lacks are added and its API secret stays.
 ENV_FILE="$SCRIPT_DIR/.env.cosigner"
 EXPORTED=(COSIGNER_PRIMARY_ADMIN_PKH SURRENDER_SCRIPT_ADDRESS QUARANTINE_ADDRESS

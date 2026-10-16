@@ -53,7 +53,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from dotenv import load_dotenv
-load_dotenv(_PROJECT_ROOT / "env.local", override=True)
+load_dotenv(_PROJECT_ROOT / "env.local", override=False)
 os.environ.setdefault("NETWORK", "mainnet")
 
 from pycardano import (

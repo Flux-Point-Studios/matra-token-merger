@@ -180,7 +180,7 @@ def build_pool_tx_cbor(
     # Set up chain context
     context = BlockFrostChainContext(
         project_id=bf.project_id,
-        base_url=bf.base_url,
+        base_url=bf.base_url.rstrip("/").removesuffix("/v0"),
     )
 
     sk = PaymentSigningKey.load(funding_skey_path)
@@ -249,7 +249,7 @@ def preflight_evaluate_tx(
 
     context = BlockFrostChainContext(
         project_id=bf.project_id,
-        base_url=bf.base_url,
+        base_url=bf.base_url.rstrip("/").removesuffix("/v0"),
     )
 
     try:
