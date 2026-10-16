@@ -55,7 +55,7 @@ from pycardano import (
 )
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
 
-from tools.api_clients import BlockfrostClient
+from tools.api_clients import BlockfrostClient, chain_context
 from tools.cardano_utils import estimate_min_ada
 from tools.config import (
     ALL_MERGE_ASSETS,
@@ -494,8 +494,6 @@ def build_surrender_tx(
     ValueError
         If the pool UTxO does not contain enough cMATRA.
     """
-    from pycardano import BlockFrostChainContext
-
     if cmatra_amount > pool_utxo["cmatra_amount"]:
         raise ValueError(
             f"Pool UTxO has {pool_utxo['cmatra_amount']} cMATRA base units "
@@ -503,11 +501,7 @@ def build_surrender_tx(
             f"reduce the batch size."
         )
 
-    # Chain context
-    context = BlockFrostChainContext(
-        project_id=bf.project_id,
-        base_url=bf.base_url,
-    )
+    context = chain_context(bf)
 
     # Admin signing key and PKH
     sk = PaymentSigningKey.load(admin_skey_path)
@@ -851,11 +845,7 @@ def process_surrender_batch(
 
         # Preflight evaluation
         if preflight:
-            from pycardano import BlockFrostChainContext
-            ctx = BlockFrostChainContext(
-                project_id=bf.project_id,
-                base_url=bf.base_url,
-            )
+            ctx = chain_context(bf)
             try:
                 cbor_bytes = (
                     tx_cbor if isinstance(tx_cbor, bytes)

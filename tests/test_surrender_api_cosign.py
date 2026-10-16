@@ -47,6 +47,7 @@ from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger, create_ledger
 from tests.cosign_cases import PIN, FakeChain, ledger_refusing_writes, not_found
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
+from tools.api_clients import BlockfrostUnavailable, EvaluationFailed
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
 from tools.process_surrender import load_rate_table, load_redemption_pin, surrendered_entitlement
 
@@ -186,6 +187,10 @@ class World:
         # Each unit's mint history, and the slot of each transaction in it.
         self.history = FakeChain()
         self.submitted: list[bytes] = []
+        # Every transaction the chain API was asked to evaluate, and what it
+        # raises instead of answering, when set.
+        self.evaluated: list[bytes] = []
+        self.evaluation_failure: Exception | None = None
         # Rewrites the co-signer's JSON answer on its way back, when set.
         self.edit_answer: Callable[[dict], dict] | None = None
 
@@ -221,8 +226,9 @@ class World:
             "COSIGNER_PRIMARY_ADMIN_PKH": self.admin_sk.to_verification_key().hash().payload.hex(),
             "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
             "COSIGNER_SKEY_PATH": str(tmp_path / "throwaway.skey"),
-            "BLOCKFROST_PROJECT_ID": "preprod-test-project",
+            "CHAIN_API_KEY_FILE": str(tmp_path / "chain-api.key"),
         }
+        Path(env["CHAIN_API_KEY_FILE"]).write_text("preprod-test-key\n")
         self.cosigner_sk.save(env["COSIGNER_SKEY_PATH"])
         self.ledger = env["COSIGNER_LEDGER_PATH"]
         create_ledger(self.ledger)
@@ -264,8 +270,11 @@ class World:
                 return getattr(world.admin_sk, name)
 
         class _BF:
-            project_id = "x"
-            base_url = "https://cardano-preprod.blockfrost.io/api/v0"
+            def evaluate_tx(self, tx_cbor):
+                world.evaluated.append(tx_cbor)
+                if world.evaluation_failure is not None:
+                    raise world.evaluation_failure
+                return {"spend:0": {"memory": 60_000, "steps": 19_500_000}}
 
             def get_tx_cbor(self, tx_hash):
                 if tx_hash not in world.chain:
@@ -317,7 +326,7 @@ class World:
         m.setattr(api, "COSIGNER_URL", "http://cosigner.test")
         m.setattr(api, "COSIGNER_SECRET", SECRET)
         m.setattr(api, "COLLATERAL_UTXO", "")
-        m.setattr(api, "BlockFrostChainContext", lambda **kw: ctx)
+        m.setattr(api, "chain_context", lambda client: ctx)
         m.setattr(api.httpx, "post", post)
         m.setattr(api.time, "time", lambda: NOW + SLOT_OFFSET_S[NETWORK])
         m.setattr(api.state, "script_cbor_hex", _SCRIPT_HEX)
@@ -757,6 +766,26 @@ def test_cosigner_checks_the_history_itself_if_the_primary_skips_its_check(world
     assert "Refused to co-sign: minted_after_pin" in caplog.text
     assert world.cosigned_rows() == 0
     assert world.submitted == []
+
+
+def test_the_build_the_wallet_gets_is_the_one_its_chain_api_evaluated(world):
+    built = world.build_route(1_000)
+    assert world.evaluated == [bytes.fromhex(built.tx_cbor_hex)]
+
+
+@pytest.mark.parametrize("failure", [
+    EvaluationFailed('{"result": {"EvaluationFailure": {}}}'),
+    BlockfrostUnavailable("https://preprod.insight.iagon.com/api/v0/utils/txs/evaluate: busy"),
+], ids=["script-failure", "busy"])
+def test_a_build_its_chain_api_does_not_evaluate_is_refused(world, failure):
+    world.evaluation_failure = failure
+    with pytest.raises(HTTPException) as err:
+        world.build_route(1_000)
+    assert err.value.status_code == 422
+    assert err.value.detail == "Transaction preflight failed. Please retry."
+    assert world.signed_by_admin == []
+    world.evaluation_failure = None
+    world.build_route(1_000)  # the pool tip was released
 
 
 def test_an_unreachable_chain_view_stops_the_build_before_signing(world):

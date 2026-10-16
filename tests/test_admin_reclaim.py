@@ -243,11 +243,9 @@ class TestBuildReclaimTxBody:
                 return stub
 
         mocker.patch("tools.admin_reclaim.TransactionBuilder", _StubBuilder)
-        mocker.patch("tools.admin_reclaim.BlockFrostChainContext")
+        mocker.patch("tools.admin_reclaim.chain_context")
 
         bf = mocker.MagicMock()
-        bf.project_id = "p"
-        bf.base_url = "u"
 
         build_reclaim_tx_body(
             bf=bf,

@@ -43,7 +43,7 @@ from pycardano import (
 from pycardano.hash import ScriptHash as PycScriptHash, TransactionId
 from pycardano import AssetName
 
-from tools.api_clients import BlockfrostClient
+from tools.api_clients import BlockfrostClient, chain_context
 from tools.cardano_utils import (
     decode_claim_datum,
     encode_claim_datum,
@@ -190,13 +190,9 @@ def build_claim_tx(
     flux_asset_hex: str,
 ) -> bytes:
     """Build and sign a claim transaction spending all valid claim UTxOs."""
-    from pycardano import BlockFrostChainContext
     import cbor2
 
-    context = BlockFrostChainContext(
-        project_id=bf.project_id,
-        base_url=bf.base_url,
-    )
+    context = chain_context(bf)
 
     sk = PaymentSigningKey.load(skey_path)
     vk = PaymentVerificationKey.from_signing_key(sk)
@@ -392,8 +388,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Preflight evaluation
     if args.preflight:
-        from pycardano import BlockFrostChainContext as _BFC
-        _ctx = _BFC(project_id=bf.project_id, base_url=bf.base_url)
+        _ctx = chain_context(bf)
         try:
             cbor_bytes = tx_cbor if isinstance(tx_cbor, bytes) else bytes.fromhex(tx_cbor)
             eval_result = _ctx.evaluate_tx(cbor_bytes)

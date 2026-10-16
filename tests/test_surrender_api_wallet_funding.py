@@ -95,7 +95,7 @@ def _wallet(world: World, monkeypatch, *values: Value) -> list[UTxO]:
         UTxO(TransactionInput(TransactionId(bytes.fromhex(body)), i), out)
         for i, out in enumerate(TransactionBody.from_cbor(world.chain[body]).outputs)
     ]
-    monkeypatch.setattr(api, "BlockFrostChainContext", lambda **kw: _MainnetParams(utxos))
+    monkeypatch.setattr(api, "chain_context", lambda client: _MainnetParams(utxos))
     return utxos
 
 
@@ -341,7 +341,7 @@ def test_a_wallet_the_chain_cannot_list_gets_the_answer_it_got_before(world, mon
         def utxos(self, address):
             raise RuntimeError("Blockfrost 500")
 
-    monkeypatch.setattr(api, "BlockFrostChainContext", lambda **kw: Unlisted([]))
+    monkeypatch.setattr(api, "chain_context", lambda client: Unlisted([]))
     refusal = _refusal(world, 1_000)
     assert refusal.status_code == 422
     assert refusal.detail == "Transaction preflight failed. Please retry."

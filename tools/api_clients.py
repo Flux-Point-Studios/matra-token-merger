@@ -1,25 +1,29 @@
 """
-Thin wrappers around Blockfrost and TapTools HTTP APIs.
+Thin wrappers around the chain API (Blockfrost-compatible: Iagon Insight by
+default) and the TapTools and Koios HTTP APIs.
 
-All functions return raw JSON-decoded dicts/lists.  Retry logic with
-exponential back-off handles 429 / 5xx responses transparently.
+All functions return raw JSON-decoded dicts/lists.  Retry logic handles
+429 / 5xx responses transparently.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
 
 import requests
+from pycardano import BlockFrostChainContext
 
 from tools.config import (
-    BLOCKFROST_BASE_URL,
-    BLOCKFROST_PROJECT_ID,
     KOIOS_API_KEY,
     KOIOS_BASE_URL,
+    NETWORK,
     TAP_TOOLS_API_KEY,
     TAPTOOLS_BASE_URL,
+    chain_api_base_url,
+    chain_api_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,8 +37,22 @@ _BACKOFF_BASE = 1.5  # seconds
 
 
 class BlockfrostUnavailable(RuntimeError):
-    """Every retry got a transient error (429 or 5xx), or a list endpoint
-    answered with something other than a list."""
+    """Every retry got a transient error (429 or 5xx), the API asked for a
+    longer wait than the retries allow, or a list endpoint answered with
+    something other than a list."""
+
+
+class EvaluationFailed(RuntimeError):
+    """The chain API did not give execution units for every redeemer."""
+
+
+def _retry_after(resp: requests.Response) -> float | None:
+    """The wait in seconds a response's Retry-After names, or None."""
+    try:
+        wait = float(resp.headers["Retry-After"])
+    except (KeyError, ValueError):
+        return None
+    return wait if wait >= 0 else None
 
 
 def _request_with_retry(
@@ -43,9 +61,16 @@ def _request_with_retry(
     headers: dict[str, str],
     params: dict[str, Any] | None = None,
     json_body: Any | None = None,
+    data: str | None = None,
     max_retries: int = _MAX_RETRIES,
 ) -> Any:
-    """Issue an HTTP request with exponential back-off on transient errors."""
+    """Issue an HTTP request, retrying transient errors after the wait the
+    API names in Retry-After, or else after an exponential back-off. The
+    waits together stay within the back-off schedule's own total: an API
+    asking for longer (a spent daily credit allowance asks until midnight
+    UTC) is given up on at once."""
+    budget = sum(_BACKOFF_BASE ** attempt for attempt in range(max_retries))
+    waited = 0.0
     for attempt in range(max_retries + 1):
         try:
             resp = requests.request(
@@ -54,48 +79,59 @@ def _request_with_retry(
                 headers=headers,
                 params=params,
                 json=json_body,
+                data=data,
                 timeout=60,
             )
-            if resp.status_code == 200:
-                return resp.json()
-            if resp.status_code in (429, 500, 502, 503, 504):
-                wait = _BACKOFF_BASE ** attempt
-                logger.warning(
-                    "HTTP %s from %s – retry %d/%d in %.1fs",
-                    resp.status_code,
-                    url,
-                    attempt + 1,
-                    max_retries,
-                    wait,
-                )
-                time.sleep(wait)
-                continue
-            # Non-retryable error
-            resp.raise_for_status()
         except requests.exceptions.ConnectionError as exc:
-            if attempt < max_retries:
-                wait = _BACKOFF_BASE ** attempt
-                logger.warning("Connection error %s – retry in %.1fs", exc, wait)
-                time.sleep(wait)
-            else:
+            if attempt == max_retries:
                 raise
+            wait = _BACKOFF_BASE ** attempt
+            logger.warning("Connection error %s – retry in %.1fs", exc, wait)
+            time.sleep(wait)
+            waited += wait
+            continue
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code not in (429, 500, 502, 503, 504):
+            resp.raise_for_status()
+            raise BlockfrostUnavailable(f"HTTP {resp.status_code} from {url}, not an answer")
+        if attempt == max_retries:
+            break
+        named = _retry_after(resp)
+        wait = _BACKOFF_BASE ** attempt if named is None else named
+        if waited + wait > budget:
+            raise BlockfrostUnavailable(
+                f"HTTP {resp.status_code} from {url} asks for a {wait:g}s wait,"
+                f" past the {budget:g}s retry budget"
+            )
+        logger.warning(
+            "HTTP %s from %s – retry %d/%d in %.1fs",
+            resp.status_code,
+            url,
+            attempt + 1,
+            max_retries,
+            wait,
+        )
+        time.sleep(wait)
+        waited += wait
     raise BlockfrostUnavailable(f"Exhausted retries for {url}")
 
 
 # ===================================================================
-# Blockfrost client
+# Chain API client (Blockfrost-compatible)
 # ===================================================================
 
 class BlockfrostClient:
-    """Minimal Blockfrost REST client with pagination support."""
+    """Minimal client for a Blockfrost-compatible REST API, with pagination
+    support. Without arguments it uses the configured chain API and key."""
 
     def __init__(
         self,
         project_id: str | None = None,
-        base_url: str = BLOCKFROST_BASE_URL,
+        base_url: str | None = None,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.project_id = project_id or BLOCKFROST_PROJECT_ID
+        self.base_url = (base_url or chain_api_base_url(NETWORK)).rstrip("/")
+        self.project_id = project_id or chain_api_key()
         self._headers = {"project_id": self.project_id}
 
     # -- low-level -------------------------------------------------------
@@ -156,6 +192,17 @@ class BlockfrostClient:
     def get_tx(self, tx_hash: str) -> dict[str, Any]:
         return self._get(f"/txs/{tx_hash}")
 
+    def tx_in_block(self, tx_hash: str) -> bool:
+        """True once the transaction is in a block, False while the API does
+        not know it (404). Any other failure raises."""
+        try:
+            self.get_tx(tx_hash)
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                return False
+            raise
+        return True
+
     def get_tx_cbor(self, tx_hash: str) -> bytes:
         """The transaction exactly as it sits on chain (body, witnesses, …)."""
         return bytes.fromhex(self._get(f"/txs/{tx_hash}/cbor")["cbor"])
@@ -182,6 +229,29 @@ class BlockfrostClient:
                 f"tx submit failed [{resp.status_code}]: {resp.text[:1000]}"
             )
         return resp.json()
+
+    def evaluate_tx(self, tx_cbor: bytes) -> dict[str, dict[str, int]]:
+        """Run a transaction's scripts against the ledger without submitting
+        it: execution units per redeemer, as {"spend:0": {"memory": ...,
+        "steps": ...}}. Insight evaluates one transaction at a time per
+        account and answers a concurrent one 429 or 503, which is retried.
+        Raises :class:`EvaluationFailed` unless the answer gives units for at
+        least one redeemer and integer memory and steps for each it lists;
+        the callers evaluate only transactions that run a script."""
+        answer = _request_with_retry(
+            "POST",
+            f"{self.base_url}/utils/txs/evaluate",
+            {**self._headers, "Content-Type": "application/cbor"},
+            data=tx_cbor.hex(),
+        )
+        result = answer.get("result") if isinstance(answer, dict) else None
+        units = result.get("EvaluationResult") if isinstance(result, dict) else None
+        if not isinstance(units, dict) or not units or not all(
+            isinstance(unit, dict) and type(unit.get("memory")) is int and type(unit.get("steps")) is int
+            for unit in units.values()
+        ):
+            raise EvaluationFailed(json.dumps(answer)[:1000])
+        return units
 
     # -- addresses -------------------------------------------------------
 
@@ -218,6 +288,15 @@ class BlockfrostClient:
 
     def get_epoch_parameters(self, epoch: int) -> dict[str, Any]:
         return self._get(f"/epochs/{epoch}/parameters")
+
+
+def chain_context(client: BlockfrostClient) -> BlockFrostChainContext:
+    """pycardano's chain context on ``client``'s API and key. blockfrost-python
+    appends the API version itself, so it gets the base URL without /v0."""
+    return BlockFrostChainContext(
+        project_id=client.project_id,
+        base_url=client.base_url.removesuffix("/v0"),
+    )
 
 
 # ===================================================================

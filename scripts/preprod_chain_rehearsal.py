@@ -16,13 +16,15 @@ attaches to the PR:
   (3) all chunks land confirmed on preprod
   (4) a depth>cap run exercises the settling-wait (503 POOL_SETTLING) + recovery
   (5) kill+restart the service mid-chain -> cold-start re-seeds from confirmed
-      Blockfrost state (no poisoned tip)
+      chain state (no poisoned tip)
 
 PREREQUISITES (operator-supplied — this script cannot fabricate them):
   - A running preprod surrender-api instance (NETWORK=preprod) reachable at
     --api-base, configured with the preprod v2 cMATRA policy/asset + the
     preprod surrender script address + admin_1 skey + a preprod co-signer.
-  - BLOCKFROST_PROJECT_ID_PREPROD (preprod… key).
+  - SURRENDER_API_SECRET, the instance's API secret, in the environment.
+  - CHAIN_API_KEY_FILE naming the file that holds the preprod chain API key
+    (the API is Iagon Insight's unless CHAIN_API_BASE_URL names another).
   - A funded preprod pool UTxO (cMATRA + Void datum) at the script address.
   - A preprod TEST WALLET holding >=16 legacy preprod NFTs so a "Surrender
     All" auto-chunks into >=4 chunks (and >=36 NFTs for the depth>8 run in
@@ -35,13 +37,11 @@ tx body, exactly as a browser wallet's signTx(partialSign=true) would. That
 is the only mainnet difference (mainnet users sign in their own wallet); the
 backend build->advance path under test is byte-identical.
 
-Usage:
-  NETWORK=preprod BLOCKFROST_PROJECT_ID_PREPROD=preprod... \\
-    python scripts/preprod_chain_rehearsal.py \\
+Usage (with SURRENDER_API_SECRET and CHAIN_API_KEY_FILE exported):
+  NETWORK=preprod python scripts/preprod_chain_rehearsal.py \\
       --api-base http://127.0.0.1:8420 \\
-      --api-secret <SURRENDER_API_SECRET> \\
       --test-wallet-skey audit_pack/preprod/keys/wallet_00.skey \\
-      --restart-cmd "sudo systemctl restart surrender-api-preprod" \\
+      --restart-cmd "systemctl --user restart cmatra-preprod-surrender-api" \\
       --depth-cap 8
 """
 
@@ -60,6 +60,7 @@ import cbor2
 import httpx
 from pycardano import (
     Address,
+    Network,
     PaymentSigningKey,
     PaymentVerificationKey,
     Transaction,
@@ -69,6 +70,9 @@ from pycardano import (
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
+from tools.api_clients import BlockfrostClient  # noqa: E402
+from tools.config import FLUX_PASS, chain_api_base_url  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s",
                     datefmt="%H:%M:%S")
 logger = logging.getLogger("preprod_chain_rehearsal")
@@ -77,32 +81,18 @@ VOID_DATUM_HEX = "d87980"
 
 
 # ---------------------------------------------------------------------------
-# Blockfrost preprod helpers (read-only)
+# Chain API reads (preprod)
 # ---------------------------------------------------------------------------
 
-def _bf_get(path: str, project_id: str) -> Any:
-    url = f"https://cardano-preprod.blockfrost.io/api/v0{path}"
-    r = httpx.get(url, headers={"project_id": project_id}, timeout=30.0)
-    return r
-
-
-def tx_confirmed(tx_hash: str, project_id: str) -> bool:
-    """True once the tx is in a block (Blockfrost returns 200 for /txs/<h>)."""
-    r = _bf_get(f"/txs/{tx_hash}", project_id)
-    return r.status_code == 200
-
-
-def output_datum_hex(tx_hash: str, output_index: int, project_id: str) -> str | None:
-    """Read the inline datum of a confirmed tx output. Blockfrost returns
+def output_datum_hex(chain: BlockfrostClient, tx_hash: str, output_index: int) -> str | None:
+    """Read the inline datum of a confirmed tx output. The API returns
     inline_datum as canonical hex ("d87980") or a legacy JSON map; normalize
     both to canonical hex."""
-    r = _bf_get(f"/txs/{tx_hash}/utxos", project_id)
-    if r.status_code != 200:
+    outs = chain.get_tx_utxos(tx_hash).get("outputs", [])
+    out = next((o for o in outs if o.get("output_index") == output_index), None)
+    if out is None:
         return None
-    outs = r.json().get("outputs", [])
-    if output_index >= len(outs):
-        return None
-    inline = outs[output_index].get("inline_datum")
+    inline = out.get("inline_datum")
     if inline is None:
         return None
     if isinstance(inline, str):
@@ -192,12 +182,28 @@ def _chunk_assets(nft_units: list[str], per_chunk: int) -> list[list[dict]]:
 # Rehearsal
 # ---------------------------------------------------------------------------
 
-def run(api: SurrenderApi, project_id: str, user_address: str,
+def _wait_confirmed(chain: BlockfrostClient, tx_hashes: list[str], timeout: int = 600) -> None:
+    deadline = time.time() + timeout
+    pending = set(tx_hashes)
+    while pending and time.time() < deadline:
+        for h in sorted(pending):
+            if chain.tx_in_block(h):
+                logger.info("  confirmed %s", h)
+                pending.discard(h)
+        if pending:
+            time.sleep(15)
+    if pending:
+        raise SystemExit(f"never confirmed within {timeout}s: {sorted(pending)}")
+
+
+def run(api: SurrenderApi, chain: BlockfrostClient, user_address: str,
         skey: PaymentSigningKey, nft_units: list[str], per_chunk: int,
         depth_cap: int, restart_cmd: str | None) -> None:
     evidence: dict[str, Any] = {"chunks": [], "assertions": {}}
 
     chunks = _chunk_assets(nft_units, per_chunk)
+    # The restart check builds and lands a chunk of NFTs the wallet still holds.
+    after_restart = chunks.pop() if restart_cmd else None
     logger.info("=== Assertion 1+2+3: %d chunks chaining off the pending tip ===",
                 len(chunks))
     if len(chunks) < 2:
@@ -226,23 +232,13 @@ def run(api: SurrenderApi, project_id: str, user_address: str,
     # Assertion 3: wait for all chunks to confirm.
     logger.info("=== Assertion 3: waiting for all %d chunks to confirm ===",
                 len(submitted_hashes))
-    deadline = time.time() + 600
-    pending = set(submitted_hashes)
-    while pending and time.time() < deadline:
-        for h in list(pending):
-            if tx_confirmed(h, project_id):
-                logger.info("  confirmed %s", h)
-                pending.discard(h)
-        if pending:
-            time.sleep(15)
-    if pending:
-        raise SystemExit(f"chunks never confirmed within 10min: {pending}")
+    _wait_confirmed(chain, submitted_hashes)
     evidence["assertions"]["3_all_confirmed"] = True
 
     # Assertion 2: every chained pool output[1] carries the Void datum.
     logger.info("=== Assertion 2: every chained pool output carries d87980 ===")
     for h in submitted_hashes:
-        d = output_datum_hex(h, 1, project_id)
+        d = output_datum_hex(chain, h, 1)
         assert d == VOID_DATUM_HEX, f"tx {h} output[1] datum {d!r} != {VOID_DATUM_HEX!r}"
         logger.info("  ✓ %s#1 datum=%s", h[:16], d)
     evidence["assertions"]["2_datum_d87980"] = True
@@ -255,15 +251,15 @@ def run(api: SurrenderApi, project_id: str, user_address: str,
     evidence["assertions"]["4_depth_cap_note"] = (
         f"drive >{depth_cap} chunks to exercise; per-chunk={per_chunk}")
 
-    if restart_cmd:
+    if after_restart is not None:
         logger.info("=== Assertion 5: kill+restart mid-chain -> cold-start re-seed ===")
         cs_before = api.chain_state()
         logger.info("  chainState before restart: %s", cs_before)
         logger.info("  running restart: %s", restart_cmd)
         os.system(restart_cmd)
         time.sleep(8)
-        # First build after restart re-seeds the tip from confirmed Blockfrost.
-        rb = api.build(user_address, chunks[0])
+        # The first build after the restart re-seeds the tip from the confirmed chain.
+        rb = api.build(user_address, after_restart)
         if rb.status_code != 200:
             raise SystemExit(f"post-restart build failed: {rb.status_code} {rb.text[:200]}")
         cs_after = api.chain_state()
@@ -271,14 +267,22 @@ def run(api: SurrenderApi, project_id: str, user_address: str,
         assert cs_after and cs_after["depth"] == 0 and cs_after["status"] == "confirmed", (
             f"cold-start did not re-seed to a confirmed depth-0 tip: {cs_after}")
         logger.info("  ✓ cold-start re-seeded from confirmed state (depth 0)")
+        bd = rb.json()
+        rs = api.submit(wallet_partial_witness(bd["tx_cbor_hex"], skey), bd["tx_hash"])
+        if rs.status_code != 200:
+            raise SystemExit(f"post-restart submit failed [{rs.status_code}]: {rs.text[:300]}")
+        landed = rs.json()["tx_hash"]
+        _wait_confirmed(chain, [landed])
+        evidence["chunks"].append({"index": len(chunks), "tx_hash": landed,
+                                   "pool_utxo_used": bd["pool_utxo_used"]})
         evidence["assertions"]["5_cold_start_reseed"] = {
-            "before": cs_before, "after": cs_after}
+            "before": cs_before, "after": cs_after, "landed": landed}
 
     print("\n===== REHEARSAL EVIDENCE (attach to PR) =====")
     print(json.dumps(evidence, indent=2))
 
 
-def run_depth_cap(api: SurrenderApi, project_id: str, user_address: str,
+def run_depth_cap(api: SurrenderApi, user_address: str,
                   skey: PaymentSigningKey, nft_units: list[str], per_chunk: int,
                   depth_cap: int) -> None:
     """Assertion 4: drive chunks past the depth cap. Expect builds to succeed up
@@ -359,7 +363,6 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--api-base", required=True, help="surrender-api base URL")
-    p.add_argument("--api-secret", required=True, help="SURRENDER_API_SECRET")
     p.add_argument("--test-wallet-skey", required=True,
                    help="Path to the preprod test wallet payment .skey")
     p.add_argument("--per-chunk", type=int, default=4,
@@ -376,27 +379,24 @@ def main(argv: list[str] | None = None) -> None:
                         "past the cap to prove the 503 POOL_SETTLING + recovery.")
     args = p.parse_args(argv)
 
-    project_id = os.environ.get(
-        "BLOCKFROST_PROJECT_ID_PREPROD",
-        os.environ.get("BLOCKFROST_PROJECT_ID", ""))
-    if not project_id.startswith("preprod"):
-        raise SystemExit("Set BLOCKFROST_PROJECT_ID_PREPROD (preprod… key).")
+    api_secret = os.environ.get("SURRENDER_API_SECRET", "")
+    if not api_secret:
+        raise SystemExit("Export SURRENDER_API_SECRET, the surrender-api instance's secret.")
+    chain = BlockfrostClient(base_url=chain_api_base_url("preprod"))
 
     skey = PaymentSigningKey.load(args.test_wallet_skey)
     vk = PaymentVerificationKey.from_signing_key(skey)
-    user_address = str(Address(payment_part=vk.hash(), network=__import__(
-        "pycardano").Network.TESTNET))
+    user_address = str(Address(payment_part=vk.hash(), network=Network.TESTNET))
     logger.info("Test wallet address: %s", user_address)
 
-    # Enumerate the wallet's legacy preprod NFTs (qty=1 assets, excluding ADA).
-    r = _bf_get(f"/addresses/{user_address}", project_id)
-    if r.status_code != 200:
-        raise SystemExit(f"Could not read test wallet from Blockfrost: "
-                         f"{r.status_code} {r.text[:200]}")
-    amounts = r.json().get("amount", [])
-    nft_units = [a["unit"] for a in amounts
-                 if a["unit"] != "lovelace" and int(a["quantity"]) == 1]
-    logger.info("Test wallet holds %d candidate legacy NFTs", len(nft_units))
+    # Enumerate the wallet's FLUX_PASS NFTs (the only asset _chunk_assets names).
+    held: dict[str, int] = {}
+    for utxo in chain.get_address_utxos(user_address):
+        for amount in utxo["amount"]:
+            held[amount["unit"]] = held.get(amount["unit"], 0) + int(amount["quantity"])
+    nft_units = sorted(unit for unit, quantity in held.items()
+                       if unit.startswith(FLUX_PASS.policy_id) and quantity == 1)
+    logger.info("Test wallet holds %d FLUX_PASS NFTs", len(nft_units))
     if len(nft_units) < 2 * args.per_chunk:
         raise SystemExit(
             f"BLOCKER: test wallet holds only {len(nft_units)} qty=1 NFTs; "
@@ -405,15 +405,15 @@ def main(argv: list[str] | None = None) -> None:
             f"scripts/preprod_harness.py first — do NOT fake them.")
 
     if args.max_nfts and args.max_nfts < len(nft_units):
-        nft_units = sorted(nft_units)[:args.max_nfts]
+        nft_units = nft_units[:args.max_nfts]
         logger.info("Capped to %d NFTs for this run", len(nft_units))
 
-    api = SurrenderApi(args.api_base, args.api_secret)
+    api = SurrenderApi(args.api_base, api_secret)
     if args.mode == "depth-cap":
-        run_depth_cap(api, project_id, user_address, skey, nft_units,
+        run_depth_cap(api, user_address, skey, nft_units,
                       args.per_chunk, args.depth_cap)
     else:
-        run(api, project_id, user_address, skey, nft_units, args.per_chunk,
+        run(api, chain, user_address, skey, nft_units, args.per_chunk,
             args.depth_cap, args.restart_cmd)
 
 

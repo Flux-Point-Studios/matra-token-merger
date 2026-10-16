@@ -48,14 +48,15 @@ def test_both_signers_load_the_same_remaining_for_every_unit(tmp_path):
     admin_2.save(str(tmp_path / "admin_2.skey"))
     for ledger in ("surrender.sqlite3", "cosigned.sqlite3"):
         create_ledger(str(tmp_path / ledger))
-    common = {"MAX_CMATRA_PER_DAY": str(25_000_000 * 10**6), "COSIGNER_API_SECRET": "t" * 43}
+    (tmp_path / "chain-api.key").write_text("mainnet-test-key\n")
+    common = {"MAX_CMATRA_PER_DAY": str(25_000_000 * 10**6), "COSIGNER_API_SECRET": "t" * 43,
+              "CHAIN_API_KEY_FILE": str(tmp_path / "chain-api.key")}
 
     cosigner = _limits(COSIGNER, {
         **common,
         "COSIGNER_SKEY_PATH": str(tmp_path / "admin_2.skey"),
         "COSIGNER_PRIMARY_ADMIN_PKH": admin_1.to_verification_key().hash().payload.hex(),
         "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
-        "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
     })
     surrender_api = _limits(SURRENDER_API, {
         **common,

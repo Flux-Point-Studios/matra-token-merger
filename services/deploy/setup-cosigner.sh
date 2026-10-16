@@ -106,13 +106,14 @@ echo "============================================"
 # record): COSIGNER_PRIMARY_ADMIN_PKH, SURRENDER_SCRIPT_ADDRESS,
 # QUARANTINE_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
 # SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY, and
-# BLOCKFROST_PROJECT_ID (this host's own view of the chain). A setting already
+# CHAIN_API_KEY_FILE (the file in ./keys holding this host's own chain API key,
+# as the container sees it: /app/keys/chain-api.key). A setting already
 # in .env.cosigner is kept as it is, so on a host an earlier version set up
 # only the settings it lacks are added and its API secret stays.
 ENV_FILE="$SCRIPT_DIR/.env.cosigner"
 EXPORTED=(COSIGNER_PRIMARY_ADMIN_PKH SURRENDER_SCRIPT_ADDRESS QUARANTINE_ADDRESS
           CMATRA_POLICY_HEX CMATRA_ASSET_HEX SURRENDER_DEADLINE_POSIX_MS
-          MAX_CMATRA_PER_TX MAX_CMATRA_PER_DAY BLOCKFROST_PROJECT_ID)
+          MAX_CMATRA_PER_TX MAX_CMATRA_PER_DAY CHAIN_API_KEY_FILE)
 has_setting() { [[ -f "$ENV_FILE" ]] && grep -q "^$1=" "$ENV_FILE"; }
 
 UNSET=()

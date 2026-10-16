@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -36,13 +37,9 @@ assert NETWORK in ("mainnet", "preprod", "preview"), (
 )
 
 # ---------------------------------------------------------------------------
-# API keys (network-aware)
+# API keys
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_PROJECT_ID: str = os.environ.get(
-    f"BLOCKFROST_PROJECT_ID_{NETWORK.upper()}",
-    os.environ.get("BLOCKFROST_PROJECT_ID", ""),
-)
 TAP_TOOLS_API_KEY: str = os.environ.get("TAP_TOOLS_API_KEY", "")
 
 # ---------------------------------------------------------------------------
@@ -177,15 +174,43 @@ NETWORK_MAGIC_FLAG: str = _NETWORK_MAGIC[NETWORK]
 CLAIM_DEADLINE_POSIX_MS: int = int(os.environ.get("CLAIM_DEADLINE_POSIX_MS", "0"))
 
 # ---------------------------------------------------------------------------
-# API base URLs (network-aware)
+# Chain API: one Blockfrost-compatible REST API per network
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_BASE_URLS = {
-    "mainnet": "https://cardano-mainnet.blockfrost.io/api/v0",
-    "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
-    "preview": "https://cardano-preview.blockfrost.io/api/v0",
+_CHAIN_API_BASE_URLS = {
+    "mainnet": "https://mainnet.insight.iagon.com/api/v0",
+    "preprod": "https://preprod.insight.iagon.com/api/v0",
 }
-BLOCKFROST_BASE_URL: str = BLOCKFROST_BASE_URLS[NETWORK]
+
+
+def chain_api_base_url(network: str) -> str:
+    """CHAIN_API_BASE_URL, or Iagon Insight's Blockfrost-compatible API for
+    *network*: the API's /v0 root, its host naming *network*. pycardano
+    takes the URL for a mainnet API exactly when it contains "mainnet", so
+    it must contain it exactly when *network* is mainnet."""
+    url = os.environ.get("CHAIN_API_BASE_URL", "").strip().rstrip("/")
+    url = url or _CHAIN_API_BASE_URLS.get(network, "")
+    if not url:
+        raise ValueError(f"CHAIN_API_BASE_URL must be set: Insight does not serve {network}")
+    if network not in (urlparse(url).hostname or "") or ("mainnet" in url) != (network == "mainnet"):
+        raise ValueError(f"CHAIN_API_BASE_URL {url} is not an API for {network}")
+    if not url.endswith("/v0"):
+        raise ValueError(f"CHAIN_API_BASE_URL {url} must be the API's /v0 root")
+    return url
+
+
+def chain_api_key() -> str:
+    """The chain API key, read from the file CHAIN_API_KEY_FILE names, so it
+    is never in the environment or on a command line."""
+    path = os.environ.get("CHAIN_API_KEY_FILE", "").strip()
+    if not path:
+        raise ValueError("CHAIN_API_KEY_FILE must name the file holding the chain API key")
+    key = Path(path).expanduser().read_text().strip()
+    if not key:
+        raise ValueError(f"CHAIN_API_KEY_FILE {path} is empty")
+    return key
+
+
 TAPTOOLS_BASE_URL: str = "https://openapi.taptools.io/api/v1"
 
 _KOIOS_BASE_URLS = {

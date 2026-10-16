@@ -24,7 +24,8 @@ Environment (all required unless noted):
   COSIGNER_LEDGER_PATH        SQLite file recording every signed surrender, created
                               once with python -m services.redemption_ledger init
   MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
-  BLOCKFROST_PROJECT_ID       this host's Blockfrost project on NETWORK
+  CHAIN_API_KEY_FILE          file holding this host's chain API key; the API is
+                              CHAIN_API_BASE_URL, Iagon Insight's for NETWORK by default
   plus the policy variables read by services.cosign_policy.load_config
   (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
   CMATRA_ASSET_HEX, SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, and
@@ -59,7 +60,7 @@ from services.cosign_policy import (
 )
 from services.redemption_ledger import RedemptionLedger
 from tools.api_clients import BlockfrostClient
-from tools.config import BLOCKFROST_BASE_URLS
+from tools.config import chain_api_base_url, chain_api_key
 
 logger = logging.getLogger("cosigner_api")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -119,7 +120,7 @@ def startup() -> None:
     primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
     ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")))
     cfg = load_config(os.environ, [primary, vk.hash().payload])
-    chain = BlockfrostClient(_need("BLOCKFROST_PROJECT_ID"), BLOCKFROST_BASE_URLS[cfg.network])
+    chain = BlockfrostClient(chain_api_key(), chain_api_base_url(cfg.network))
 
     state.sk = sk
     state.vkey_hex = vk.payload.hex()

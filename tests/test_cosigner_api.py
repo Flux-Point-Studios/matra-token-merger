@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import sqlite3
+from pathlib import Path
 
 import nacl.signing
 import pytest
@@ -74,8 +75,9 @@ def service(tmp_path, monkeypatch):
         "COSIGNER_PRIMARY_ADMIN_PKH": ADMIN_1.hex(),
         "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
         "MAX_CMATRA_PER_DAY": str(10**18),
-        "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
+        "CHAIN_API_KEY_FILE": str(tmp_path / "chain-api.key"),
     }
+    Path(env["CHAIN_API_KEY_FILE"]).write_text("mainnet-test-key\n")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     create_ledger(env["COSIGNER_LEDGER_PATH"])
@@ -220,7 +222,7 @@ def test_daily_cap_is_persisted_across_restarts(service, monkeypatch):
 
 @pytest.mark.parametrize("missing", ["MAX_CMATRA_PER_DAY", "COSIGNER_PRIMARY_ADMIN_PKH",
                                      "COSIGNER_LEDGER_PATH", "SURRENDER_DEADLINE_POSIX_MS",
-                                     "COSIGNER_SKEY_PATH", "BLOCKFROST_PROJECT_ID"])
+                                     "COSIGNER_SKEY_PATH", "CHAIN_API_KEY_FILE"])
 def test_refuses_to_start_without_its_configuration(service, monkeypatch, missing):
     monkeypatch.delenv(missing)
     with pytest.raises(ValueError, match=missing):
@@ -432,11 +434,25 @@ def test_unwritable_ledger_is_a_coded_refusal(service):
 # ---------------------------------------------------------------------------
 
 
-def test_the_chain_view_is_this_hosts_own_blockfrost_project(service):
+def test_the_chain_view_is_this_hosts_own_chain_api_key(service, monkeypatch):
+    monkeypatch.delenv("CHAIN_API_BASE_URL", raising=False)
     with service.client(0):
         chain = cosigner.state.chain
-    assert chain.project_id == "mainnet-test-project"
+    assert chain.project_id == "mainnet-test-key"
+    assert chain.base_url == "https://mainnet.insight.iagon.com/api/v0"
+
+
+def test_the_chain_view_follows_the_policys_network(service, monkeypatch):
+    """The network the policy is read for, not the one tools.config was
+    imported with, picks the API."""
+    monkeypatch.setenv("CHAIN_API_BASE_URL", "https://cardano-mainnet.blockfrost.io/api/v0")
+    with service.client(0):
+        chain = cosigner.state.chain
     assert chain.base_url == "https://cardano-mainnet.blockfrost.io/api/v0"
+    monkeypatch.setenv("CHAIN_API_BASE_URL", "https://cardano-preprod.blockfrost.io/api/v0")
+    with pytest.raises(ValueError, match="not an API for mainnet"):
+        with service.client(0):
+            pass
 
 
 def test_refuses_a_unit_whose_supply_grew_after_the_pin(service):

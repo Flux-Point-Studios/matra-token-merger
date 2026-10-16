@@ -43,7 +43,6 @@ from pycardano import (
     Address,
     Asset,
     AssetName,
-    BlockFrostChainContext,
     InvalidHereAfter,
     MultiAsset,
     Network,
@@ -58,6 +57,9 @@ from pycardano import (
     Value,
 )
 
+from tools.api_clients import BlockfrostClient, chain_context
+from tools.config import chain_api_base_url
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s",
                     datefmt="%H:%M:%S")
 logger = logging.getLogger("preprod_setup")
@@ -69,17 +71,10 @@ CMATRA_SUPPLY_BASE = 1_000_000_000_000_000       # 1e15, 6 decimals
 NFT_NAME_PREFIX = "464c5558504153535f"            # "FLUXPASS_"
 
 
-def bf_ctx(pid: str) -> BlockFrostChainContext:
-    return BlockFrostChainContext(project_id=pid)
-
-
-def wait_for_tx(pid: str, tx_hash: str, timeout: int = 240) -> bool:
-    import httpx
+def wait_for_tx(chain: BlockfrostClient, tx_hash: str, timeout: int = 240) -> bool:
     deadline = time.time() + timeout
-    url = f"https://cardano-preprod.blockfrost.io/api/v0/txs/{tx_hash}"
     while time.time() < deadline:
-        r = httpx.get(url, headers={"project_id": pid}, timeout=30.0)
-        if r.status_code == 200:
+        if chain.tx_in_block(tx_hash):
             return True
         time.sleep(10)
     return False
@@ -98,11 +93,11 @@ def gen_or_load_key(path: Path) -> tuple[PaymentSigningKey, PaymentVerificationK
     return sk, vk, pkh, addr
 
 
-def fund_addresses(pid: str, funder_skey: Path, targets: list[tuple[Address, int]]) -> str:
+def fund_addresses(chain: BlockfrostClient, funder_skey: Path, targets: list[tuple[Address, int]]) -> str:
     sk = PaymentSigningKey.load(str(funder_skey))
     vk = PaymentVerificationKey.from_signing_key(sk)
     funder_addr = Address(payment_part=vk.hash(), network=Network.TESTNET)
-    ctx = bf_ctx(pid)
+    ctx = chain_context(chain)
     b = TransactionBuilder(ctx)
     b.add_input_address(funder_addr)
     for addr, lovelace in targets:
@@ -114,12 +109,12 @@ def fund_addresses(pid: str, funder_skey: Path, targets: list[tuple[Address, int
     return h
 
 
-def mint_cmatra(pid: str, admin_sk, admin_vk, admin_addr, timelock_slot: int) -> tuple[str, str]:
+def mint_cmatra(chain: BlockfrostClient, admin_sk, admin_vk, admin_addr, timelock_slot: int) -> tuple[str, str]:
     sig = ScriptPubkey(admin_vk.hash())
     policy = ScriptAll([sig, InvalidHereAfter(timelock_slot)])
     policy_id = policy.hash()
     name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
-    ctx = bf_ctx(pid)
+    ctx = chain_context(chain)
     b = TransactionBuilder(ctx)
     b.add_input_address(admin_addr)
     b.validity_start = ctx.last_block_slot
@@ -135,14 +130,14 @@ def mint_cmatra(pid: str, admin_sk, admin_vk, admin_addr, timelock_slot: int) ->
     return policy_id.payload.hex(), h
 
 
-def mint_nfts(pid: str, admin_sk, admin_vk, admin_addr, target_addr: Address,
+def mint_nfts(chain: BlockfrostClient, admin_sk, admin_vk, admin_addr, target_addr: Address,
               count: int) -> tuple[str, list[str], str]:
     """Mint `count` distinct qty=1 NFTs under one native-script policy, all sent
     to target_addr in a single UTxO. Returns (policy_hex, [unit_hex...], tx)."""
     sig = ScriptPubkey(admin_vk.hash())
     policy = ScriptAll([sig])  # admin-signature-only native policy
     policy_id = policy.hash()
-    ctx = bf_ctx(pid)
+    ctx = chain_context(chain)
     b = TransactionBuilder(ctx)
     b.add_input_address(admin_addr)
     asset = Asset()
@@ -199,13 +194,13 @@ def apply_validator_params(blueprint_src: Path, admin_pkh_1: str, admin_pkh_2: s
     return script_hash, str(addr)
 
 
-def build_pool_utxo(pid: str, admin_sk, admin_addr, script_address: str,
+def build_pool_utxo(chain: BlockfrostClient, admin_sk, admin_addr, script_address: str,
                     cmatra_policy_hex: str, pool_base: int) -> str:
     name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
     policy_id = ScriptHash(bytes.fromhex(cmatra_policy_hex))
     script_addr = Address.from_primitive(script_address)
     void_datum = RawPlutusData(cbor2.loads(VOID_DATUM_CBOR))
-    ctx = bf_ctx(pid)
+    ctx = chain_context(chain)
     b = TransactionBuilder(ctx)
     b.add_input_address(admin_addr)
     multi = MultiAsset({policy_id: Asset({name: pool_base})})
@@ -230,8 +225,7 @@ def main() -> None:
     p.add_argument("--deadline-hours", type=int, default=24)
     args = p.parse_args()
 
-    pid = os.environ["BLOCKFROST_PROJECT_ID_PREPROD"]
-    assert pid.startswith("preprod"), "need preprod Blockfrost key"
+    chain = BlockfrostClient(base_url=chain_api_base_url("preprod"))
 
     work = Path(args.work_dir)
     keys = work / "keys"
@@ -254,9 +248,9 @@ def main() -> None:
 
     # Stage 1: fund admin_1 (mint+pool+fees) and wallet_00 (chunk fees+collateral)
     if not state.get("funded"):
-        h = fund_addresses(pid, Path(args.funder_skey),
+        h = fund_addresses(chain, Path(args.funder_skey),
                            [(a1_addr, 600_000_000), (w_addr, 400_000_000)])
-        if not wait_for_tx(pid, h):
+        if not wait_for_tx(chain, h):
             raise SystemExit(f"funding tx {h} did not confirm")
         state["funding_tx"] = h
         state["funded"] = True
@@ -264,18 +258,18 @@ def main() -> None:
 
     # Stage 2: mint cMATRA_TEST
     if not state.get("cmatra_policy"):
-        ctx = bf_ctx(pid)
+        ctx = chain_context(chain)
         timelock = ctx.last_block_slot + args.deadline_hours * 3600 + 7200
-        pol, h = mint_cmatra(pid, a1_sk, a1_vk, a1_addr, timelock)
-        if not wait_for_tx(pid, h):
+        pol, h = mint_cmatra(chain, a1_sk, a1_vk, a1_addr, timelock)
+        if not wait_for_tx(chain, h):
             raise SystemExit("cMATRA mint did not confirm")
         state.update(cmatra_policy=pol, cmatra_mint_tx=h, cmatra_timelock_slot=timelock)
         save()
 
     # Stage 3: mint NFTs into wallet_00
     if not state.get("nft_policy"):
-        pol, units, h = mint_nfts(pid, a1_sk, a1_vk, a1_addr, w_addr, args.nft_count)
-        if not wait_for_tx(pid, h):
+        pol, units, h = mint_nfts(chain, a1_sk, a1_vk, a1_addr, w_addr, args.nft_count)
+        if not wait_for_tx(chain, h):
             raise SystemExit("NFT mint did not confirm")
         state.update(nft_policy=pol, nft_units=units, nft_mint_tx=h)
         save()
@@ -294,9 +288,9 @@ def main() -> None:
 
     # Stage 5: fund the pool UTxO
     if not state.get("pool_tx"):
-        h = build_pool_utxo(pid, a1_sk, a1_addr, state["script_address"],
+        h = build_pool_utxo(chain, a1_sk, a1_addr, state["script_address"],
                             state["cmatra_policy"], args.pool_base)
-        if not wait_for_tx(pid, h):
+        if not wait_for_tx(chain, h):
             raise SystemExit("pool UTxO tx did not confirm")
         state["pool_tx"] = h
         state["pool_base"] = args.pool_base
@@ -322,8 +316,7 @@ def main() -> None:
     quarantine_preprod = "addr_test1wq5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqxrttf6"
     env_lines = [
         "NETWORK=preprod",
-        f"BLOCKFROST_PROJECT_ID_PREPROD={pid}",
-        f"BLOCKFROST_PROJECT_ID={pid}",
+        f"CHAIN_API_KEY_FILE={os.environ['CHAIN_API_KEY_FILE']}",
         f"FLUX_PASS_POLICY={state['nft_policy']}",
         f"SURRENDER_SCRIPT_ADDRESS={state['script_address']}",
         f"CMATRA_POLICY_HEX={state['cmatra_policy']}",

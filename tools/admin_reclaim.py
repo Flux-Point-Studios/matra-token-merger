@@ -54,7 +54,6 @@ from pycardano import (
     Address,
     Asset,
     AssetName,
-    BlockFrostChainContext,
     MultiAsset,
     PlutusV3Script,
     RawPlutusData,
@@ -67,7 +66,7 @@ from pycardano import (
 )
 from pycardano.hash import ScriptHash, TransactionId, VerificationKeyHash
 
-from tools.api_clients import BlockfrostClient
+from tools.api_clients import BlockfrostClient, chain_context
 from tools.cardano_utils import (
     decode_claim_datum,
     encode_claim_datum,
@@ -272,10 +271,7 @@ def build_reclaim_tx_body(
     )
     script = PlutusV3Script(bytes.fromhex(script_cbor_hex))
 
-    context = BlockFrostChainContext(
-        project_id=bf.project_id,
-        base_url=bf.base_url,
-    )
+    context = chain_context(bf)
     builder = TransactionBuilder(context)
 
     for u in unclaimed:
