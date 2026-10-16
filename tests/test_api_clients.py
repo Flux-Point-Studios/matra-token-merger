@@ -58,7 +58,7 @@ class TestBlockfrostClient:
     def test_get_latest_block(self):
         responses.add(
             responses.GET,
-            "https://cardano-mainnet.blockfrost.io/api/v0/blocks/latest",
+            "https://mainnet.insight.iagon.com/api/v0/blocks/latest",
             json={"hash": "abc", "height": 100},
         )
         client = BlockfrostClient(project_id="test")
@@ -69,7 +69,7 @@ class TestBlockfrostClient:
     def test_get_asset_info(self):
         responses.add(
             responses.GET,
-            "https://cardano-mainnet.blockfrost.io/api/v0/assets/unit123",
+            "https://mainnet.insight.iagon.com/api/v0/assets/unit123",
             json={"quantity": "1000000"},
         )
         client = BlockfrostClient(project_id="test")
@@ -80,7 +80,7 @@ class TestBlockfrostClient:
     def test_get_tx_cbor_returns_the_raw_transaction_bytes(self):
         responses.add(
             responses.GET,
-            "https://cardano-mainnet.blockfrost.io/api/v0/txs/ab12/cbor",
+            "https://mainnet.insight.iagon.com/api/v0/txs/ab12/cbor",
             json={"cbor": "84a0a0f5f6"},
         )
         client = BlockfrostClient(project_id="test")
@@ -90,7 +90,7 @@ class TestBlockfrostClient:
     def test_get_tx(self):
         responses.add(
             responses.GET,
-            "https://cardano-mainnet.blockfrost.io/api/v0/txs/ab12",
+            "https://mainnet.insight.iagon.com/api/v0/txs/ab12",
             json={"slot": 42},
         )
         client = BlockfrostClient(project_id="test")
@@ -98,7 +98,7 @@ class TestBlockfrostClient:
 
     @responses.activate
     def test_get_address_transactions_pages_oldest_first(self):
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/addresses/addr1x/transactions"
+        base = "https://mainnet.insight.iagon.com/api/v0/addresses/addr1x/transactions"
         responses.add(responses.GET, base, json=[{"tx_hash": f"t{i}"} for i in range(100)])
         responses.add(responses.GET, base, json=[{"tx_hash": "last"}])
         client = BlockfrostClient(project_id="test")
@@ -108,7 +108,7 @@ class TestBlockfrostClient:
 
     @responses.activate
     def test_get_asset_history_pages_oldest_first(self):
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/u1/history"
+        base = "https://mainnet.insight.iagon.com/api/v0/assets/u1/history"
         responses.add(responses.GET, base, json=[{"tx_hash": f"t{i}"} for i in range(100)])
         responses.add(responses.GET, base, json=[{"tx_hash": "last", "action": "burned"}])
         client = BlockfrostClient(project_id="test")
@@ -120,7 +120,7 @@ class TestBlockfrostClient:
     def test_get_epoch_parameters(self):
         responses.add(
             responses.GET,
-            "https://cardano-mainnet.blockfrost.io/api/v0/epochs/640/parameters",
+            "https://mainnet.insight.iagon.com/api/v0/epochs/640/parameters",
             json={"epoch": 640},
         )
         client = BlockfrostClient(project_id="test")
@@ -128,7 +128,7 @@ class TestBlockfrostClient:
 
     @responses.activate
     def test_pagination(self):
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/u/addresses"
+        base = "https://mainnet.insight.iagon.com/api/v0/assets/u/addresses"
 
         # Page 1: full page
         responses.add(responses.GET, base, json=[{"address": f"a{i}"} for i in range(100)])
@@ -141,7 +141,7 @@ class TestBlockfrostClient:
 
     @responses.activate
     def test_empty_pagination(self):
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/u/addresses"
+        base = "https://mainnet.insight.iagon.com/api/v0/assets/u/addresses"
         responses.add(responses.GET, base, json=[])
 
         client = BlockfrostClient(project_id="test")
@@ -156,7 +156,7 @@ class TestBlockfrostClient:
     def test_a_page_that_is_not_a_list_is_unavailable(self, page, answer):
         """Only an empty or short list ends a listing; any other answer would
         cut it short unnoticed."""
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/u/addresses"
+        base = "https://mainnet.insight.iagon.com/api/v0/assets/u/addresses"
         if page == 2:
             responses.add(responses.GET, base, json=[{"address": f"a{i}"} for i in range(100)])
         responses.add(responses.GET, base, **answer)
@@ -168,7 +168,7 @@ class TestBlockfrostClient:
     def test_project_id_header(self):
         responses.add(
             responses.GET,
-            "https://cardano-mainnet.blockfrost.io/api/v0/blocks/latest",
+            "https://mainnet.insight.iagon.com/api/v0/blocks/latest",
             json={},
         )
         client = BlockfrostClient(project_id="my_project_id")
@@ -215,7 +215,7 @@ class TestTapToolsClient:
 class TestBlockfrostPolicyAssets:
     @responses.activate
     def test_get_policy_assets_single_page(self):
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/policy/abc123"
+        base = "https://mainnet.insight.iagon.com/api/v0/assets/policy/abc123"
         responses.add(responses.GET, base, json=[
             {"asset": "abc123nft1", "quantity": "1"},
             {"asset": "abc123nft2", "quantity": "1"},
@@ -226,7 +226,7 @@ class TestBlockfrostPolicyAssets:
 
     @responses.activate
     def test_get_policy_assets_paginated(self):
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/policy/abc123"
+        base = "https://mainnet.insight.iagon.com/api/v0/assets/policy/abc123"
         responses.add(responses.GET, base, json=[
             {"asset": f"abc123nft{i}", "quantity": "1"} for i in range(100)
         ])
@@ -239,7 +239,7 @@ class TestBlockfrostPolicyAssets:
 
     @responses.activate
     def test_get_policy_assets_empty(self):
-        base = "https://cardano-mainnet.blockfrost.io/api/v0/assets/policy/abc123"
+        base = "https://mainnet.insight.iagon.com/api/v0/assets/policy/abc123"
         responses.add(responses.GET, base, json=[])
         client = BlockfrostClient(project_id="test")
         result = client.get_policy_assets("abc123")

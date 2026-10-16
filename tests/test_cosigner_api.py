@@ -436,7 +436,7 @@ def test_the_chain_view_is_this_hosts_own_blockfrost_project(service):
     with service.client(0):
         chain = cosigner.state.chain
     assert chain.project_id == "mainnet-test-project"
-    assert chain.base_url == "https://cardano-mainnet.blockfrost.io/api/v0"
+    assert chain.base_url == "https://mainnet.insight.iagon.com/api/v0"
 
 
 def test_refuses_a_unit_whose_supply_grew_after_the_pin(service):
@@ -517,3 +517,13 @@ def test_a_surrender_spending_a_spent_pool_output_is_refused(service):
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["code"] == "input_spent"
     assert service.rows() == 0
+
+
+def test_startup_uses_provider_file_and_base(service, monkeypatch, tmp_path):
+    key = tmp_path / "insight.key"
+    key.write_text("opaque-test-key\n")
+    monkeypatch.setenv("CHAIN_API_KEY_FILE", str(key))
+    monkeypatch.setenv("CHAIN_API_BASE_URL", "https://mainnet.provider.example/api/v0")
+    with service.client(0):
+        assert cosigner.state.chain.base_url == "https://mainnet.provider.example/api/v0"
+        assert cosigner.state.chain.project_id == "opaque-test-key"

@@ -506,7 +506,7 @@ def build_surrender_tx(
     # Chain context
     context = BlockFrostChainContext(
         project_id=bf.project_id,
-        base_url=bf.base_url,
+        base_url=bf.base_url.rstrip("/").removesuffix("/v0"),
     )
 
     # Admin signing key and PKH
@@ -854,7 +854,7 @@ def process_surrender_batch(
             from pycardano import BlockFrostChainContext
             ctx = BlockFrostChainContext(
                 project_id=bf.project_id,
-                base_url=bf.base_url,
+                base_url=bf.base_url.rstrip("/").removesuffix("/v0"),
             )
             try:
                 cbor_bytes = (

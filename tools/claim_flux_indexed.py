@@ -195,7 +195,7 @@ def build_claim_tx(
 
     context = BlockFrostChainContext(
         project_id=bf.project_id,
-        base_url=bf.base_url,
+        base_url=bf.base_url.rstrip("/").removesuffix("/v0"),
     )
 
     sk = PaymentSigningKey.load(skey_path)

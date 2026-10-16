@@ -71,6 +71,8 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s",
                     datefmt="%H:%M:%S")
+from tools.config import chain_api_base_url, chain_api_key
+
 logger = logging.getLogger("preprod_chain_rehearsal")
 
 VOID_DATUM_HEX = "d87980"
@@ -81,7 +83,7 @@ VOID_DATUM_HEX = "d87980"
 # ---------------------------------------------------------------------------
 
 def _bf_get(path: str, project_id: str) -> Any:
-    url = f"https://cardano-preprod.blockfrost.io/api/v0{path}"
+    url = f"{chain_api_base_url('preprod')}{path}"
     r = httpx.get(url, headers={"project_id": project_id}, timeout=30.0)
     return r
 
@@ -376,11 +378,9 @@ def main(argv: list[str] | None = None) -> None:
                         "past the cap to prove the 503 POOL_SETTLING + recovery.")
     args = p.parse_args(argv)
 
-    project_id = os.environ.get(
-        "BLOCKFROST_PROJECT_ID_PREPROD",
-        os.environ.get("BLOCKFROST_PROJECT_ID", ""))
-    if not project_id.startswith("preprod"):
-        raise SystemExit("Set BLOCKFROST_PROJECT_ID_PREPROD (preprod… key).")
+    project_id = chain_api_key("preprod")
+    if not project_id:
+        raise SystemExit("Set CHAIN_API_KEY_FILE for preprod.")
 
     skey = PaymentSigningKey.load(args.test_wallet_skey)
     vk = PaymentVerificationKey.from_signing_key(skey)

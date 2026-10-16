@@ -1,0 +1,20 @@
+[Unit]
+Description=cMATRA preprod surrender API
+After=network-online.target cmatra-cosigner-preprod.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/cmatra-preprod/current
+EnvironmentFile=%h/.config/cmatra-preprod/surrender.env
+Environment=NETWORK=preprod
+Environment=CHAIN_API_BASE_URL=https://preprod.insight.iagon.com/api/v0
+Environment=CHAIN_API_KEY_FILE=%h/.secrets/iagon/insights-api-key
+ExecStart=/usr/bin/env %h/.local/share/cmatra-preprod/current/.venv/bin/uvicorn services.surrender_api:app --host 127.0.0.1 --port 8430
+Restart=on-failure
+RestartSec=5
+Nice=10
+UMask=0077
+
+[Install]
+WantedBy=default.target

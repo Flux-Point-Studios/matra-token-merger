@@ -58,8 +58,11 @@ from pycardano import (
     Value,
 )
 
+from tools.config import chain_api_base_url, chain_api_key
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s",
                     datefmt="%H:%M:%S")
+
 logger = logging.getLogger("preprod_setup")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -70,13 +73,16 @@ NFT_NAME_PREFIX = "464c5558504153535f"            # "FLUXPASS_"
 
 
 def bf_ctx(pid: str) -> BlockFrostChainContext:
-    return BlockFrostChainContext(project_id=pid)
+    return BlockFrostChainContext(
+        project_id=pid,
+        base_url=chain_api_base_url("preprod").removesuffix("/v0"),
+    )
 
 
 def wait_for_tx(pid: str, tx_hash: str, timeout: int = 240) -> bool:
     import httpx
     deadline = time.time() + timeout
-    url = f"https://cardano-preprod.blockfrost.io/api/v0/txs/{tx_hash}"
+    url = f"{chain_api_base_url('preprod')}/txs/{tx_hash}"
     while time.time() < deadline:
         r = httpx.get(url, headers={"project_id": pid}, timeout=30.0)
         if r.status_code == 200:
@@ -230,8 +236,9 @@ def main() -> None:
     p.add_argument("--deadline-hours", type=int, default=24)
     args = p.parse_args()
 
-    pid = os.environ["BLOCKFROST_PROJECT_ID_PREPROD"]
-    assert pid.startswith("preprod"), "need preprod Blockfrost key"
+    pid = chain_api_key("preprod")
+    if not pid:
+        raise ValueError("Set CHAIN_API_KEY_FILE for preprod")
 
     work = Path(args.work_dir)
     keys = work / "keys"
@@ -322,8 +329,12 @@ def main() -> None:
     quarantine_preprod = "addr_test1wq5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqxrttf6"
     env_lines = [
         "NETWORK=preprod",
-        f"BLOCKFROST_PROJECT_ID_PREPROD={pid}",
-        f"BLOCKFROST_PROJECT_ID={pid}",
+        f"CHAIN_API_BASE_URL={chain_api_base_url('preprod')}",
+        *(
+            [f"CHAIN_API_KEY_FILE={Path(os.environ['CHAIN_API_KEY_FILE']).expanduser().resolve()}"]
+            if "CHAIN_API_KEY_FILE" in os.environ
+            else [f"BLOCKFROST_PROJECT_ID_PREPROD={pid}", f"BLOCKFROST_PROJECT_ID={pid}"]
+        ),
         f"FLUX_PASS_POLICY={state['nft_policy']}",
         f"SURRENDER_SCRIPT_ADDRESS={state['script_address']}",
         f"CMATRA_POLICY_HEX={state['cmatra_policy']}",

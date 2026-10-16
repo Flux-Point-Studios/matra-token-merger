@@ -39,10 +39,20 @@ assert NETWORK in ("mainnet", "preprod", "preview"), (
 # API keys (network-aware)
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_PROJECT_ID: str = os.environ.get(
-    f"BLOCKFROST_PROJECT_ID_{NETWORK.upper()}",
-    os.environ.get("BLOCKFROST_PROJECT_ID", ""),
-)
+def chain_api_key(network: str | None = None) -> str:
+    key_file = os.environ.get("CHAIN_API_KEY_FILE")
+    if key_file is not None:
+        key = Path(key_file).expanduser().read_text().strip()
+        if not key or any(c.isspace() for c in key):
+            raise ValueError("CHAIN_API_KEY_FILE must contain one nonempty key")
+        return key
+    network = network or os.environ.get("NETWORK", NETWORK).lower()
+    return os.environ.get(
+        f"BLOCKFROST_PROJECT_ID_{network.upper()}",
+        os.environ.get("BLOCKFROST_PROJECT_ID", ""),
+    )
+
+
 TAP_TOOLS_API_KEY: str = os.environ.get("TAP_TOOLS_API_KEY", "")
 
 # ---------------------------------------------------------------------------
@@ -180,12 +190,19 @@ CLAIM_DEADLINE_POSIX_MS: int = int(os.environ.get("CLAIM_DEADLINE_POSIX_MS", "0"
 # API base URLs (network-aware)
 # ---------------------------------------------------------------------------
 
-BLOCKFROST_BASE_URLS = {
-    "mainnet": "https://cardano-mainnet.blockfrost.io/api/v0",
-    "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
-    "preview": "https://cardano-preview.blockfrost.io/api/v0",
-}
-BLOCKFROST_BASE_URL: str = BLOCKFROST_BASE_URLS[NETWORK]
+def chain_api_base_url(network: str | None = None) -> str:
+    network = network or os.environ.get("NETWORK", NETWORK).lower()
+    override = os.environ.get("CHAIN_API_BASE_URL", os.environ.get("BLOCKFROST_BASE_URL"))
+    if override is not None:
+        base = override.rstrip("/")
+        if not base.startswith(("https://", "http://")) or not base.endswith("/api/v0"):
+            raise ValueError("Chain API base must be an HTTP(S) URL ending in /api/v0")
+        return base
+    if network not in ("mainnet", "preprod"):
+        raise ValueError("Set CHAIN_API_BASE_URL explicitly for unsupported Insight networks")
+    return f"https://{network}.insight.iagon.com/api/v0"
+
+
 TAPTOOLS_BASE_URL: str = "https://openapi.taptools.io/api/v1"
 
 _KOIOS_BASE_URLS = {
