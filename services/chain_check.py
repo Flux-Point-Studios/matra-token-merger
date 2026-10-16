@@ -1,8 +1,9 @@
 """What a signer confirms with the chain itself before it records an approval.
 
 services.cosign_policy judges a transaction by the bytes it is handed. What
-those bytes cannot show comes from the signer's own view of the chain, a
-Blockfrost project queried from the signer's own host:
+those bytes cannot show comes from the signer's own view of the chain, the
+Blockfrost-compatible chain API queried with the signer's own key from its
+own host:
 
   * no surrendered unit has more supply on chain than it had at the pin. Two
     collection policies can still mint, and editions of one name are

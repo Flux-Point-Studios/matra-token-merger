@@ -1,5 +1,7 @@
 """Tests for tools.config — environment loading and constants."""
 
+import pytest
+
 from tools.config import (
     AGENT,
     AGENT_DECIMALS,
@@ -20,6 +22,8 @@ from tools.config import (
     TokenInfo,
     VALIDATOR_EMISSIONS_BASE,
     VALIDATOR_RESERVE_BASE,
+    chain_api_base_url,
+    chain_api_key,
 )
 
 
@@ -240,3 +244,56 @@ class TestDualAdminEnvSurface:
         # Either both are empty (no env), or ADMIN_PKH falls back to ADMIN_PKH_1
         if ADMIN_PKH_1:
             assert ADMIN_PKH == ADMIN_PKH_1 or ADMIN_PKH == ""
+
+
+class TestChainApi:
+    """Every chain read and write goes to one Blockfrost-compatible API: the
+    one CHAIN_API_BASE_URL names, Iagon Insight's by default, authenticated by
+    the key in the file CHAIN_API_KEY_FILE names."""
+
+    @pytest.mark.parametrize("network, url", [
+        ("mainnet", "https://mainnet.insight.iagon.com/api/v0"),
+        ("preprod", "https://preprod.insight.iagon.com/api/v0"),
+    ])
+    def test_insight_serves_each_network_by_default(self, monkeypatch, network, url):
+        monkeypatch.delenv("CHAIN_API_BASE_URL", raising=False)
+        assert chain_api_base_url(network) == url
+
+    def test_the_environment_names_another_api(self, monkeypatch):
+        monkeypatch.setenv("CHAIN_API_BASE_URL", " https://cardano-preprod.blockfrost.io/api/v0/ ")
+        assert chain_api_base_url("preprod") == "https://cardano-preprod.blockfrost.io/api/v0"
+
+    @pytest.mark.parametrize("network, url", [
+        ("mainnet", "https://preprod.insight.iagon.com/api/v0"),
+        ("preprod", "https://mainnet.insight.iagon.com/api/v0"),
+        ("preprod", "https://chain.example/preprod/api/v0"),
+        # pycardano takes any URL containing "mainnet" for a mainnet one
+        ("preprod", "https://preprod.insight.iagon.com/mainnet/api/v0"),
+    ])
+    def test_an_api_that_is_not_the_networks_is_refused(self, monkeypatch, network, url):
+        monkeypatch.setenv("CHAIN_API_BASE_URL", url)
+        with pytest.raises(ValueError, match="not an API for " + network):
+            chain_api_base_url(network)
+
+    def test_a_network_insight_does_not_serve_needs_its_api_named(self, monkeypatch):
+        monkeypatch.delenv("CHAIN_API_BASE_URL", raising=False)
+        with pytest.raises(ValueError, match="CHAIN_API_BASE_URL"):
+            chain_api_base_url("preview")
+
+    def test_the_key_is_the_content_of_the_file_the_environment_names(self, tmp_path, monkeypatch):
+        key_file = tmp_path / "chain-api.key"
+        key_file.write_text("k3y\n")
+        monkeypatch.setenv("CHAIN_API_KEY_FILE", str(key_file))
+        assert chain_api_key() == "k3y"
+
+    def test_no_key_file_is_refused(self, monkeypatch):
+        monkeypatch.delenv("CHAIN_API_KEY_FILE", raising=False)
+        with pytest.raises(ValueError, match="CHAIN_API_KEY_FILE"):
+            chain_api_key()
+
+    def test_an_empty_key_file_is_refused(self, tmp_path, monkeypatch):
+        key_file = tmp_path / "chain-api.key"
+        key_file.write_text("\n")
+        monkeypatch.setenv("CHAIN_API_KEY_FILE", str(key_file))
+        with pytest.raises(ValueError, match="empty"):
+            chain_api_key()

@@ -12,7 +12,8 @@ version: "3.8"
 #
 # Setup:
 #   1. Copy this file + .env.cosigner to the co-signer host
-#   2. Place admin_2.skey in ./keys/ (NEVER let this file leave this machine)
+#   2. Place admin_2.skey in ./keys/ (NEVER let this file leave this machine),
+#      and this host's chain API key as ./keys/chain-api.key (mode 600)
 #   3. Run: docker compose -f docker-compose.cosigner.yml up -d
 #
 # ============================================================================

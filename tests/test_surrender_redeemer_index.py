@@ -238,11 +238,7 @@ def _build_with_user_prefix(prefix: str):
     api.state.admin_pkh = sk.to_verification_key().hash()
     api.state.admin_addr = admin_addr
 
-    class _BF:
-        project_id = "x"
-        base_url = "https://cardano-mainnet.blockfrost.io/api/v0"
-
-    api.state.bf = _BF()
+    api.state.bf = object()  # only ever handed to the patched chain_context
 
     ctx = _FakeContext(_user_utxos_for(prefix, user_addr))
 
@@ -255,7 +251,7 @@ def _build_with_user_prefix(prefix: str):
          mock.patch.object(api, "CMATRA_ASSET_HEX", _CMATRA_ASSET), \
          mock.patch.object(api, "COSIGNER_URL", ""), \
          mock.patch.object(api, "COLLATERAL_UTXO", ""), \
-         mock.patch.object(api, "BlockFrostChainContext", lambda **kw: ctx):
+         mock.patch.object(api, "chain_context", lambda client: ctx):
         pool_utxo = {
             "tx_hash": _POOL_HASH,
             "output_index": 1,

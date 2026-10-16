@@ -138,11 +138,7 @@ def build_real_surrender_tx(tag_sets_on: bool) -> tuple[str, str]:
     api.state.reserved_collateral.clear()
     api.state.user_pending.clear()
 
-    class _BF:
-        project_id = "x"
-        base_url = "https://cardano-mainnet.blockfrost.io/api/v0"
-
-    api.state.bf = _BF()
+    api.state.bf = object()  # only ever handed to the patched chain_context
     ctx = _FakeContext(_user_utxos_for("cc", user_addr))
 
     with mock.patch.object(api, "SCRIPT_ADDRESS", script_addr.encode()), \
@@ -152,7 +148,7 @@ def build_real_surrender_tx(tag_sets_on: bool) -> tuple[str, str]:
          mock.patch.object(api, "COSIGNER_URL", ""), \
          mock.patch.object(api, "COLLATERAL_UTXO", ""), \
          mock.patch.object(api, "TAG_SETS_258", tag_sets_on), \
-         mock.patch.object(api, "BlockFrostChainContext", lambda **kw: ctx):
+         mock.patch.object(api, "chain_context", lambda client: ctx):
         pool_utxo = {
             "tx_hash": _POOL_HASH,
             "output_index": 1,

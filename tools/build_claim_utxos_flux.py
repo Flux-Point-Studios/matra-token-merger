@@ -42,7 +42,7 @@ from pycardano import (
     Withdrawals,
 )
 
-from tools.api_clients import BlockfrostClient
+from tools.api_clients import BlockfrostClient, chain_context
 from tools.cardano_utils import encode_claim_datum, estimate_min_ada
 from tools.config import FLUX_DECIMALS
 
@@ -133,19 +133,12 @@ def build_batch_tx_cbor(
 
     Returns dict with tx_cbor_hex, tx_hash, outputs metadata.
     """
-    from pycardano import (
-        BlockFrostChainContext,
-        RawPlutusData,
-    )
+    from pycardano import RawPlutusData
     from pycardano.hash import ScriptHash as PycScriptHash
     from pycardano import AssetName
     import cbor2
 
-    # Set up chain context
-    context = BlockFrostChainContext(
-        project_id=bf.project_id,
-        base_url=bf.base_url,
-    )
+    context = chain_context(bf)
 
     sk = PaymentSigningKey.load(funding_skey_path)
     vk = PaymentVerificationKey.from_signing_key(sk)
@@ -205,16 +198,11 @@ def preflight_evaluate_tx(
     signed_tx,
     batch_label: str = "",
 ) -> dict[str, Any]:
-    """Run evaluate_tx (Blockfrost /utils/txs/evaluate) as preflight check.
+    """Run evaluate_tx (the chain API's /utils/txs/evaluate) as preflight check.
 
     Returns evaluation result dict. Logs warnings on failure.
     """
-    from pycardano import BlockFrostChainContext
-
-    context = BlockFrostChainContext(
-        project_id=bf.project_id,
-        base_url=bf.base_url,
-    )
+    context = chain_context(bf)
 
     try:
         tx_cbor = signed_tx.to_cbor()

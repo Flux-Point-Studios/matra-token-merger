@@ -84,7 +84,7 @@ from pycardano.utils import max_tx_fee, min_lovelace_post_alonzo
 from pycardano.plutus import CostModels, RedeemerKey, RedeemerMap, RedeemerTag
 from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenList, default_encoder
 
-from tools.api_clients import BlockfrostClient
+from tools.api_clients import BlockfrostClient, chain_context
 from tools.cardano_utils import estimate_min_ada
 from tools.config import FLUX_DECIMALS, ALL_MERGE_ASSETS
 from tools.process_surrender import (
@@ -828,12 +828,8 @@ def _build_tx_blocking(
     # Mandatory preflight (confirmed-tip path): evaluate_tx against the live
     # ledger before returning to the user. Catches script errors before any
     # collateral is at risk.
-    preflight_ctx = BlockFrostChainContext(
-        project_id=state.bf.project_id,
-        base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
-    )
-    preflight_ctx.evaluate_tx_cbor(bytes.fromhex(tx_cbor_hex))
-    logger.info("Preflight OK for tx %s", tx_hash[:16])
+    units = state.bf.evaluate_tx(bytes.fromhex(tx_cbor_hex))
+    logger.info("Preflight OK for tx %s: %s", tx_hash[:16], units)
     return tx_cbor_hex, tx_hash, built_pool_output, user_change
 
 
@@ -1013,7 +1009,7 @@ def _get_cosigner_witness(
                 "language_views_hex": language_views.hex(),
             },
             headers={"X-API-Secret": COSIGNER_SECRET},
-            # the co-signer asks its own chain view; one lookup may back off for 21 s
+            # the co-signer asks its own chain view; one lookup may back off for 13 s
             timeout=30.0,
         )
         resp.raise_for_status()
@@ -1519,16 +1515,7 @@ def _build_surrender_tx(
     pay back to the user ({tx_hash, output_index, lovelace, multi_asset}) — the
     pending change to feed the next chained chunk.
     """
-    # NOTE: state.bf is our custom BlockfrostClient (tools/api_clients.py)
-    # which stores base_url WITH '/v0' (e.g. ".../api/v0") because it builds
-    # request URLs as `base_url + path`. pycardano's BlockFrostChainContext,
-    # however, hands the URL to blockfrost-python's BlockFrostApi which
-    # AUTO-APPENDS '/v0'. So passing state.bf.base_url verbatim gives
-    # '/api/v0/v0/...' = 400 Invalid path. Strip the suffix.
-    context = BlockFrostChainContext(
-        project_id=state.bf.project_id,
-        base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
-    )
+    context = chain_context(state.bf)
 
     script = PlutusV3Script(bytes.fromhex(state.script_cbor_hex))
     cmatra_policy = PycScriptHash(bytes.fromhex(CMATRA_POLICY_HEX))
@@ -1826,10 +1813,7 @@ def _build_defrag_tx_blocking(
     surrenders within the limit. Returns
     (tx_cbor_hex, tx_hash_hex, target_ref, n_tokens, n_lean_outputs, size_bytes).
     """
-    context = BlockFrostChainContext(
-        project_id=state.bf.project_id,
-        base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
-    )
+    context = chain_context(state.bf)
     addr = Address.from_primitive(user_address)
     utxos = context.utxos(user_address)
     if not utxos:
@@ -2168,7 +2152,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     """Build a surrender tx and evaluate it against the live ledger — NO submission.
 
     Identical to build-surrender but instead of returning CBOR for signing,
-    it runs Blockfrost evaluate_tx to verify the Plutus script executes
+    it runs the chain API's evaluate to verify the Plutus script executes
     correctly with real mainnet UTxOs.  Returns execution units and fee. The
     co-signer is never asked: evaluation runs scripts, not signature checks.
 
@@ -2232,13 +2216,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
 
     # Evaluate against live ledger (does NOT submit)
     try:
-        context = BlockFrostChainContext(
-            project_id=state.bf.project_id,
-            base_url=state.bf.base_url.rstrip("/").removesuffix("/v0"),
-        )
-        tx_bytes = bytes.fromhex(tx_cbor_hex)
-        eval_result = context.evaluate_tx(tx_bytes)
-        eval_str = str(eval_result)
+        eval_str = str(state.bf.evaluate_tx(bytes.fromhex(tx_cbor_hex)))
         logger.info("evaluate_tx OK for %s: %s", tx_hash_hex[:16], eval_str)
     except Exception as e:
         logger.error("evaluate_tx FAILED for %s: %s", tx_hash_hex[:16], e)

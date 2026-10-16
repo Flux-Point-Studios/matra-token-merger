@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -65,6 +64,9 @@ from pycardano import (
     Value,
 )
 from pycardano.hash import ScriptHash, TransactionId
+
+from tools.api_clients import BlockfrostClient, chain_context
+from tools.config import chain_api_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -624,7 +626,7 @@ def test_admin_withdraw_happy(
 
 def run_red_team(
     work_dir: Path,
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     blueprint_path: Path,
 ) -> list[dict[str, Any]]:
     """Run full red-team suite against preprod surrender pool deployment.
@@ -646,9 +648,7 @@ def run_red_team(
         logger.error("Rehearsal must complete through stage 6 (pool deployed). Current state is incomplete.")
         sys.exit(1)
 
-    context = BlockFrostChainContext(
-        project_id=blockfrost_project_id,
-    )
+    context = chain_context(chain)
 
     # Load validator from blueprint
     with open(blueprint_path) as f:
@@ -676,21 +676,9 @@ def run_red_team(
 
     # Query live pool UTxOs directly from chain
     from scripts.preprod_harness import Wallet
-    from tools.api_clients import BlockfrostClient as BfClient
-
-    _BF_BASE_URLS = {
-        "preprod": "https://cardano-preprod.blockfrost.io/api/v0",
-        "preview": "https://cardano-preview.blockfrost.io/api/v0",
-    }
-    bf_network = "preprod" if blockfrost_project_id.startswith("preprod") else \
-                 "preview" if blockfrost_project_id.startswith("preview") else "mainnet"
-    bf_client = BfClient(
-        project_id=blockfrost_project_id,
-        base_url=_BF_BASE_URLS.get(bf_network, "https://cardano-mainnet.blockfrost.io/api/v0"),
-    )
 
     pool_utxos = _query_live_pool_utxos(
-        bf_client, script_address, cmatra_policy_hex, cmatra_asset_hex,
+        chain, script_address, cmatra_policy_hex, cmatra_asset_hex,
     )
     logger.info("Live pool UTxOs on-chain: %d", len(pool_utxos))
 
@@ -838,7 +826,7 @@ def run_red_team(
     if not deadline_passed:
         logger.info("-" * 40)
         logger.info("TEST 9: Both admins ProcessSurrender (happy path)")
-        ctx9 = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx9 = chain_context(chain)
         r = test_admin_process_surrender_happy(
             ctx9, admin_1, admin_2, pos_ref_1,
             script_address, script, cmatra_policy_id, cmatra_asset_hex,
@@ -863,12 +851,12 @@ def run_red_team(
         logger.info("TEST 10: Both admins AdminWithdraw after deadline (happy path)")
 
         fresh_pool = _query_live_pool_utxos(
-            bf_client, script_address, cmatra_policy_hex, cmatra_asset_hex,
+            chain, script_address, cmatra_policy_hex, cmatra_asset_hex,
         )
         if not fresh_pool:
             logger.warning("No pool UTxOs remaining for test 10.")
         else:
-            ctx10 = BlockFrostChainContext(project_id=blockfrost_project_id)
+            ctx10 = chain_context(chain)
             r = test_admin_withdraw_happy(
                 ctx10, admin_1, admin_2, fresh_pool[0],
                 script_address, script, cmatra_policy_id, cmatra_asset_hex,
@@ -940,15 +928,7 @@ def main(argv: list[str] | None = None) -> None:
         project_root / "onchain" / "claim_validator" / "plutus.json"
     )
 
-    bf_id = os.environ.get(
-        "BLOCKFROST_PROJECT_ID_PREPROD",
-        os.environ.get("BLOCKFROST_PROJECT_ID", ""),
-    )
-    if not bf_id or not bf_id.startswith("preprod"):
-        logger.error("Need a preprod Blockfrost project ID.")
-        sys.exit(1)
-
-    run_red_team(work_dir, bf_id, blueprint_path)
+    run_red_team(work_dir, BlockfrostClient(base_url=chain_api_base_url("preprod")), blueprint_path)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ Surrenders (a pool input spent and legacy assets paid to quarantine) are the
 corpus the co-signer policy must accept; the rest are the mint and pool
 rotation ceremonies it must refuse.
 
-Needs NETWORK=mainnet and BLOCKFROST_PROJECT_ID in the environment.
+Needs NETWORK=mainnet and CHAIN_API_KEY_FILE in the environment.
 """
 
 from __future__ import annotations

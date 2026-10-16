@@ -20,7 +20,7 @@ subtracted twice. Pinning refuses to write a record the chain does not bear
 out, so a pin never promises more of a unit than exists outside its waived
 reserve and quarantine.
 
-    NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
+    NETWORK=mainnet CHAIN_API_KEY_FILE=<key file> python -m scripts.pin_redemption \\
         <supply slot> audit_pack/<date>/redemption_pin.json
 
 --check compares the chain tip with a committed pin and exits 1 if any unit
@@ -35,7 +35,7 @@ still holds more than the waiver less the record. Re-pinning at the old
 supply slot cannot show a later mint; this reads current supply and each
 NFT's own history.
 
-    NETWORK=mainnet BLOCKFROST_PROJECT_ID=... python -m scripts.pin_redemption \\
+    NETWORK=mainnet CHAIN_API_KEY_FILE=<key file> python -m scripts.pin_redemption \\
         --check audit_pack/<date>/redemption_pin.json
 """
 

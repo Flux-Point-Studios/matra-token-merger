@@ -31,7 +31,7 @@ EXPORTS = {
        if key not in ("NETWORK", "RATE_TABLE_PATH", "REDEMPTION_PIN_PATH")},
     "COSIGNER_PRIMARY_ADMIN_PKH": ADMIN_1.hex(),
     "MAX_CMATRA_PER_DAY": str(25_000_000 * 10**6),
-    "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
+    "CHAIN_API_KEY_FILE": "/app/keys/chain-api.key",
 }
 
 DOCKER_STUB = """#!/usr/bin/env bash
@@ -50,6 +50,7 @@ class Host:
         keys = self.dir / "keys"
         keys.mkdir(mode=0o700)
         PaymentSigningKey.generate().save(str(keys / "admin_2.skey"))
+        (keys / "chain-api.key").write_text("mainnet-test-key\n")
         self.env_file = self.dir / ".env.cosigner"
         self.ledger = self.dir / "data/cosigned.sqlite3"
         self.docker_log = tmp_path / "docker.log"
@@ -89,6 +90,7 @@ class Host:
             "PATH": os.environ["PATH"], **self.settings(),
             "COSIGNER_SKEY_PATH": str(self.dir / "keys/admin_2.skey"),
             "COSIGNER_LEDGER_PATH": str(self.ledger),
+            "CHAIN_API_KEY_FILE": str(self.dir / "keys/chain-api.key"),
         }
         return subprocess.run(
             [sys.executable, "-c", "import services.cosigner_api as c; c.startup()"],
@@ -159,10 +161,10 @@ def test_a_setting_neither_in_the_file_nor_exported_stops_it_before_any_change(h
     host.write_env(_earlier_version_env(_secret()))
     before = host.env_file.read_bytes()
     missing = {key: value for key, value in EXPORTS.items()
-               if key not in ("MAX_CMATRA_PER_DAY", "BLOCKFROST_PROJECT_ID")}
+               if key not in ("MAX_CMATRA_PER_DAY", "CHAIN_API_KEY_FILE")}
     result = host.setup(missing)
     assert result.returncode != 0
-    assert "MAX_CMATRA_PER_DAY" in result.stderr and "BLOCKFROST_PROJECT_ID" in result.stderr
+    assert "MAX_CMATRA_PER_DAY" in result.stderr and "CHAIN_API_KEY_FILE" in result.stderr
     assert host.env_file.read_bytes() == before
     assert host.ledger_inits() == 0
     assert sorted(p.name for p in host.dir.iterdir()) == [".env.cosigner", "keys", "setup-cosigner.sh"]

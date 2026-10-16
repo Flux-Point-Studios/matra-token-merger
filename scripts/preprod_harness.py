@@ -23,11 +23,12 @@ Stages:
 
 Requires:
   - NETWORK=preprod in env
-  - BLOCKFROST_PROJECT_ID_PREPROD set (or BLOCKFROST_PROJECT_ID with preprod key)
+  - CHAIN_API_KEY_FILE naming the file that holds the preprod chain API key
+    (the API is Iagon Insight's unless CHAIN_API_BASE_URL names another)
   - tADA in the admin wallet (faucet: https://docs.cardano.org/cardano-testnets/tools/faucet/)
 
 Used by: manual operator invocation for preprod dress rehearsals.
-Depends on: pycardano 0.19.x, cbor2, blockfrost-python (auto-detect network).
+Depends on: pycardano 0.19.x, cbor2, blockfrost-python.
 """
 
 from __future__ import annotations
@@ -35,7 +36,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from dataclasses import dataclass
@@ -77,6 +77,9 @@ from pycardano.hash import (
     TransactionId,
     VerificationKeyHash,
 )
+
+from tools.api_clients import BlockfrostClient, chain_context
+from tools.config import chain_api_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +317,7 @@ def build_adversarial_distributions(num_wallets: int) -> list[Distribution]:
 
 
 def distribute_test_tokens(
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     admin: Wallet,
     test_wallets: list[Wallet],
     agent_policy_id: ScriptHash,
@@ -329,7 +332,7 @@ def distribute_test_tokens(
     for on-chain confirmation.
 
     Args:
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         admin: Admin wallet funding the distributions.
         test_wallets: List of test wallets to receive tokens.
         agent_policy_id: Policy ID ScriptHash for AGENT_TEST.
@@ -352,7 +355,7 @@ def distribute_test_tokens(
         batch = distributions[batch_start : batch_start + batch_size]
 
         # Fresh context each batch to avoid stale UTxO cache
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = chain_context(chain)
 
         builder = TransactionBuilder(ctx)
         builder.add_input_address(admin.address)
@@ -581,7 +584,7 @@ def load_surrender_validator(
 # ---------------------------------------------------------------------------
 
 def build_pool_utxos(
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     admin: Wallet,
     script_address: str,
     cmatra_policy_id: ScriptHash,
@@ -598,7 +601,7 @@ def build_pool_utxos(
     no redeemers needed. The admin simply sends cMATRA with inline Void datums.
 
     Args:
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         admin: Admin wallet that holds cMATRA and funds the transaction.
         script_address: Bech32 script address for the surrender pool.
         cmatra_policy_id: Policy ID ScriptHash for cMATRA_TEST.
@@ -638,7 +641,7 @@ def build_pool_utxos(
         batch_num = batch_start // batch_size
 
         # Fresh context each batch to avoid stale UTxO cache
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = chain_context(chain)
 
         builder = TransactionBuilder(ctx)
         builder.add_input_address(admin.address)
@@ -690,7 +693,7 @@ def build_pool_utxos(
 # ---------------------------------------------------------------------------
 
 def process_surrender(
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     admin: Wallet,
     user_address: str,
     cmatra_amount: int,
@@ -713,7 +716,7 @@ def process_surrender(
       - Validity range: must be entirely before the deadline
 
     Args:
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         admin: Admin wallet that signs the transaction.
         user_address: Bech32 address to receive cMATRA.
         cmatra_amount: cMATRA base units to send to the user.
@@ -736,7 +739,7 @@ def process_surrender(
         )
 
     # Fresh context for this transaction
-    ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+    ctx = chain_context(chain)
 
     asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
     script_addr = Address.from_primitive(script_address)
@@ -815,7 +818,7 @@ def process_surrender(
 # ---------------------------------------------------------------------------
 
 def red_team_wrong_signer(
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     wrong_wallet: Wallet,
     admin: Wallet,
     pool_utxo_ref: dict[str, Any],
@@ -829,7 +832,7 @@ def red_team_wrong_signer(
     random wallet signing should fail validation.
 
     Args:
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         wrong_wallet: Non-admin wallet attempting the attack.
         admin: Admin wallet (for reference, not used to sign).
         pool_utxo_ref: Pool UTxO to attempt spending.
@@ -841,7 +844,7 @@ def red_team_wrong_signer(
         True if the attack was correctly rejected (expected behavior).
     """
     try:
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = chain_context(chain)
 
         asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
         script_addr = Address.from_primitive(script_address)
@@ -889,7 +892,7 @@ def red_team_wrong_signer(
 
 
 def red_team_post_deadline(
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     admin: Wallet,
     pool_utxo_ref: dict[str, Any],
     script_address: str,
@@ -904,7 +907,7 @@ def red_team_post_deadline(
     should fail.
 
     Args:
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         admin: Admin wallet (correct signer, but wrong timing).
         pool_utxo_ref: Pool UTxO to attempt spending.
         script_address: Bech32 script address.
@@ -916,7 +919,7 @@ def red_team_post_deadline(
         True if the attack was correctly rejected (expected behavior).
     """
     try:
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = chain_context(chain)
 
         asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
         script_addr = Address.from_primitive(script_address)
@@ -971,7 +974,7 @@ def red_team_post_deadline(
 
 
 def red_team_no_admin_sig(
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     random_wallet: Wallet,
     pool_utxo_ref: dict[str, Any],
     script_address: str,
@@ -985,7 +988,7 @@ def red_team_no_admin_sig(
     not the admin should fail validation.
 
     Args:
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         random_wallet: A non-admin wallet used to sign.
         pool_utxo_ref: Pool UTxO to attempt spending.
         script_address: Bech32 script address.
@@ -996,7 +999,7 @@ def red_team_no_admin_sig(
         True if the attack was correctly rejected (expected behavior).
     """
     try:
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = chain_context(chain)
 
         asset_name = AssetName(bytes.fromhex(CMATRA_ASSET_NAME_HEX))
         script_addr = Address.from_primitive(script_address)
@@ -1047,7 +1050,7 @@ def red_team_no_admin_sig(
 # ---------------------------------------------------------------------------
 
 def admin_withdraw(
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     admin: Wallet,
     pool_utxo_refs: list[dict[str, Any]],
     script_address: str,
@@ -1060,7 +1063,7 @@ def admin_withdraw(
     assignment issues and execution budget limits.
 
     Args:
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         admin: Admin wallet that signs the withdrawal.
         pool_utxo_refs: List of remaining pool UTxO dicts.
         script_address: Bech32 script address of the surrender pool.
@@ -1076,7 +1079,7 @@ def admin_withdraw(
 
     for i, ref in enumerate(pool_utxo_refs):
         # Fresh context each iteration to pick up UTxO changes
-        ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+        ctx = chain_context(chain)
 
         builder = TransactionBuilder(ctx)
 
@@ -1133,7 +1136,7 @@ def admin_withdraw(
 
 def run_preprod_rehearsal(
     work_dir: Path,
-    blockfrost_project_id: str,
+    chain: BlockfrostClient,
     blueprint_path: Path,
     num_test_wallets: int = 20,
     timelock_offset_slots: int = 600,  # ~10 minutes for quick AdminWithdraw test
@@ -1148,7 +1151,7 @@ def run_preprod_rehearsal(
 
     Args:
         work_dir: Working directory for keys, data, and state file.
-        blockfrost_project_id: Blockfrost preprod project ID.
+        chain: the preprod chain API.
         blueprint_path: Path to Aiken plutus.json blueprint.
         num_test_wallets: Number of test wallets to create.
         timelock_offset_slots: Offset for minting policy timelock.
@@ -1159,10 +1162,7 @@ def run_preprod_rehearsal(
     data_dir = work_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Let blockfrost-python auto-detect network from project_id prefix
-    context = BlockFrostChainContext(
-        project_id=blockfrost_project_id,
-    )
+    context = chain_context(chain)
 
     state_file = work_dir / "rehearsal_state.json"
     state: dict[str, Any] = {}
@@ -1335,7 +1335,7 @@ def run_preprod_rehearsal(
         distributions = build_adversarial_distributions(num_test_wallets)
 
         dist_txs = distribute_test_tokens(
-            blockfrost_project_id, admin, test_wallets,
+            chain, admin, test_wallets,
             agent_policy_id, agent_name_hex,
             shards_policy_id, shards_name_hex,
             distributions,
@@ -1365,7 +1365,7 @@ def run_preprod_rehearsal(
         logger.info("=" * 60)
 
         # Fresh context after previous stages
-        context = BlockFrostChainContext(project_id=blockfrost_project_id)
+        context = chain_context(chain)
         current_slot = context.last_block_slot
         timelock_slot = current_slot + timelock_offset_slots
         logger.info(
@@ -1379,7 +1379,7 @@ def run_preprod_rehearsal(
         for _attempt in range(12):
             time.sleep(15)
             try:
-                _check_ctx = BlockFrostChainContext(project_id=blockfrost_project_id)
+                _check_ctx = chain_context(chain)
                 _utxos = _check_ctx.utxos(admin.address)
                 _has_cmatra = any(
                     cmatra_policy_id in (utxo.output.amount.multi_asset or {})
@@ -1485,7 +1485,7 @@ def run_preprod_rehearsal(
         logger.info("=" * 60)
 
         pool_batches = build_pool_utxos(
-            blockfrost_project_id, admin, script_address,
+            chain, admin, script_address,
             cmatra_policy_id, pool_base,
             num_pool_utxos=num_pool_utxos,
             batch_size=5,
@@ -1575,7 +1575,7 @@ def run_preprod_rehearsal(
 
             try:
                 tx_hash = process_surrender(
-                    blockfrost_project_id, admin, str(w.address),
+                    chain, admin, str(w.address),
                     total_cmatra, selected_ref, script_address,
                     script, cmatra_policy_id,
                     deadline_posix_ms=deadline_posix_ms,
@@ -1665,7 +1665,7 @@ def run_preprod_rehearsal(
                 # Test 1: Wrong signer
                 logger.info("RED TEAM TEST 1: Wrong signer (non-admin)")
                 passed = red_team_wrong_signer(
-                    blockfrost_project_id, attacker, admin,
+                    chain, attacker, admin,
                     test_pool_ref, script_address, script, cmatra_policy_id,
                 )
                 red_team_results.append({"test": "wrong_signer", "passed": passed})
@@ -1673,7 +1673,7 @@ def run_preprod_rehearsal(
                 # Test 2: Post-deadline surrender
                 logger.info("RED TEAM TEST 2: Post-deadline ProcessSurrender")
                 passed = red_team_post_deadline(
-                    blockfrost_project_id, admin,
+                    chain, admin,
                     test_pool_ref, script_address, script, cmatra_policy_id,
                     deadline_posix_ms,
                 )
@@ -1682,7 +1682,7 @@ def run_preprod_rehearsal(
                 # Test 3: No admin signature
                 logger.info("RED TEAM TEST 3: No admin signature")
                 passed = red_team_no_admin_sig(
-                    blockfrost_project_id, attacker,
+                    chain, attacker,
                     test_pool_ref, script_address, script, cmatra_policy_id,
                 )
                 red_team_results.append({"test": "no_admin_sig", "passed": passed})
@@ -1734,7 +1734,7 @@ def run_preprod_rehearsal(
         else:
             try:
                 withdraw_tx = admin_withdraw(
-                    blockfrost_project_id, admin,
+                    chain, admin,
                     remaining_refs, script_address,
                     script, cmatra_policy_id,
                 )
@@ -1834,20 +1834,9 @@ def main(argv: list[str] | None = None) -> None:
         logger.error("Run 'aiken build' in onchain/claim_validator/ first")
         sys.exit(1)
 
-    # Get Blockfrost preprod project ID
-    bf_id = os.environ.get(
-        "BLOCKFROST_PROJECT_ID_PREPROD",
-        os.environ.get("BLOCKFROST_PROJECT_ID", ""),
-    )
-    if not bf_id or not bf_id.startswith("preprod"):
-        logger.error("Need a preprod Blockfrost project ID.")
-        logger.error("Set BLOCKFROST_PROJECT_ID_PREPROD in env.local")
-        logger.error("Get one free at: https://blockfrost.io/")
-        sys.exit(1)
-
     run_preprod_rehearsal(
         work_dir=work_dir,
-        blockfrost_project_id=bf_id,
+        chain=BlockfrostClient(base_url=chain_api_base_url("preprod")),
         blueprint_path=blueprint_path,
         num_test_wallets=args.num_wallets,
         timelock_offset_slots=args.timelock_offset,

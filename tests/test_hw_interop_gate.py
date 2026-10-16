@@ -126,12 +126,8 @@ def test_gate_passes_on_defrag_build(node_bin, tmp_path):
     ]
     ctx = _FakeContext(utxos)
 
-    class _BF:
-        project_id = "x"
-        base_url = "https://cardano-mainnet.blockfrost.io/api/v0"
-
-    api.state.bf = _BF()
-    with mock.patch.object(api, "BlockFrostChainContext", lambda **kw: ctx):
+    api.state.bf = object()  # only ever handed to the patched chain_context
+    with mock.patch.object(api, "chain_context", lambda client: ctx):
         tx_hex, _hash, _ref, _ntok, _nout, _size = api._build_defrag_tx_blocking(
             user_addr.encode(), None, 20
         )
