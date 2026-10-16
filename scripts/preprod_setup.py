@@ -354,7 +354,7 @@ def main() -> None:
         "POOL_TIP_EVICTION_WINDOW_S=240",
         "POOL_TIP_WATCHDOG_INTERVAL_S=30",
     ]
-    env_path = PROJECT_ROOT / "env.local"
+    env_path = work / "env.local"
     env_path.write_text("\n".join(env_lines) + "\n")
     state["env_local"] = str(env_path)
     save()

@@ -1,18 +1,23 @@
 # cMATRA Insight cutover
 
-Status: prepared for materios review; no deployment authorized by Handoff D.
+Status: review fixes prepared for materios re-review; Handoff T authorizes no deployment.
 Mainnet requires G2 dedicated credentials and deci's explicit restart go.
 Do not run mainnet steps from a Codex session. Do not revoke Blockfrost keys.
 
 ## Provider contract
 
-`tools.config.chain_api_base_url` is the shared resolver. Mainnet and preprod
-use `https://<network>.insight.iagon.com/api/v0` by default.
-`CHAIN_API_BASE_URL` overrides `BLOCKFROST_BASE_URL`; both require `/api/v0`.
-Preview requires an explicit base because Insight preview is not verified.
+`tools.config.chain_api_base_url` is the shared resolver. Mainnet, preprod
+and preview retain `https://cardano-<network>.blockfrost.io/api/v0` by default.
+Only `CHAIN_API_BASE_URL` selects another provider; legacy `BLOCKFROST_BASE_URL`
+remains ignored. Overrides require `/api/v0`, HTTPS (HTTP only on loopback),
+and a matching network: known Blockfrost/Insight hosts are checked exactly;
+other hosts must return the requested integer `network_magic` from `/genesis`.
+Redirects and unverifiable responses are refused. Without an override, preprod
+requires a preprod-prefixed Blockfrost credential.
 REST clients use `/api/v0`; pycardano receives `/api` and appends `/v0` itself.
 
-Set `CHAIN_API_KEY_FILE` to an owner-readable file containing one key. It wins
+Set `CHAIN_API_KEY_FILE` to a service-user-owned regular file with mode 0400
+or 0600 containing one key. It wins
 against both legacy `BLOCKFROST_PROJECT_ID_<NETWORK>` and
 `BLOCKFROST_PROJECT_ID`. Missing/empty/multiline files fail closed. The key is
 read in-process and is never placed in argv or a unit's Environment value.
@@ -80,13 +85,15 @@ Ogmios v6 error shape. Keep its existing fail-closed evaluate behavior.
    from sockets and verify the uvicorn module and ports; never signal a stale
    recorded PID. Preserve the old env.local and fixture directory privately.
 3. A fresh fixture is required: the May fixture is expired. From the isolated
-   release, run `NETWORK=preprod CHAIN_API_KEY_FILE=$HOME/.secrets/iagon/insights-api-key
+   release, run `NETWORK=preprod CHAIN_API_BASE_URL=https://preprod.insight.iagon.com/api/v0 CHAIN_API_KEY_FILE=$HOME/.secrets/iagon/insights-api-key
    .venv/bin/python -m scripts.preprod_setup --funder-skey
    /home/deci/work/matra-token-merger/audit_pack/preprod_chain_rehearsal/keys/admin_1.skey
    --work-dir <new-private-fixture> --deadline-hours 168 --nft-count 40` as one
    shell command. This step broadcasts **preprod** setup transactions, so it
    belongs to the post-review deployment. Never reuse the expired setup state.
-4. The setup script predates the hardened co-signer. Its generated env alone
+4. Setup writes `env.local` only inside the private fixture work directory,
+   never the release. Do not copy it into the release. Explicit process/unit
+   environment wins over dotenv defaults. The generated env alone
    is insufficient: create a preprod redemption pin with `scripts.pin_redemption`
    for the fresh NFTs and initialize **separate** primary/co-signer ledgers
    with `services.redemption_ledger.create_ledger`. Set both services' identical
@@ -103,7 +110,8 @@ Ogmios v6 error shape. Keep its existing fail-closed evaluate behavior.
    files. Remove `CHAIN_API_*` and `BLOCKFROST_*` entries from these env files
    so they cannot override the units' provider settings. The supplied user
    units read `~/.secrets/iagon/insights-api-key` directly in Python.
-6. Symlink `~/.local/share/cmatra-preprod/current` to the reviewed release.
+6. Refuse the release if it contains `env.local` or `.env`.
+   Symlink `~/.local/share/cmatra-preprod/current` to the reviewed release.
    Copy `services/deploy/preprod/*.service` to `~/.config/systemd/user/`.
    Run `systemd-analyze --user verify` on the units, then
    `systemctl --user daemon-reload`. Stop only the re-verified old preprod
@@ -138,48 +146,62 @@ Read-only inspection confirmed:
 | Gemtek | surrender-api.service | /home/deci/surrender-api | env.surrender-api | 127.0.0.1:8420 |
 | Node-3 | cmatra-cosigner.service | /home/deci/cmatra-cosigner | env.cosigner | 192.168.0.133:8421 |
 
-1. Require the reviewed merge, complete preprod G1, G2 cMATRA account/key,
+1. Require the reviewed merge, complete preprod G1, G2 separate cMATRA credentials for the two signers,
    and deci's explicit authorization. Insight serializes evaluations per
    account, so another key under the same shared account does not by itself
    establish isolation. Confirm the account is isolated or add/test bounded
    Retry-After handling before enabling shared-account traffic.
-2. Export the reviewed source into an isolated staging directory. Snapshot
-   both deployed directories and unit files into task-unique 0700 backup
-   directories; use SQLite's backup API for each ledger while services run.
-   Record file hashes and current unit MainPID/WorkingDirectory. Keep signing
-   keys and backups private. Reconcile deployed source differences before
-   replacing files; do not overwrite env, keys, audit packs or ledgers.
-3. Deliver the dedicated cMATRA key as
-   `/home/deci/.secrets/iagon/cmatra-insight.key` on each host, directory 0700,
-   file 0600 owned by deci. Copy to Node-3 with SSH stdin, never command-line
-   contents. Compare only sha256 prefixes in-process. Do not use the shared
-   dev key for this production cutover.
+2. **Before any staging, require deci's explicit go for this host and step.**
+   Export the reviewed source into
+   `~/.local/share/<unit>/releases/<SHA>` on that host. Build its venv at
+   that final path; do not rename a venv after installation.
+   Never stage source or environment into a running release. Snapshot both
+   deployed directories and unit files into task-unique 0700 backup directories;
+   use SQLite's backup API for each ledger while services run. Record hashes
+   and MainPID/WorkingDirectory. Preserve keys, pins, caps and ledgers.
+3. Provision two DISTINCT credentials: Gemtek uses
+   `/home/deci/.secrets/iagon/cmatra-surrender-insight.key`; Node-3 uses
+   `/home/deci/.secrets/iagon/cmatra-cosigner-insight.key`. Directory 0700,
+   files 0600 owned by the service user. Do not copy one signer's key to the
+   other. Compare digests in-process and refuse equality without printing
+   either key. Independent signer chain views are a security requirement;
+   separate accounts or an independently operated provider are preferred.
+   Account-level evaluation isolation must also satisfy step 1.
 4. Replay `scripts/fetch_cosign_golden.py` against Insight (read-only), then the
    existing golden verdict tests: identical approvals/rejections are required.
    Confirm the Railway app named `cosigner-production` belongs to cMATRA
    before changing it. Its public SaturnSwap-looking hostname is not evidence
    of cMATRA ownership. If dashboard inventory is unavailable, this item stays
    unverified and the owning session must resolve it.
-5. On Node-3 first, stage reviewed `tools/` and `services/` modules into
-   `/home/deci/cmatra-cosigner`, preserving all non-source files. In
-   `env.cosigner` set `CHAIN_API_BASE_URL=https://mainnet.insight.iagon.com/api/v0`
-   and `CHAIN_API_KEY_FILE=/home/deci/.secrets/iagon/cmatra-insight.key` by
-   parsing/writing the file in-process. Remove stale `CHAIN_API_*` duplicates;
-   preserve policy, caps, pin, keys, ledger and API authentication settings.
-   After the operator's go: `sudo systemctl restart cmatra-cosigner.service`.
-   Check `/health` at 192.168.0.133:8421 and inspect sanitized logs.
-6. On Gemtek, repeat source staging and the two provider settings for
-   `/home/deci/surrender-api/env.surrender-api`. After the operator's go:
-   `sudo systemctl restart surrender-api.service`. Check localhost:8420/health.
-   Compare the same unsigned mainnet surrender on both evaluators before the
-   claimant signs. Mainnet signing/broadcast belongs to deci at his terminal.
+5. After the Node-3 step-specific go, prepare the reviewed modules, venv and
+   private config in its NEW release. Set
+   `CHAIN_API_BASE_URL=https://mainnet.insight.iagon.com/api/v0` and
+   `CHAIN_API_KEY_FILE=/home/deci/.secrets/iagon/cmatra-cosigner-insight.key`.
+   Preserve all other settings and use absolute paths to the CURRENT ledger
+   and signing key. Verify config and remove duplicate provider entries
+   in-process. At the authorized restart, point
+   `~/.local/share/cmatra-cosigner/current` to the new release. Update the
+   backed-up unit configuration so WorkingDirectory, ExecStart interpreter
+   and EnvironmentFile all resolve through that symlink, retaining its
+   existing bind and port. Run daemon-reload and restart only
+   `cmatra-cosigner.service`. These units currently use literal paths;
+   creating a symlink alone does not switch the service.
+   Check `/health` at 192.168.0.133:8421 and sanitized logs.
+6. Obtain the Gemtek step-specific go before preparing its NEW release.
+   Repeat with `CHAIN_API_KEY_FILE=/home/deci/.secrets/iagon/cmatra-surrender-insight.key`.
+   At the authorized `surrender-api.service` restart, configure its unit
+   paths through `~/.local/share/surrender-api/current`, retaining its bind
+   and port, and switch that symlink to the new release. Run daemon-reload. Check localhost:8420/health. Compare the same unsigned mainnet
+   surrender on both evaluators before the claimant signs. Mainnet signing
+   and broadcast belong to deci at his terminal.
 7. Record the next real surrender's co-sign, chain confirmation, pool balance,
    pending-tip eviction and total charged credits. Monitor 24 hours with zero
    provider 4xx/5xx and no changed signer verdicts. Keep Blockfrost projects
    alive for seven request-free days; deci handles revocation in the dashboard.
 
-Mainnet rollback: operator restores the backed-up source and env on the affected
-host, keeps the **current** ledgers (never roll back approvals), and restarts
+Mainnet rollback: operator restores the affected host's backed-up unit
+configuration and previous release/config, runs daemon-reload, keeps the
+**current** ledgers (never roll back approvals), and restarts
 only that cMATRA unit. Confirm health and a read-only pool query. Do not restore
 a stale ledger backup over approvals recorded since cutover.
 

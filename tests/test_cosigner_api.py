@@ -436,7 +436,7 @@ def test_the_chain_view_is_this_hosts_own_blockfrost_project(service):
     with service.client(0):
         chain = cosigner.state.chain
     assert chain.project_id == "mainnet-test-project"
-    assert chain.base_url == "https://mainnet.insight.iagon.com/api/v0"
+    assert chain.base_url == "https://cardano-mainnet.blockfrost.io/api/v0"
 
 
 def test_refuses_a_unit_whose_supply_grew_after_the_pin(service):
@@ -522,8 +522,19 @@ def test_a_surrender_spending_a_spent_pool_output_is_refused(service):
 def test_startup_uses_provider_file_and_base(service, monkeypatch, tmp_path):
     key = tmp_path / "insight.key"
     key.write_text("opaque-test-key\n")
+    key.chmod(0o600)
     monkeypatch.setenv("CHAIN_API_KEY_FILE", str(key))
-    monkeypatch.setenv("CHAIN_API_BASE_URL", "https://mainnet.provider.example/api/v0")
+    monkeypatch.setenv("CHAIN_API_BASE_URL", "https://mainnet.insight.iagon.com/api/v0")
     with service.client(0):
-        assert cosigner.state.chain.base_url == "https://mainnet.provider.example/api/v0"
+        assert cosigner.state.chain.base_url == "https://mainnet.insight.iagon.com/api/v0"
         assert cosigner.state.chain.project_id == "opaque-test-key"
+
+
+def test_chain_provider_uses_policy_network(service, monkeypatch):
+    monkeypatch.setenv("NETWORK", "preprod")
+    monkeypatch.setenv("BLOCKFROST_PROJECT_ID_PREPROD", "preprod-fixture")
+    monkeypatch.setenv("BLOCKFROST_PROJECT_ID_MAINNET", "mainnet-policy-fixture")
+    monkeypatch.setattr(cosigner, "load_config", lambda *args: MAINNET)
+    with service.client(0):
+        assert cosigner.state.chain.base_url == "https://cardano-mainnet.blockfrost.io/api/v0"
+        assert cosigner.state.chain.project_id == "mainnet-policy-fixture"
