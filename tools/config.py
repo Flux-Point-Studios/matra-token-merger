@@ -185,14 +185,17 @@ _CHAIN_API_BASE_URLS = {
 
 def chain_api_base_url(network: str) -> str:
     """CHAIN_API_BASE_URL, or Iagon Insight's Blockfrost-compatible API for
-    *network*. pycardano takes any URL containing "mainnet" for a mainnet
-    API, so the host must name *network* and only mainnet's may say mainnet."""
+    *network*: the API's /v0 root, its host naming *network*. pycardano
+    takes the URL for a mainnet API exactly when it contains "mainnet", so
+    it must contain it exactly when *network* is mainnet."""
     url = os.environ.get("CHAIN_API_BASE_URL", "").strip().rstrip("/")
     url = url or _CHAIN_API_BASE_URLS.get(network, "")
     if not url:
         raise ValueError(f"CHAIN_API_BASE_URL must be set: Insight does not serve {network}")
-    if network not in (urlparse(url).hostname or "") or (network != "mainnet" and "mainnet" in url):
+    if network not in (urlparse(url).hostname or "") or ("mainnet" in url) != (network == "mainnet"):
         raise ValueError(f"CHAIN_API_BASE_URL {url} is not an API for {network}")
+    if not url.endswith("/v0"):
+        raise ValueError(f"CHAIN_API_BASE_URL {url} must be the API's /v0 root")
     return url
 
 

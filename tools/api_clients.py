@@ -94,7 +94,7 @@ def _request_with_retry(
             return resp.json()
         if resp.status_code not in (429, 500, 502, 503, 504):
             resp.raise_for_status()
-            continue
+            raise BlockfrostUnavailable(f"HTTP {resp.status_code} from {url}, not an answer")
         if attempt == max_retries:
             break
         named = _retry_after(resp)
@@ -235,7 +235,9 @@ class BlockfrostClient:
         it: execution units per redeemer, as {"spend:0": {"memory": ...,
         "steps": ...}}. Insight evaluates one transaction at a time per
         account and answers a concurrent one 429 or 503, which is retried.
-        Raises :class:`EvaluationFailed` unless every redeemer got units."""
+        Raises :class:`EvaluationFailed` unless the answer gives units for at
+        least one redeemer and integer memory and steps for each it lists;
+        the callers evaluate only transactions that run a script."""
         answer = _request_with_retry(
             "POST",
             f"{self.base_url}/utils/txs/evaluate",
@@ -244,7 +246,7 @@ class BlockfrostClient:
         )
         result = answer.get("result") if isinstance(answer, dict) else None
         units = result.get("EvaluationResult") if isinstance(result, dict) else None
-        if not isinstance(units, dict) or not all(
+        if not isinstance(units, dict) or not units or not all(
             isinstance(unit, dict) and type(unit.get("memory")) is int and type(unit.get("steps")) is int
             for unit in units.values()
         ):

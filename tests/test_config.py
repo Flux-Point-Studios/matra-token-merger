@@ -267,13 +267,26 @@ class TestChainApi:
         ("mainnet", "https://preprod.insight.iagon.com/api/v0"),
         ("preprod", "https://mainnet.insight.iagon.com/api/v0"),
         ("preprod", "https://chain.example/preprod/api/v0"),
-        # pycardano takes any URL containing "mainnet" for a mainnet one
+        # pycardano takes a URL for a mainnet one exactly when it contains
+        # "mainnet", case and all
         ("preprod", "https://preprod.insight.iagon.com/mainnet/api/v0"),
+        ("mainnet", "https://MAINNET.insight.iagon.com/api/v0"),
     ])
     def test_an_api_that_is_not_the_networks_is_refused(self, monkeypatch, network, url):
         monkeypatch.setenv("CHAIN_API_BASE_URL", url)
         with pytest.raises(ValueError, match="not an API for " + network):
             chain_api_base_url(network)
+
+    @pytest.mark.parametrize("url", [
+        "https://mainnet.insight.iagon.com/api",
+        "https://mainnet.insight.iagon.com/api/v0/blocks",
+    ])
+    def test_an_api_root_without_its_version_is_refused(self, monkeypatch, url):
+        """The client appends paths to the /v0 root and pycardano strips it;
+        any other root sends one of them to the wrong paths."""
+        monkeypatch.setenv("CHAIN_API_BASE_URL", url)
+        with pytest.raises(ValueError, match="/v0 root"):
+            chain_api_base_url("mainnet")
 
     def test_a_network_insight_does_not_serve_needs_its_api_named(self, monkeypatch):
         monkeypatch.delenv("CHAIN_API_BASE_URL", raising=False)

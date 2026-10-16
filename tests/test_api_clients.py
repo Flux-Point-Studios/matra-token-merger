@@ -112,6 +112,15 @@ class TestRetryLogic:
         assert slept == [8]
         assert len(responses.calls) == 2
 
+    @pytest.mark.parametrize("status", [202, 204])
+    @responses.activate
+    def test_a_success_code_other_than_200_is_unavailable_at_once(self, slept, status):
+        responses.add(responses.GET, "https://example.com/api", status=status)
+        with pytest.raises(BlockfrostUnavailable, match=str(status)):
+            _request_with_retry("GET", "https://example.com/api", {})
+        assert slept == []
+        assert len(responses.calls) == 1
+
     @responses.activate
     def test_an_unreadable_retry_after_falls_back_to_the_backoff(self, slept):
         responses.add(responses.GET, "https://example.com/api", status=429,
@@ -227,9 +236,10 @@ class TestEvaluate:
         {"result": {"EvaluationResult": {"spend:0": {"memory": "1", "steps": 2}}}},
         {"result": {"EvaluationResult": {"spend:0": {"memory": True, "steps": 2}}}},
         {"result": {"EvaluationResult": []}},
+        {"result": {"EvaluationResult": {}}},
         {"result": None},
         [],
-    ], ids=["failure", "fault", "v6-names", "string", "bool", "list", "null", "not-an-object"])
+    ], ids=["failure", "fault", "v6-names", "string", "bool", "list", "empty", "null", "not-an-object"])
     @responses.activate
     def test_anything_but_units_for_each_redeemer_fails(self, answer):
         responses.add(responses.POST, f"{BASE}/utils/txs/evaluate", json=answer)
