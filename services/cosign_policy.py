@@ -60,6 +60,7 @@ from pycardano import Address
 from tools.cardano_utils import SLOT_OFFSET_S
 from tools.credential_denylist import DEFAULT_DENYLIST_PATH, DenyList, PointerAddress, load_denylist
 from tools.process_surrender import (
+    funded_limits,
     load_rate_table,
     load_redemption_pin,
     surrendered_entitlement,
@@ -406,6 +407,8 @@ class CosignConfig:
     supply_slot: int
     max_payout_per_tx: int
     denylist: DenyList
+    funded_limits: Mapping[str, int]
+    """Per merge asset's policy: what the pool was funded to redeem after the pin."""
 
 
 def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignConfig:
@@ -426,6 +429,7 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
     network = need("NETWORK")
     deadline_ms = int(need("SURRENDER_DEADLINE_POSIX_MS"))
     pin = load_redemption_pin(Path(env.get("REDEMPTION_PIN_PATH") or DEFAULT_REDEMPTION_PIN_PATH))
+    rate_table = load_rate_table(Path(env.get("RATE_TABLE_PATH") or DEFAULT_RATE_TABLE_PATH))
     return CosignConfig(
         network=network,
         pool_address=Address.from_primitive(need("SURRENDER_SCRIPT_ADDRESS")).to_primitive(),
@@ -434,13 +438,14 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         cmatra_name=bytes.fromhex(need("CMATRA_ASSET_HEX")),
         admin_pkhs=admins,
         deadline_slot=slot_at(deadline_ms // 1000, network),
-        rate_table=load_rate_table(Path(env.get("RATE_TABLE_PATH") or DEFAULT_RATE_TABLE_PATH)),
+        rate_table=rate_table,
         redeemable_nfts=pin.nft_units,
         redemption_limits=pin.remaining,
         pinned_supply=pin.supply,
         supply_slot=pin.supply_slot,
         max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
         denylist=load_denylist(Path(env.get("DENYLIST_PATH") or DEFAULT_DENYLIST_PATH)),
+        funded_limits=funded_limits(rate_table, pin),
     )
 
 

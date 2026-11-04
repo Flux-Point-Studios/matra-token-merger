@@ -7,7 +7,11 @@ leaves the process. Two limits are checked against the record:
     stays within a cap;
   * what each legacy unit redeems after the pin stays within what the pin
     says remains of it, so an edition minted after the pin, or a unit already
-    locked in quarantine, is never paid for again.
+    locked in quarantine, is never paid for again;
+  * what each merge asset redeems after the pin, all its units together,
+    stays within what the pool was funded to pay for of it
+    (tools.process_surrender.funded_limits), so editions beyond the supply
+    the rate table priced are not paid from the others' share.
 
 Both count what could actually land. Transactions that spend the same pool
 output conflict, so at most one of them lands; a transaction spending another's
@@ -143,9 +147,11 @@ class RedemptionLedger:
     """SQLite record of approved surrenders, shared by every process that
     signs with one key."""
 
-    def __init__(self, path: str, max_per_day: int) -> None:
-        """Open the ledger at ``path``. Raises FileNotFoundError if there is
-        none, and ValueError if the file there is not a ledger."""
+    def __init__(self, path: str, max_per_day: int, funded: Mapping[str, int]) -> None:
+        """Open the ledger at ``path``, holding each asset policy to what
+        ``funded`` says the pool was funded to redeem of it after the pin.
+        Raises FileNotFoundError if there is none, and ValueError if the file
+        there is not a ledger."""
         if not os.path.isfile(path):
             raise FileNotFoundError(
                 f"{path}: no redemption ledger. Find the one this signer has been using;"
@@ -153,6 +159,7 @@ class RedemptionLedger:
             )
         self.path = path
         self.max_per_day = max_per_day
+        self.funded = dict(funded)
         # mode=rw: a connection never creates the file, so a ledger removed
         # while the service runs fails every write instead of starting over.
         self._uri = Path(path).resolve().as_uri() + "?mode=rw"
@@ -223,6 +230,14 @@ class RedemptionLedger:
                 raise CosignRejected(
                     "redemption_limit",
                     f"{unit}: {redeemed} redeemed would pass the {limits.get(unit, 0)} the pin leaves",
+                )
+        for policy in sorted({unit[:56] for unit in approval.units}):
+            redeemed = _heaviest(rows, lambda row: sum(q for unit, q in row.units.items() if unit[:56] == policy))
+            if redeemed > self.funded.get(policy, 0):
+                raise CosignRejected(
+                    "funded_supply",
+                    f"{policy}: {redeemed} redeemed after the pin would pass the"
+                    f" {self.funded.get(policy, 0)} the pool was funded for",
                 )
         paid = _heaviest((row for row in rows if row.signed_at > now - DAY_S), lambda row: row.payout)
         if paid > self.max_per_day:

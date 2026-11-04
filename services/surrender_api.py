@@ -640,7 +640,9 @@ async def startup():
              "REDEMPTION_PIN_PATH": REDEMPTION_PIN_PATH, "DENYLIST_PATH": DENYLIST_PATH},
             [state.admin_pkh.payload, state.cosigner_pkh.payload],
         ), denylist=state.denylist)
-        state.ledger = RedemptionLedger(SURRENDER_LEDGER_PATH, int(MAX_CMATRA_PER_DAY))
+        state.ledger = RedemptionLedger(
+            SURRENDER_LEDGER_PATH, int(MAX_CMATRA_PER_DAY), state.cosign_config.funded_limits,
+        )
         logger.info("Co-signer PKH: %s", COSIGNER_PKH[:16])
 
     # Pool-tip chainer. Seeds lazily on the first build (so startup never

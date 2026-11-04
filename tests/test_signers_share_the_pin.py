@@ -20,7 +20,7 @@ from pycardano import PaymentSigningKey
 
 from services.redemption_ledger import create_ledger
 from tests.test_cosign_policy import ENV as POLICY_ENV
-from tools.config import AGENT
+from tools.config import AGENT, T2_ADAM_PASS
 from tools.process_surrender import load_redemption_pin
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,14 +29,15 @@ PIN_PATH = ROOT / "audit_pack/2026-09-27/redemption_pin.json"
 DENYLIST_PATH = ROOT / "audit_pack/2026-11-01/denylist.json"
 REPORT = (
     "print(json.dumps({'limits': dict(cfg.redemption_limits), 'denylist': cfg.denylist.sha256,"
-    " 'denied': len(cfg.denylist.labels), 'prechecked': PRECHECKED}))"
+    " 'denied': len(cfg.denylist.labels), 'prechecked': PRECHECKED, 'funded': dict(ledger.funded)}))"
 )
 COSIGNER = (
-    "import json, services.cosigner_api as c; c.startup(); cfg = c.state.cfg; PRECHECKED = None;" + REPORT
+    "import json, services.cosigner_api as c; c.startup(); cfg = c.state.cfg; ledger = c.state.ledger;"
+    " PRECHECKED = None;" + REPORT
 )
 SURRENDER_API = (
     "import asyncio, json, services.surrender_api as a; asyncio.run(a.startup());"
-    " cfg = a.state.cosign_config; PRECHECKED = a.state.denylist.sha256;" + REPORT
+    " cfg = a.state.cosign_config; ledger = a.state.ledger; PRECHECKED = a.state.denylist.sha256;" + REPORT
 )
 
 
@@ -92,6 +93,12 @@ def test_both_signers_load_the_same_remaining_for_every_unit(hosts):
     assert cosigner == surrender_api == dict(load_redemption_pin(PIN_PATH).remaining)
     assert len(cosigner) == 851
     assert cosigner[AGENT.unit] == 444_803_187
+
+
+def test_both_signers_hold_each_asset_to_what_the_pool_was_funded_for(hosts):
+    cosigner, surrender_api = hosts.loaded(COSIGNER)["funded"], hosts.loaded(SURRENDER_API)["funded"]
+    assert cosigner == surrender_api
+    assert cosigner[T2_ADAM_PASS.policy_id] == 20
 
 
 def test_both_signers_refuse_the_same_credentials(hosts):

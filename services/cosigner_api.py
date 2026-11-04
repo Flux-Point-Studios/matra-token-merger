@@ -119,8 +119,8 @@ def startup() -> None:
     sk = PaymentSigningKey.load(_need("COSIGNER_SKEY_PATH"))
     vk = PaymentVerificationKey.from_signing_key(sk)
     primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
-    ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")))
     cfg = load_config(os.environ, [primary, vk.hash().payload])
+    ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")), cfg.funded_limits)
     api_key = chain_api_key(cfg.network)
     if not api_key:
         raise ValueError("CHAIN_API_KEY_FILE or BLOCKFROST_PROJECT_ID must be set")

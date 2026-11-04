@@ -308,7 +308,8 @@ class World:
         self.cosign_calls = 0
         self._wire_surrender_api(env)
         create_ledger(str(tmp_path / "primary.sqlite3"))
-        self.primary_ledger = RedemptionLedger(str(tmp_path / "primary.sqlite3"), 10**15)
+        self.primary_ledger = RedemptionLedger(
+            str(tmp_path / "primary.sqlite3"), 10**15, api.state.cosign_config.funded_limits)
         monkeypatch.setattr(api.state, "ledger", self.primary_ledger)
 
     def _produce(self, outputs, inputs=None) -> str:
@@ -487,7 +488,8 @@ def test_chained_builds_carry_no_signature_past_the_primary_cap(world, monkeypat
     daily cap obtain nothing that either ledger has not recorded."""
     e = _entitlement(1_000)
     create_ledger(str(tmp_path / "small-cap.sqlite3"))
-    small_cap = RedemptionLedger(str(tmp_path / "small-cap.sqlite3"), int(1.5 * e))
+    small_cap = RedemptionLedger(
+        str(tmp_path / "small-cap.sqlite3"), int(1.5 * e), api.state.cosign_config.funded_limits)
     monkeypatch.setattr(api.state, "ledger", small_cap)
     pool, user_inputs = world.pool_utxo, None
     for _ in range(3):

@@ -1,6 +1,7 @@
 """services.redemption_ledger counts what the approved surrenders could take
 from the pool if they landed, and refuses an approval that could never land
-or that would pass the daily cap or a unit's pinned limit.
+or that would pass the daily cap, a unit's pinned limit or what the pool was
+funded to redeem of its asset.
 
 Approvals here are synthetic, apart from the replay of every mainnet
 surrender: the ledger sees only the outputs a transaction spends or offers as
@@ -21,12 +22,17 @@ import pytest
 from services.cosign_policy import Approval, CosignRejected, evaluate_surrender
 from services.redemption_ledger import DAY_S, RedemptionLedger, create_ledger
 from tests.cosign_cases import golden, golden_scenario
+from tools.config import ALL_MERGE_ASSETS
+
+ALL_POLICIES = [asset.policy_id for asset in ALL_MERGE_ASSETS]
 
 ROOT = Path(__file__).resolve().parent.parent
 
 UNIT = "ab" * 28 + "01"
 OTHER = "ab" * 28 + "02"
 POOL_ROOT = (b"\x00" * 32, 0)
+# What the pool was funded for, per asset policy: here no less than its units' limits.
+FUNDED = {"ab" * 28: 6}
 
 
 def _tx(n: int) -> bytes:
@@ -60,7 +66,7 @@ def change(n: int) -> tuple[bytes, int]:
 def ledger(tmp_path):
     path = str(tmp_path / "ledger.sqlite3")
     create_ledger(path)
-    return RedemptionLedger(path, max_per_day=100)
+    return RedemptionLedger(path, max_per_day=100, funded=FUNDED)
 
 
 def rows(ledger: RedemptionLedger) -> int:
@@ -88,6 +94,54 @@ def test_a_unit_the_pin_does_not_list_is_refused(ledger):
     with pytest.raises(CosignRejected) as err:
         ledger.record(approval(1, POOL_ROOT, units={"cd" * 28: 1}), 1000.0, LIMITS)
     assert err.value.code == "redemption_limit"
+
+
+def _funded(tmp_path, funded: dict[str, int]) -> RedemptionLedger:
+    path = str(tmp_path / "funded.sqlite3")
+    create_ledger(path)
+    return RedemptionLedger(path, max_per_day=100, funded=funded)
+
+
+def _root(n: int) -> tuple[bytes, int]:
+    """A pool output no recorded transaction produced."""
+    return (bytes([0x40 + n]) * 32, 0)
+
+
+def test_an_asset_is_refused_past_what_the_pool_was_funded_for(tmp_path):
+    """Each unit is within its own limit; together they pass the asset's."""
+    ledger = _funded(tmp_path, {"ab" * 28: 3})
+    ledger.record(approval(1, _root(1), units={UNIT: 1}), 1000.0, LIMITS)
+    ledger.record(approval(2, _root(2), units={OTHER: 2}), 1000.0, LIMITS)
+    with pytest.raises(CosignRejected) as err:
+        ledger.record(approval(3, _root(3), units={OTHER: 1}), 1000.0, LIMITS)
+    assert err.value.code == "funded_supply"
+    assert "ab" * 28 in err.value.detail
+    assert rows(ledger) == 2
+
+
+def test_funded_supply_counts_surrenders_of_one_pool_output_once(tmp_path):
+    ledger = _funded(tmp_path, {"ab" * 28: 3})
+    ledger.record(approval(1, _root(1), units={OTHER: 3}), 1000.0, LIMITS)
+    ledger.record(approval(2, _root(1), units={OTHER: 3}), 1000.0, LIMITS)
+    with pytest.raises(CosignRejected) as err:
+        ledger.record(approval(3, _root(2), units={UNIT: 1}), 1000.0, LIMITS)
+    assert err.value.code == "funded_supply"
+
+
+def test_funded_supply_does_not_roll_over(tmp_path):
+    ledger = _funded(tmp_path, {"ab" * 28: 1})
+    ledger.record(approval(1, _root(1), units={OTHER: 1}), 1000.0, LIMITS)
+    with pytest.raises(CosignRejected) as err:
+        ledger.record(approval(2, _root(2), units={OTHER: 1}), 1000.0 + 10 * DAY_S, LIMITS)
+    assert err.value.code == "funded_supply"
+
+
+def test_an_asset_the_pool_was_not_funded_for_is_refused(tmp_path):
+    ledger = _funded(tmp_path, {"ab" * 28: 6})
+    unfunded = "cd" * 28 + "01"
+    with pytest.raises(CosignRejected) as err:
+        ledger.record(approval(1, _root(1), units={unfunded: 1}), 1000.0, {**LIMITS, unfunded: 5})
+    assert err.value.code == "funded_supply"
 
 
 def test_surrenders_of_one_pool_output_count_once(ledger):
@@ -228,7 +282,7 @@ def test_every_mainnet_surrender_replays_through_a_ledger(tmp_path):
     what an earlier one spent, three reuse an earlier one's collateral."""
     path = str(tmp_path / "replay.sqlite3")
     create_ledger(path)
-    ledger = RedemptionLedger(path, max_per_day=10**30)
+    ledger = RedemptionLedger(path, max_per_day=10**30, funded=dict.fromkeys(ALL_POLICIES, 10**30))
     landed = sorted((t["slot"], t["tx_hash"]) for t in golden()["transactions"] if t["kind"] == "surrender")
     for _, tx_hash in landed:
         s = golden_scenario(tx_hash)
@@ -261,7 +315,7 @@ def test_check_writes_nothing(ledger):
 
 def test_the_record_survives_a_restart(ledger):
     ledger.record(approval(1, POOL_ROOT), 1000.0, LIMITS)
-    reopened = RedemptionLedger(ledger.path, max_per_day=100)
+    reopened = RedemptionLedger(ledger.path, max_per_day=100, funded=FUNDED)
     with pytest.raises(CosignRejected):
         reopened.record(approval(2, after(1)), 1000.0, LIMITS)
 
@@ -314,7 +368,7 @@ def test_concurrent_writers_never_pass_the_cap(ledger):
 def test_a_missing_ledger_file_is_refused_and_not_created(tmp_path):
     path = tmp_path / "absent.sqlite3"
     with pytest.raises(FileNotFoundError, match="redemption_ledger init"):
-        RedemptionLedger(str(path), max_per_day=100)
+        RedemptionLedger(str(path), max_per_day=100, funded=FUNDED)
     assert not path.exists()
 
 
@@ -323,7 +377,7 @@ def test_a_file_that_is_not_a_ledger_is_refused(tmp_path, content):
     path = tmp_path / "other.sqlite3"
     path.write_bytes(content)
     with pytest.raises((ValueError, sqlite3.DatabaseError)):
-        RedemptionLedger(str(path), max_per_day=100)
+        RedemptionLedger(str(path), max_per_day=100, funded=FUNDED)
 
 
 def test_a_database_without_the_approvals_table_is_refused(tmp_path):
@@ -331,7 +385,7 @@ def test_a_database_without_the_approvals_table_is_refused(tmp_path):
     with sqlite3.connect(path) as conn:
         conn.execute("CREATE TABLE unrelated (x)")
     with pytest.raises(ValueError, match="not a redemption ledger"):
-        RedemptionLedger(str(path), max_per_day=100)
+        RedemptionLedger(str(path), max_per_day=100, funded=FUNDED)
 
 
 def test_a_ledger_that_does_not_record_spent_outputs_is_refused(tmp_path):
@@ -345,7 +399,7 @@ def test_a_ledger_that_does_not_record_spent_outputs_is_refused(tmp_path):
             " payout INTEGER NOT NULL, units TEXT NOT NULL, signed_at REAL NOT NULL)"
         )
     with pytest.raises(ValueError, match="not a redemption ledger"):
-        RedemptionLedger(str(path), max_per_day=100)
+        RedemptionLedger(str(path), max_per_day=100, funded=FUNDED)
 
 
 def test_a_ledger_removed_while_in_use_is_not_recreated(ledger):
@@ -360,7 +414,7 @@ def test_create_ledger_makes_an_empty_private_ledger(tmp_path):
     path = str(tmp_path / "new.sqlite3")
     create_ledger(path)
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
-    assert rows(RedemptionLedger(path, max_per_day=100)) == 0
+    assert rows(RedemptionLedger(path, max_per_day=100, funded=FUNDED)) == 0
 
 
 def test_create_ledger_never_replaces_an_existing_ledger(ledger):
@@ -375,7 +429,7 @@ def test_init_command_creates_the_ledger_once(tmp_path):
     command = [sys.executable, "-m", "services.redemption_ledger", "init", str(path)]
     first = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     assert first.returncode == 0, first.stderr
-    assert rows(RedemptionLedger(str(path), max_per_day=100)) == 0
+    assert rows(RedemptionLedger(str(path), max_per_day=100, funded=FUNDED)) == 0
     again = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     assert again.returncode != 0
     assert "exists" in again.stderr

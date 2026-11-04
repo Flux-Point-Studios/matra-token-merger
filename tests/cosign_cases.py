@@ -46,6 +46,7 @@ from tools.config import AGENT, T1_ADAM_PASS
 from tools.credential_denylist import DenyList, load_denylist
 from tools.process_surrender import (
     compute_redemption,
+    funded_limits,
     load_rate_table,
     load_redemption_pin,
 )
@@ -92,6 +93,7 @@ MAINNET = CosignConfig(
     supply_slot=PIN.supply_slot,
     max_payout_per_tx=20_000_000 * 10**6,
     denylist=CORPUS_DENYLIST,
+    funded_limits=funded_limits(RATES, PIN),
 )
 # The pin's limits before any surrender landed (nothing quarantined), so the
 # mainnet surrenders can be replayed through a signer's ledger.
