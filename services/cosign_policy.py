@@ -60,6 +60,7 @@ from pycardano import Address
 from tools.cardano_utils import SLOT_OFFSET_S
 from tools.credential_denylist import DEFAULT_DENYLIST_PATH, DenyList, PointerAddress, load_denylist
 from tools.process_surrender import (
+    compute_redemption,
     funded_limits,
     load_rate_table,
     load_redemption_pin,
@@ -415,7 +416,8 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
     """Build the policy from environment variables. Everything that decides
     what gets signed is required; only the data files default to the
     committed rate table, redemption pin and deny-list. A deny-list that is
-    missing or malformed raises."""
+    missing or malformed raises, and so does a per-transaction cap below what
+    one unit pays at most."""
 
     def need(key: str) -> str:
         value = env.get(key, "").strip()
@@ -430,6 +432,13 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
     deadline_ms = int(need("SURRENDER_DEADLINE_POSIX_MS"))
     pin = load_redemption_pin(Path(env.get("REDEMPTION_PIN_PATH") or DEFAULT_REDEMPTION_PIN_PATH))
     rate_table = load_rate_table(Path(env.get("RATE_TABLE_PATH") or DEFAULT_RATE_TABLE_PATH))
+    max_payout_per_tx = int(need("MAX_CMATRA_PER_TX"))
+    one_unit = max(compute_redemption(rate_table, name, 1) for name in rate_table["tokens"])
+    if max_payout_per_tx < one_unit:
+        raise ValueError(
+            f"MAX_CMATRA_PER_TX {max_payout_per_tx} is below {one_unit}, what one unit pays at most:"
+            " units that pay that could never be surrendered"
+        )
     return CosignConfig(
         network=network,
         pool_address=Address.from_primitive(need("SURRENDER_SCRIPT_ADDRESS")).to_primitive(),
@@ -443,7 +452,7 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         redemption_limits=pin.remaining,
         pinned_supply=pin.supply,
         supply_slot=pin.supply_slot,
-        max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
+        max_payout_per_tx=max_payout_per_tx,
         denylist=load_denylist(Path(env.get("DENYLIST_PATH") or DEFAULT_DENYLIST_PATH)),
         funded_limits=funded_limits(rate_table, pin),
     )
