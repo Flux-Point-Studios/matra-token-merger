@@ -848,6 +848,29 @@ def test_the_build_leaves_out_only_the_holders_it_need_not_spend(monkeypatch):
     assert asked == []
 
 
+def test_the_build_asks_where_at_most_256_holders_were_made(monkeypatch):
+    """An address can hold a unit in any number of outputs, each made by a
+    transaction of its own. The build asks where 256 of them are; the rest
+    go after those."""
+    asked: list[str] = []
+
+    class Chain:
+        def get_tx(self, tx_hash):
+            asked.append(tx_hash)
+            return {"hash": tx_hash, "slot": 10}
+
+    monkeypatch.setattr(api.state, "bf", Chain())
+    agent = MultiAsset()
+    agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 1})
+    user = Address(VerificationKeyHash(b"\x02" * 28), network=Network.TESTNET)
+    holders = [UTxO(TransactionInput(TransactionId(n.to_bytes(32, "big")), 0),
+                    TransactionOutput(user, Value(2_000_000, agent))) for n in range(1, 301)]
+    later = api._later_holders(holders, [{"policy_hex": AGENT_POLICY, "asset_hex": AGENT_NAME, "quantity": 1}])
+    assert len(asked) == len(set(asked)) == 256
+    [spent] = [u for u in holders if u not in later]
+    assert str(spent.input.transaction_id) in asked
+
+
 def _merge_a_pass_from_another_key_into_the_agent(world) -> str:
     """A T1 pass from another key reaches the claimant 15 minutes ago and is
     merged 10 minutes ago into the output holding its long-held AGENT. Returns

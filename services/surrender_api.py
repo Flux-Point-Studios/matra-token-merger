@@ -124,7 +124,7 @@ from services.cosign_policy import (
     split_tx,
 )
 from services.cosign_policy import evaluate_surrender as check_surrender
-from services.chain_check import ChainUnavailable, confirm_on_chain, placed_at
+from services.chain_check import MAX_PROVENANCE_LOOKUPS, ChainUnavailable, confirm_on_chain, placed_at
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
 from services.pager import Pager
@@ -1425,13 +1425,14 @@ def _later_holders(utxos: list[UTxO], legacy_assets: list[dict[str, Any]]) -> li
     surrendered. Left to itself the builder spends the UTxOs with the most
     ADA first, and could spend units that reached the claimant inside the
     cooling-off, which both signers refuse, while units held longer sit
-    unspent."""
+    unspent. The chain is asked where at most MAX_PROVENANCE_LOOKUPS of the
+    holders' transactions are; holders made by any others go after them."""
     made: dict[str, tuple[bool, int]] = {}
 
     def age(utxo: UTxO) -> tuple[bool, int, str, int]:
         tx_hash = str(utxo.input.transaction_id)
         if tx_hash not in made:
-            slot = placed_at(tx_hash, state.bf)
+            slot = placed_at(tx_hash, state.bf) if len(made) < MAX_PROVENANCE_LOOKUPS else None
             made[tx_hash] = (slot is None, slot or 0)
         return *made[tx_hash], tx_hash, utxo.input.index
 
