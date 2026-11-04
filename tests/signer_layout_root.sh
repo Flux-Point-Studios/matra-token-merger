@@ -47,13 +47,13 @@ step "both signers from this commit"
 "$install_signer" a2
 
 step "an operator account holding the ledgers the old layout kept, one approval each"
-useradd --create-home --shell /bin/bash operator
-chmod 0750 /home/operator
-old_a1=/home/operator/surrender-api/data/surrender-ledger.sqlite3
-old_a2=/home/operator/cmatra-cosigner/data/cosigned.sqlite3
+useradd --create-home --shell /bin/bash c1op
+chmod 0750 /home/c1op
+old_a1=/home/c1op/surrender-api/data/surrender-ledger.sqlite3
+old_a2=/home/c1op/cmatra-cosigner/data/cosigned.sqlite3
 for old in "$old_a1" "$old_a2"; do
-    runuser -u operator -- install -d -m 0700 "$(dirname "$old")"
-    (cd /opt/cmatra-a1/app && runuser -u operator -- .venv/bin/python - "$old" <<'PY'
+    runuser -u c1op -- install -d -m 0700 "$(dirname "$old")"
+    (cd /opt/cmatra-a1/app && runuser -u c1op -- .venv/bin/python - "$old" <<'PY'
 import json, sqlite3, sys
 from services.redemption_ledger import create_ledger
 create_ledger(sys.argv[1])
@@ -84,11 +84,11 @@ k2=$(block K2)
 declare -A pkh
 for pair in "cmatra-a1 admin_1" "cmatra-a2 admin_2"; do
     read -r U K <<< "$pair"
-    line=$(cd /home/operator && eval "$k2") || fail "K2 failed for $U"
+    line=$(cd /home/c1op && eval "$k2") || fail "K2 failed for $U"
     pkh[$U]=${line##* }
     [[ ${pkh[$U]} =~ ^[0-9a-f]{56}$ ]] || fail "K2 printed no key hash for $U: $line"
     before=$(sha256sum < "/var/lib/$U/keys/$K.skey")
-    if (cd /home/operator && eval "$k2") >/dev/null 2>&1; then fail "K2 ran over $U's existing key"; fi
+    if (cd /home/c1op && eval "$k2") >/dev/null 2>&1; then fail "K2 ran over $U's existing key"; fi
     [[ $(sha256sum < "/var/lib/$U/keys/$K.skey") == "$before" ]] || fail "K2 changed $U's existing key"
 done
 pkh1=${pkh[cmatra-a1]} pkh2=${pkh[cmatra-a2]}
@@ -149,21 +149,21 @@ step "what each user can and cannot touch"
 runuser -u cmatra-a1 -- test -w /var/lib/cmatra-a1/ledger || fail "cmatra-a1 cannot write its ledger directory"
 for denied in "cmatra-a1 -w /opt/cmatra-a1/app/services" "cmatra-a1 -r /etc/cmatra-a1/env.surrender-api" \
               "cmatra-a1 -r /var/lib/cmatra-a2/keys/admin_2.skey" "cmatra-a2 -r /var/lib/cmatra-a1/keys/admin_1.skey" \
-              "operator -r /var/lib/cmatra-a1/keys/admin_1.skey" "operator -r /etc/cmatra-a2/env.cosigner"; do
+              "c1op -r /var/lib/cmatra-a1/keys/admin_1.skey" "c1op -r /etc/cmatra-a2/env.cosigner"; do
     read -r who mode path <<< "$denied"
     if runuser -u "$who" -- test "$mode" "$path"; then fail "$who passes test $mode $path"; fi
 done
 
 step "W1: new admin_1 witnesses a transaction as cmatra-a1, from a directory it cannot enter"
-install -d -m 0700 -o operator -g operator /home/operator/c1-ceremony
-python3 - "$repo/ceremony/c1/chain/pool-parent.cbor.json" /home/operator/c1-ceremony/c1a.unsigned.tx <<'PY'
+install -d -m 0700 -o c1op -g c1op /home/c1op/c1-ceremony
+python3 - "$repo/ceremony/c1/chain/pool-parent.cbor.json" /home/c1op/c1-ceremony/c1a.unsigned.tx <<'PY'
 import json, sys
 json.dump({"type": "Tx ConwayEra", "description": "", "cborHex": json.load(open(sys.argv[1]))["cbor"]}, open(sys.argv[2], "w"))
 PY
 w1=$(block W1)
 # shellcheck disable=SC2034  # W1 reads FILE
-(cd /home/operator/c1-ceremony && FILE=c1a && eval "$w1")
-in_release - /home/operator/c1-ceremony/c1a.new1.witness /home/operator/c1-ceremony/c1a.unsigned.tx "$pkh1" <<'PY'
+(cd /home/c1op/c1-ceremony && FILE=c1a && eval "$w1")
+in_release - /home/c1op/c1-ceremony/c1a.new1.witness /home/c1op/c1-ceremony/c1a.unsigned.tx "$pkh1" <<'PY'
 import hashlib, json, sys
 from services.cosign_policy import signature_verifies, split_tx
 from tools.pool_migration import _key_witness
