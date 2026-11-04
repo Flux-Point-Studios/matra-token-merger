@@ -42,7 +42,7 @@ from services.cosign_policy import Approval, CosignRejected
 from tests.cbor_encode import encode
 from tests.cosign_cases import MAINNET, PIN, FakeChain, blake, http_error
 from tools.api_clients import BlockfrostClient, BlockfrostUnavailable
-from tools.config import AGENT, chain_api_base_url, FLUX_PASS, T1_ADAM_PASS, T2_ADAM_PASS
+from tools.config import AGENT, SHARDS, chain_api_base_url, FLUX_PASS, T1_ADAM_PASS, T2_ADAM_PASS
 
 ROOT = Path(__file__).resolve().parent.parent
 T1_UNIT = next(u for u in sorted(PIN.nft_units) if u.startswith(T1_ADAM_PASS.policy_id))
@@ -119,11 +119,14 @@ def a_unit_burned_below_its_pinned_supply(confirm):
 def _minted_past_its_pinned_supply(unit: str) -> Callable:
     def run(confirm):
         grown = _chain(supply={unit: PIN.supply[unit] + 1})
-        confirm(_approval({AGENT.unit: 5, T1_UNIT: 1}), MAINNET, grown, NOTHING_RECORDED)
+        confirm(_approval({AGENT.unit: 5, T1_UNIT: 1, unit: 1}), MAINNET, grown, NOTHING_RECORDED)
     return run
 
 
-for _name, _unit in (("nft", T1_UNIT), ("fungible", AGENT.unit)):
+# The T1 and T2 policy keys are exposed, and the SHARDS policy can still
+# mint: a unit of any of them minted past its pinned supply is refused.
+T2_UNIT = next(u for u in sorted(PIN.nft_units) if u.startswith(T2_ADAM_PASS.policy_id))
+for _name, _unit in (("nft", T1_UNIT), ("fungible", AGENT.unit), ("t2", T2_UNIT), ("shards", SHARDS.unit)):
     PROBES.append(Probe(f"{_name}_minted_past_its_pinned_supply", "supply_grown",
                         _minted_past_its_pinned_supply(_unit), _unit))
 
