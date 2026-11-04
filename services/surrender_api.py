@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -543,7 +544,8 @@ app.add_middleware(
 
 @app.middleware("http")
 async def verify_api_secret(request: Request, call_next):
-    """Reject requests to mutating endpoints without valid API secret."""
+    """Reject requests to mutating endpoints without the API secret,
+    compared in constant time."""
     # Health and pool-status are read-only — allow without secret
     if request.url.path in ("/health", "/pool-status", "/docs", "/openapi.json"):
         return await call_next(request)
@@ -558,8 +560,8 @@ async def verify_api_secret(request: Request, call_next):
             content={"detail": "Service not configured"},
         )
 
-    provided = request.headers.get("x-api-secret", "")
-    if not provided or provided != API_SECRET:
+    provided = request.headers.get("x-api-secret", "").encode()
+    if not hmac.compare_digest(provided, API_SECRET.encode()):
         from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=403,
