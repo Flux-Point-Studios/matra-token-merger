@@ -58,3 +58,27 @@ steps:
       # fail loud if a resolver change brings it back.
       - if pip show cbor2pure >/dev/null 2>&1; then echo "ERROR cbor2pure present — pycardano cap regressed" >&2; exit 1; fi
       - pytest -q
+
+  - name: c1-ceremony
+    # ceremony/c1: the simulation offline against its recorded chain reads,
+    # evaluate.py on the transactions it builds, and the mutation run over
+    # RUNBOOK.md's shell blocks, under the aiken and cardano-cli it pins
+    image: nikolaik/python-nodejs:python3.12-nodejs20
+    commands:
+      - apt-get update -qq && apt-get install -y -qq jq >/dev/null
+      - curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
+      - export PATH="$HOME/.aiken/bin:$PATH"
+      - aikup install v1.1.21
+      - bash services/deploy/install-cardano-cli.sh /usr/local/bin
+      - python -m pip install --upgrade pip -q
+      - pip install -q --require-hashes -r services/deploy/requirements-cosigner.txt
+      - pip install -q -e ".[dev]"
+      - pytest -q ceremony/c1
+
+  - name: signer-layout
+    # as root in a throwaway container: both signers laid out under their own
+    # users as the C1 runbook does it, checked, and started dark
+    image: python:3.12-slim-bookworm
+    commands:
+      - apt-get update -qq && apt-get install -y -qq git curl >/dev/null
+      - bash tests/signer_layout_root.sh
