@@ -33,6 +33,8 @@ dev = [
     # here so the import chain resolves under pytest.
     "fastapi>=0.115.0",
     "httpx>=0.27.0",
+    # The deny-list's published schema is checked against its loader.
+    "jsonschema>=4.18.0",
 ]
 
 [tool.setuptools.packages.find]
