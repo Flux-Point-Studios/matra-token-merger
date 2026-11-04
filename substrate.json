@@ -15,7 +15,7 @@
     {
       "id": "cmatra-claim-validator",
       "name": "cMATRA claim validator",
-      "desc": "Dual-admin surrender pool: seven legacy assets in at TWAP-locked rates, cMATRA out, with a fixed redemption deadline.",
+      "desc": "Dual-admin surrender pool: seven legacy assets in at TWAP-locked rates, cMATRA out, with a fixed redemption deadline. apply_params.sh applies an admin pair and deadline under the audited compiler, and verify_build.sh proves every pool in deployed_pools.txt is this source re-applied (the v2 pool to e1a181b2).",
       "kind": "contract",
       "paths": [
         "onchain/claim_validator"

@@ -124,5 +124,25 @@ else
     echo "to enable hash verification."
 fi
 
+# --- Deployed pools: this source with each pool's parameters applied ---
+echo ""
+echo "--- Deployed pools ---"
+applied_dir="$(mktemp -d)"
+trap 'rm -rf "$applied_dir"' EXIT
+pools=0
+while read -r pkh1 pkh2 deadline expected; do
+    [[ -z "$pkh1" || "$pkh1" == \#* ]] && continue
+    pools=$((pools + 1))
+    got=$(./apply_params.sh "$pkh1" "$pkh2" "$deadline" "$applied_dir/pool.json" 2>/dev/null \
+        | awk '$1 == "script_hash" {print $2}')
+    if [[ "$got" == "$expected" ]]; then
+        echo "PASS: $expected = apply($pkh1, $pkh2, $deadline)"
+    else
+        echo "FAIL: apply($pkh1, $pkh2, $deadline) = ${got:-<nothing>}, deployed $expected"
+        exit 1
+    fi
+done < deployed_pools.txt
+[[ $pools -gt 0 ]] || { echo "FAIL: deployed_pools.txt lists no pool"; exit 1; }
+
 echo ""
 echo "=== Verification complete ==="
