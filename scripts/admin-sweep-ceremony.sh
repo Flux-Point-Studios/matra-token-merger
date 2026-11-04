@@ -89,6 +89,10 @@ fi
 # shellcheck disable=SC1090
 source "$PARAMS_FILE"
 
+REPO_ROOT="${REPO_ROOT:?REPO_ROOT must be set by sweep_params.env}"
+PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
+export PYTHONPATH
+
 # The remainder goes only to the custody address the params name.
 if [[ "$STAGE" != "help" ]]; then
   [[ -n "${SWEEP_DEST_ADDR:-}" ]] || {
@@ -97,11 +101,9 @@ if [[ "$STAGE" != "help" ]]; then
     echo "ERROR: SWEEP_DEST_ADDR is not a mainnet address" >&2; exit 1; }
   [[ "$SWEEP_DEST_ADDR" != "$ADMIN_1_ADDR" ]] || {
     echo "ERROR: SWEEP_DEST_ADDR is admin_1's own address; the remainder goes to custody" >&2; exit 1; }
+  python3 -m tools.sweep_helpers check-destination --addr "$SWEEP_DEST_ADDR" >&2 || {
+    echo "ERROR: SWEEP_DEST_ADDR fails the deny-list check above" >&2; exit 1; }
 fi
-
-REPO_ROOT="${REPO_ROOT:?REPO_ROOT must be set by sweep_params.env}"
-PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
-export PYTHONPATH
 
 # ---- Helpers ----
 

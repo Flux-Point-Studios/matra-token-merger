@@ -3,7 +3,10 @@
 The golden fixture (tests/fixtures/cosign_golden.json.gz, rebuilt by
 scripts/fetch_cosign_golden.py) holds every transaction that ever touched the
 surrender pool address, the bodies of the transactions that produced their
-inputs, and the PlutusV3 language views in force when each was built.
+inputs, and the PlutusV3 language views in force when each was built. The
+forfeited-claims fixture (tests/fixtures/forfeited_claims.json.gz, rebuilt by
+the same script with --forfeited) holds the 19 surrenders the attacker made
+with passes taken from W1, in the same form.
 
 Each adversarial case starts from a real surrender and changes one thing an
 attacker holding one admin key could change. The expected value is the exact
@@ -37,6 +40,7 @@ from services.cosign_policy import (
 )
 from tests.cbor_encode import encode
 from tools.config import AGENT, T1_ADAM_PASS
+from tools.credential_denylist import DenyList, load_denylist
 from tools.process_surrender import (
     compute_redemption,
     load_rate_table,
@@ -45,6 +49,7 @@ from tools.process_surrender import (
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_PATH = ROOT / "tests/fixtures/cosign_golden.json.gz"
+FORFEITED_PATH = ROOT / "tests/fixtures/forfeited_claims.json.gz"
 
 POOL_BECH32 = "addr1w8s6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg9mn27a"
 QUARANTINE_BECH32 = "addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl"
@@ -60,6 +65,14 @@ RATES = load_rate_table(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json")
 PIN_PATH = ROOT / "audit_pack/2026-09-27/redemption_pin.json"
 PIN = load_redemption_pin(PIN_PATH)
 REDEEMABLE = PIN.nft_units
+COMMITTED_DENYLIST = load_denylist(ROOT / "audit_pack/2026-11-01/denylist.json")
+
+# Credentials only the corpus denies; no mainnet surrender names them.
+DENIED_KEY, DENIED_STAKE, DENIED_SCRIPT = b"\xd1" * 28, b"\xd2" * 28, b"\xd3" * 28
+CORPUS_DENYLIST = DenyList(
+    labels={DENIED_KEY: "corpus payment key", DENIED_STAKE: "corpus stake key", DENIED_SCRIPT: "corpus script"},
+    allowed=frozenset(), sha256="corpus",
+)
 
 MAINNET = CosignConfig(
     network="mainnet",
@@ -75,6 +88,7 @@ MAINNET = CosignConfig(
     pinned_supply=PIN.supply,
     supply_slot=PIN.supply_slot,
     max_payout_per_tx=20_000_000 * 10**6,
+    denylist=CORPUS_DENYLIST,
 )
 # The pin's limits before any surrender landed (nothing quarantined), so the
 # mainnet surrenders can be replayed through a signer's ledger.
@@ -116,7 +130,14 @@ def golden() -> dict[str, Any]:
         return json.load(fh)
 
 
+@lru_cache(maxsize=1)
+def forfeited() -> dict[str, Any]:
+    with gzip.open(FORFEITED_PATH, "rt") as fh:
+        return json.load(fh)
+
+
 SURRENDER_HASHES = [t["tx_hash"] for t in golden()["transactions"] if t["kind"] == "surrender"]
+FORFEITED_HASHES = [t["tx_hash"] for t in forfeited()["transactions"]]
 
 
 @dataclass(frozen=True)
@@ -129,7 +150,14 @@ class Scenario:
 
 
 def golden_scenario(tx_hash: str) -> Scenario:
-    doc = golden()
+    return _scenario(golden(), tx_hash)
+
+
+def forfeited_scenario(tx_hash: str) -> Scenario:
+    return _scenario(forfeited(), tx_hash)
+
+
+def _scenario(doc: dict[str, Any], tx_hash: str) -> Scenario:
     row = next(t for t in doc["transactions"] if t["tx_hash"] == tx_hash)
     tx = bytes.fromhex(row["tx_cbor"])
     body = decode(split_tx(tx)[0])
@@ -753,9 +781,77 @@ def claimant_pays_from_a_script_with_a_script_stake_part(d):
     _retarget_claimant(d, bytes([0x31]) + b"\xab" * 28 + b"\xcd" * 28)
 
 
-@case("claimant_not_key_address")
+@case("pointer_address")
 def claimant_pays_from_a_script_pointer_address(d):
     _retarget_claimant(d, bytes([0x51]) + b"\xab" * 28 + b"\x01\x01\x01")
+
+
+# -- the deny-list -------------------------------------------------------------
+
+CLEAN = b"\x0c" * 28  # a credential no list names
+BYRON = bytes.fromhex("82d818582183581c") + b"\x01" * 28 + bytes.fromhex("a0001a01020304")
+
+
+def _input_at(d: Draft, address: bytes) -> list:
+    """A reference to a new 2 ADA output at ``address``."""
+    return [d.add_parent([[address, 2_000_000]]), 0]
+
+
+@case("denied_credential")
+def claimant_denied_by_its_payment_key(d):
+    _retarget_claimant(d, bytes([0x01]) + DENIED_KEY + CLEAN)
+
+
+@case("denied_credential")
+def claimant_denied_by_its_stake_key(d):
+    _retarget_claimant(d, bytes([0x01]) + CLEAN + DENIED_STAKE)
+
+
+@case("denied_credential")
+def claimant_denied_by_a_script_as_its_stake_part(d):
+    _retarget_claimant(d, bytes([0x21]) + CLEAN + DENIED_SCRIPT)
+
+
+@case("denied_credential")
+def claimant_denied_at_an_enterprise_address(d):
+    _retarget_claimant(d, bytes([0x61]) + DENIED_KEY)
+
+
+@case("pointer_address")
+def claimant_pays_from_a_key_pointer_address(d):
+    """A pointer names the stake credential by a chain certificate, which the
+    deny-list cannot check."""
+    _retarget_claimant(d, bytes([0x41]) + CLEAN + b"\x81\x00\x01")
+
+
+@case("denied_credential")
+def an_input_from_a_denied_address(d):
+    d.set_inputs(d.inputs() + [_input_at(d, bytes([0x61]) + DENIED_KEY)])
+
+
+@case("denied_credential")
+def collateral_from_a_denied_address(d):
+    d.body[13] = Tag(258, [_input_at(d, bytes([0x01]) + CLEAN + DENIED_STAKE)])
+
+
+@case("denied_credential")
+def collateral_return_to_a_denied_address(d):
+    d.body[16][0] = bytes([0x01]) + CLEAN + DENIED_STAKE
+
+
+@case("denied_credential")
+def change_paid_to_a_denied_address(d):
+    d.body[1][CHANGE][0] = bytes([0x61]) + DENIED_KEY
+
+
+@case("output_shape")
+def change_paid_to_a_byron_address(d):
+    d.body[1][CHANGE][0] = BYRON
+
+
+@case("output_shape")
+def change_paid_to_an_address_one_byte_long(d):
+    d.body[1][CHANGE][0] = d.claimant() + b"\x00"
 
 
 @case("collateral_not_claimant")

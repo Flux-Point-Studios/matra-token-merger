@@ -7,6 +7,10 @@ Wraps tools/process_surrender.py to provide HTTP endpoints for:
   - Submitting them once the user has signed, with both admins' signatures
   - Pool status queries
 
+An address that names a credential on the deny-list (or that the list cannot
+check) is refused with 403 at every route that takes one, before any chain
+query, key use or pool-tip lock; the service does not start without the list.
+
 Signing flow:
   1. Frontend sends user's address + assets to surrender
   2. Server builds tx: pool UTxO (script) + user UTxOs → cMATRA to user + legacy to quarantine
@@ -35,6 +39,7 @@ import sys
 import time
 import uuid
 from collections import UserList
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +113,13 @@ from services.cosign_policy import (
     split_tx,
 )
 from services.cosign_policy import evaluate_surrender as check_surrender
+from tools.credential_denylist import (
+    DEFAULT_DENYLIST_PATH,
+    DenyList,
+    PointerAddress,
+    load_denylist,
+    log_denylist,
+)
 from services.chain_check import ChainUnavailable, confirm_on_chain
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
@@ -130,6 +142,7 @@ RATE_TABLE_PATH: str = os.environ.get("RATE_TABLE_PATH") or str(DEFAULT_RATE_TAB
 REDEMPTION_PIN_PATH: str = (
     os.environ.get("REDEMPTION_PIN_PATH") or str(DEFAULT_REDEMPTION_PIN_PATH)
 )
+DENYLIST_PATH: str = os.environ.get("DENYLIST_PATH") or str(DEFAULT_DENYLIST_PATH)
 BLUEPRINT_PATH: str = os.environ.get(
     "BLUEPRINT_PATH",
     str(_PROJECT_ROOT / "onchain/claim_validator/plutus.json"),
@@ -374,6 +387,8 @@ class AppState:
     # The co-signer's own policy, run here first: this service refuses to sign
     # a transaction the co-signer would refuse.
     cosign_config: CosignConfig | None = None
+    # The credentials no route serves, the same list the policy refuses.
+    denylist: DenyList | None = None
     ledger: RedemptionLedger | None = None
     built_bodies: dict[str, bytes] = {}
     # tx hash -> (producing bodies, language views) for the co-signer.
@@ -564,6 +579,8 @@ async def startup():
     )
     state.redeemable_nfts = load_redemption_pin(Path(REDEMPTION_PIN_PATH)).nft_units
     logger.info("Loaded %d redeemable NFT unit(s)", len(state.redeemable_nfts))
+    state.denylist = load_denylist(DENYLIST_PATH)
+    log_denylist(logger, state.denylist)
 
     # Script
     if Path(BLUEPRINT_PATH).exists():
@@ -618,11 +635,11 @@ async def startup():
                 "COSIGNER_URL needs COSIGNER_PKH, SURRENDER_LEDGER_PATH, MAX_CMATRA_PER_DAY and the admin key"
             )
         state.cosigner_pkh = VerificationKeyHash(bytes.fromhex(COSIGNER_PKH))
-        state.cosign_config = load_config(
+        state.cosign_config = replace(load_config(
             {**os.environ, "RATE_TABLE_PATH": RATE_TABLE_PATH,
-             "REDEMPTION_PIN_PATH": REDEMPTION_PIN_PATH},
+             "REDEMPTION_PIN_PATH": REDEMPTION_PIN_PATH, "DENYLIST_PATH": DENYLIST_PATH},
             [state.admin_pkh.payload, state.cosigner_pkh.payload],
-        )
+        ), denylist=state.denylist)
         state.ledger = RedemptionLedger(SURRENDER_LEDGER_PATH, int(MAX_CMATRA_PER_DAY))
         logger.info("Co-signer PKH: %s", COSIGNER_PKH[:16])
 
@@ -721,6 +738,25 @@ async def _pool_tip_watchdog() -> None:
 # ---------------------------------------------------------------------------
 # Build surrender — two-party co-signing
 # ---------------------------------------------------------------------------
+
+
+def _refuse_denied_address(address: Address) -> None:
+    """403 for an address that names a credential on the deny-list, or whose
+    credentials the list cannot check; 503 while no list is loaded."""
+    if state.denylist is None:
+        raise HTTPException(503, "Deny-list not loaded")
+    try:
+        label = state.denylist.denied(address.to_primitive())
+    except PointerAddress:
+        logger.warning("Refused pointer address %s", str(address)[:24])
+        raise HTTPException(403, {"code": "pointer_address",
+                                  "message": "Use a base or enterprise address to surrender."})
+    except ValueError:
+        raise HTTPException(400, "Invalid Cardano address encoding")
+    if label is not None:
+        logger.warning("Refused %s: denied credential (%s)", address, label)
+        raise HTTPException(403, {"code": "denied_credential",
+                                  "message": "This address cannot use the merger."})
 
 
 def _build_asset_lookup() -> dict[str, Any]:
@@ -864,6 +900,7 @@ async def build_surrender(req: BuildSurrenderRequest):
         raise
     except Exception:
         raise HTTPException(400, "Invalid Cardano address encoding")
+    _refuse_denied_address(user_addr_check)
 
     # Closed-beta whitelist gate. If ALLOWED_USER_ADDRESSES is non-empty, only
     # those exact bech32 addresses may build a surrender tx. Empty = open
@@ -1919,6 +1956,7 @@ async def prepare_defrag(req: PrepareDefragRequest):
         raise
     except Exception:
         raise HTTPException(400, "Invalid Cardano address encoding")
+    _refuse_denied_address(addr_check)
 
     # Same closed-beta gate as /build-surrender.
     if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
@@ -2176,6 +2214,11 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     """
     if not req.user_address.startswith("addr1"):
         raise HTTPException(400, "Invalid Cardano mainnet address")
+    try:
+        user_addr = Address.from_primitive(req.user_address)
+    except Exception:
+        raise HTTPException(400, "Invalid Cardano address encoding")
+    _refuse_denied_address(user_addr)
     if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
         raise HTTPException(403, "Surrender window not yet open")
     if not state.rate_table:

@@ -29,6 +29,7 @@ from pycardano import (
     Network,
     PaymentSigningKey,
     PlutusV3Script,
+    PointerAddress,
     RawPlutusData,
     TransactionBody,
     TransactionInput,
@@ -37,7 +38,7 @@ from pycardano import (
     Value,
     plutus_script_hash,
 )
-from pycardano.hash import ScriptHash, TransactionId
+from pycardano.hash import ScriptHash, TransactionId, VerificationKeyHash
 
 import services.cosigner_api as cosigner
 import services.surrender_api as api
@@ -45,7 +46,15 @@ from services.chain_check import ChainUnavailable
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger, create_ledger
-from tests.cosign_cases import PIN, FakeChain, ledger_refusing_writes, not_found
+from tests.cosign_cases import (
+    COMMITTED_DENYLIST,
+    PIN,
+    FakeChain,
+    key_address,
+    ledger_refusing_writes,
+    not_found,
+    throwaway_key,
+)
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
 from tools.process_surrender import load_rate_table, load_redemption_pin, surrendered_entitlement
@@ -57,9 +66,16 @@ T1_UNITS = sorted(u for u in REDEEMABLE if u.startswith(T1_ADAM_PASS.policy_id))
 FLUX_UNIT = next(u for u in sorted(REDEEMABLE) if u.startswith(FLUX_PASS.policy_id))
 # A pinned pass the pin still redeems; the synthetic claimant holds it.
 PASS = next(u for u in T1_UNITS if PIN.remaining[u] > 0)
-MAINNET_USER = (
-    "addr1q9s6m9d8yedfcf53yhq5j5zsg0s58wpzamwexrxpfelgz2wgk0s9l9fqc93tyc8zu4z7hp9dlska2kew9trdg8nscjcq3sk5s3"
-)
+MAINNET_USER = Address.from_primitive(key_address(throwaway_key(7))).encode()
+# Addresses the committed deny-list names: W1, W2 (the FPS treasury), and the
+# attacker's collection and claim addresses.
+DENIED_USERS = {
+    "W1": "addr1q9jzvg6qqefx4c8eqsez4fnsxfdmcjtz4ku9f0fgju6ymc7ehhk8tdd2j0fqtn7975krepy8a7l8cepk5gyzyq7g6l6sktytnt",
+    "W2": "addr1q9s6m9d8yedfcf53yhq5j5zsg0s58wpzamwexrxpfelgz2wgk0s9l9fqc93tyc8zu4z7hp9dlska2kew9trdg8nscjcq3sk5s3",
+    "attacker": "addr1qxqf5syeture53vzrjgh2j3gwknylp62famesvv9hf5manv7jwqtqyr950fw8anzxavs6c8l6jxg033jquchc8dxns7qm366em",
+    "claims": "addr1qx53hw2d3xhh3eqt6skfnqw0r7cjvm09yw3f6exvrlk4j88pjuvalvn7yf4ec5msyjgan7ur5hjs7d7x59jnfmjchngs5sp0tr",
+}
+POINTER_USER = Address(VerificationKeyHash(b"\x0c" * 28), PointerAddress(1, 2, 3), Network.MAINNET).encode()
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +104,7 @@ def validating(monkeypatch):
     monkeypatch.setattr(api, "CMATRA_ASSET_HEX", "634d41545241")
     monkeypatch.setattr(api, "QUARANTINE_ADDRESS", script_addr.encode())
     monkeypatch.setattr(api, "ALLOWED_USER_ADDRESSES", frozenset())
+    monkeypatch.setattr(api.state, "denylist", COMMITTED_DENYLIST)
     monkeypatch.setattr(api.state, "rate_table", RATES)
     monkeypatch.setattr(api.state, "redeemable_nfts", REDEEMABLE)
     monkeypatch.setattr(api.state, "script_cbor_hex", _SCRIPT_HEX)
@@ -99,9 +116,55 @@ def validating(monkeypatch):
     return seen
 
 
-def _build(assets) -> None:
+def _build(assets, user: str = MAINNET_USER) -> None:
     asyncio.run(api.build_surrender(
-        api.BuildSurrenderRequest(user_address=MAINNET_USER, assets=assets)))
+        api.BuildSurrenderRequest(user_address=user, assets=assets)))
+
+
+def _defrag(user: str) -> None:
+    asyncio.run(api.prepare_defrag(api.PrepareDefragRequest(user_address=user)))
+
+
+def _evaluate(user: str) -> None:
+    api.evaluate_surrender(api.BuildSurrenderRequest(user_address=user, assets=[_item("AGENT", 1000)]))
+
+
+ROUTES = {"build": lambda user: _build([_item("AGENT", 1000)], user), "evaluate": _evaluate, "defrag": _defrag}
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("who", DENIED_USERS)
+def test_a_denied_address_is_refused_before_anything_is_built(validating, monkeypatch, route, who):
+    built = []
+    monkeypatch.setattr(api, "_build_defrag_tx_blocking", lambda *args: built.append(args))
+    monkeypatch.setattr(api, "find_pool_utxos", lambda *args: built.append(args))
+    with pytest.raises(HTTPException) as err:
+        ROUTES[route](DENIED_USERS[who])
+    assert err.value.status_code == 403
+    assert err.value.detail["code"] == "denied_credential"
+    assert validating == {} and built == []
+    assert api.state.tip_mgr.chain_state() is None
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_pointer_address_is_refused_before_anything_is_built(validating, monkeypatch, route):
+    built = []
+    monkeypatch.setattr(api, "_build_defrag_tx_blocking", lambda *args: built.append(args))
+    monkeypatch.setattr(api, "find_pool_utxos", lambda *args: built.append(args))
+    with pytest.raises(HTTPException) as err:
+        ROUTES[route](POINTER_USER)
+    assert err.value.status_code == 403
+    assert err.value.detail["code"] == "pointer_address"
+    assert validating == {} and built == []
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_without_a_denylist_nothing_is_built(validating, monkeypatch, route):
+    monkeypatch.setattr(api.state, "denylist", None)
+    with pytest.raises(HTTPException) as err:
+        ROUTES[route](MAINNET_USER)
+    assert err.value.status_code == 503
+    assert validating == {}
 
 
 @pytest.mark.parametrize("assets,reason", [
@@ -331,6 +394,7 @@ class World:
         m.setattr(api.state, "built_bodies", {})
         m.setattr(api.state, "cosign_config", load_config(env, [admin_pkh.payload, cosigner_pkh.payload]))
         m.setattr(api, "ALLOWED_USER_ADDRESSES", frozenset())
+        m.setattr(api.state, "denylist", COMMITTED_DENYLIST)
         m.setattr(api.state, "rate_table", RATES)
         m.setattr(api.state, "redeemable_nfts", REDEEMABLE)
         m.setattr(api.state, "tip_mgr", PoolTipManager(

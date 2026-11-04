@@ -4,6 +4,9 @@ The pool validator checks the two admin signatures and the time window; every
 other property of a surrender is checked here, off chain, by each signer. The
 policy reads the complete transaction and approves only a surrender:
 
+  * no input, collateral input, collateral return or output at an address
+    that names a credential on the deny-list, in either part; a pointer
+    address, whose stake credential the list cannot check, is refused too;
   * exactly one pool input, holding only ADA and cMATRA under the Void inline
     datum; every other input and all collateral from one key-hash address on
     the pool's network (the claimant), which is not an admin key. Each input is
@@ -54,6 +57,7 @@ from nacl.signing import VerifyKey
 from pycardano import Address
 
 from tools.cardano_utils import SLOT_OFFSET_S
+from tools.credential_denylist import DEFAULT_DENYLIST_PATH, DenyList, PointerAddress, load_denylist
 from tools.process_surrender import (
     load_rate_table,
     load_redemption_pin,
@@ -330,6 +334,19 @@ def _is_key_address(address: bytes) -> bool:
     return address[0] >> 4 in (0, 2, 4, 6)
 
 
+def _refuse_denied(address: bytes, cfg: CosignConfig) -> None:
+    """Refuse ``address`` if it names a credential on the deny-list, or
+    names its credentials in a way the list cannot check."""
+    try:
+        label = cfg.denylist.denied(address)
+    except PointerAddress as exc:
+        raise CosignRejected("pointer_address", str(exc)) from exc
+    except ValueError as exc:
+        raise CosignRejected("output_shape", str(exc)) from exc
+    if label is not None:
+        raise CosignRejected("denied_credential", f"{address.hex()}: {label}")
+
+
 def slot_at(posix_seconds: float, network: str) -> int:
     return int(posix_seconds) - SLOT_OFFSET_S[network]
 
@@ -387,12 +404,14 @@ class CosignConfig:
     pinned_supply: Mapping[str, int]
     supply_slot: int
     max_payout_per_tx: int
+    denylist: DenyList
 
 
 def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignConfig:
     """Build the policy from environment variables. Everything that decides
-    what gets signed is required; only the two data files default to the
-    committed rate table and redemption pin."""
+    what gets signed is required; only the data files default to the
+    committed rate table, redemption pin and deny-list. A deny-list that is
+    missing or malformed raises."""
 
     def need(key: str) -> str:
         value = env.get(key, "").strip()
@@ -420,6 +439,7 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         pinned_supply=pin.supply,
         supply_slot=pin.supply_slot,
         max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
+        denylist=load_denylist(Path(env.get("DENYLIST_PATH") or DEFAULT_DENYLIST_PATH)),
     )
 
 
@@ -507,6 +527,8 @@ def evaluate_surrender(
     spent = dict(resolve(raw) for raw in input_refs)
     if len(spent) != len(input_refs):
         raise CosignRejected("duplicate_input", "an input is listed twice")
+    for out in spent.values():
+        _refuse_denied(out.address, cfg)
     pool_refs = [ref for ref, out in spent.items() if out.address == cfg.pool_address]
     if len(pool_refs) != 1:
         raise CosignRejected("pool_input_count", f"{len(pool_refs)} pool inputs")
@@ -530,10 +552,15 @@ def evaluate_surrender(
         raise CosignRejected("claimant_network", "claimant address is on another network")
 
     collateral = [resolve(raw) for raw in _elements(body.get(13, []))]
+    for _, out in collateral:
+        _refuse_denied(out.address, cfg)
     if any(out.address != claimant for _, out in collateral):
         raise CosignRejected("collateral_not_claimant", "collateral is not the claimant's")
-    if 16 in body and parse_output(body[16]).address != claimant:
-        raise CosignRejected("collateral_return_not_claimant", "collateral return leaves the claimant")
+    if 16 in body:
+        collateral_return = parse_output(body[16]).address
+        _refuse_denied(collateral_return, cfg)
+        if collateral_return != claimant:
+            raise CosignRejected("collateral_return_not_claimant", "collateral return leaves the claimant")
 
     pool_outs: list[Output] = []
     quarantined: dict[str, int] = {}
@@ -542,6 +569,7 @@ def evaluate_surrender(
         raise CosignRejected("body_shape", "outputs are not an array")
     produced = [parse_output(raw) for raw in outputs]
     for out in produced:
+        _refuse_denied(out.address, cfg)
         if out.has_script_ref:
             raise CosignRejected("output_script_ref", "an output carries a reference script")
         if out.address == cfg.pool_address:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import sqlite3
+from dataclasses import replace
 
 import nacl.signing
 import pytest
@@ -538,3 +539,18 @@ def test_chain_provider_uses_policy_network(service, monkeypatch):
     with service.client(0):
         assert cosigner.state.chain.base_url == "https://cardano-mainnet.blockfrost.io/api/v0"
         assert cosigner.state.chain.project_id == "mainnet-policy-fixture"
+
+
+def test_the_denylist_loaded_at_startup_refuses_a_w1_surrender(service):
+    """A real surrender W1 made in May, sent to the co-signer with the
+    deny-list it loaded at startup: refused for W1's credential, nothing
+    recorded. The real admins replace the throwaway one, as in start()."""
+    s = golden_scenario("6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580")
+    with service.client(s.now_slot) as client:
+        cosigner.state.cfg = replace(MAINNET_BEFORE_SURRENDERS, denylist=cosigner.state.cfg.denylist)
+        cosigner.state.chain = service.chain
+        resp = client.post("/cosign", json=_request(s), headers=HEADERS)
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "denied_credential"
+    assert "W1" in resp.json()["detail"]["detail"]
+    assert service.rows() == 0

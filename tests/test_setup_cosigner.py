@@ -28,7 +28,7 @@ DEPLOY = ROOT / "services/deploy"
 
 EXPORTS = {
     **{key: value for key, value in POLICY_ENV.items()
-       if key not in ("NETWORK", "RATE_TABLE_PATH", "REDEMPTION_PIN_PATH")},
+       if key not in ("NETWORK", "RATE_TABLE_PATH", "REDEMPTION_PIN_PATH", "DENYLIST_PATH")},
     "COSIGNER_PRIMARY_ADMIN_PKH": ADMIN_1.hex(),
     "MAX_CMATRA_PER_DAY": str(25_000_000 * 10**6),
     "BLOCKFROST_PROJECT_ID": "mainnet-test-project",

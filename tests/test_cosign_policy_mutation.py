@@ -3,19 +3,25 @@
 Every ``raise CosignRejected(...)`` in the policy is a check. Each mutant
 replaces exactly one of them with ``pass`` and re-runs the adversarial corpus
 and the decoder probes against it. A check whose deletion no probe notices is
-dead weight or untested; either way this test fails and names its line."""
+dead weight or untested; either way this test fails and names its line.
+
+The deny-list is checked at every address site, and an address is denied by
+either of its credentials: a mutant that skips one site, or that reads only
+one half of an address in tools.credential_denylist, must change a probe too."""
 
 from __future__ import annotations
 
 import ast
 import sys
 import types
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
 import services.cosign_policy as policy
+import tools.credential_denylist as denylist
 from tests.cosign_cases import (
     CASES,
     DECODE_ACCEPTED,
@@ -105,7 +111,27 @@ OPERATOR_MUTANTS = {
     "policy_ids_shorter_than_28_bytes_read": ("len(policy) != 28", "len(policy) > 28"),
     "asset_names_of_33_bytes_read": ("len(name) > 32", "len(name) > 33"),
     "asset_names_of_32_bytes_refused": ("len(name) > 32", "len(name) > 31"),
+    "denylist_skips_the_inputs": (
+        "for out in spent.values():\n        _refuse_denied(out.address, cfg)",
+        "for out in spent.values():\n        pass",
+    ),
+    "denylist_skips_the_collateral": (
+        "for _, out in collateral:\n        _refuse_denied(out.address, cfg)",
+        "for _, out in collateral:\n        pass",
+    ),
+    "denylist_skips_the_collateral_return": ("_refuse_denied(collateral_return, cfg)", "pass"),
+    "denylist_skips_the_outputs": (
+        "for out in produced:\n        _refuse_denied(out.address, cfg)",
+        "for out in produced:\n        pass",
+    ),
 }
+
+# Changes to tools.credential_denylist, run through the policy's corpus.
+DENYLIST_MUTANTS = {
+    "stake_half_dropped": ("return address[1:29], address[29:57]", "return (address[1:29],)"),
+    "payment_half_dropped": ("return address[1:29], address[29:57]", "return (address[29:57],)"),
+}
+DENYLIST_SOURCE = Path(denylist.__file__).read_text()
 
 
 @lru_cache(maxsize=1)
@@ -126,11 +152,14 @@ def _outcome(call) -> str:
     return "accepted"
 
 
-def _differences(module: types.ModuleType) -> list[str]:
+def _differences(module: types.ModuleType, lists: types.ModuleType = denylist) -> list[str]:
+    """Every probe ``module`` answers otherwise than expected, with each
+    case's deny-list read through the deny-list module ``lists``."""
     diffs = []
     for case, s in _scenarios():
+        cfg = replace(s.cfg, denylist=lists.DenyList(**vars(s.cfg.denylist)))
         got = _outcome(lambda: module.evaluate_surrender(
-            s.tx, s.language_views, s.parents, s.now_slot, s.cfg))
+            s.tx, s.language_views, s.parents, s.now_slot, cfg))
         if got != case.expected:
             diffs.append(f"{case.name}: {case.expected} -> {got}")
     for case, s in _witness_scenarios():
@@ -179,3 +208,17 @@ def test_changing_the_condition_turns_a_probe_red(name):
     assert SOURCE.count(original) == 1, f"{original!r} is no longer in the policy"
     mutant = _load(SOURCE.replace(original, changed), f"cosign_policy_{name}")
     assert _differences(mutant), f"{name} changes no probe outcome"
+
+
+@pytest.mark.parametrize("name", DENYLIST_MUTANTS)
+def test_a_denylist_that_reads_half_an_address_turns_a_probe_red(name):
+    original, changed = DENYLIST_MUTANTS[name]
+    assert DENYLIST_SOURCE.count(original) == 1, f"{original!r} is no longer in the deny-list"
+    lists = types.ModuleType(f"credential_denylist_{name}")
+    lists.__file__ = denylist.__file__
+    sys.modules[lists.__name__] = lists
+    try:
+        exec(compile(DENYLIST_SOURCE.replace(original, changed), denylist.__file__, "exec"), lists.__dict__)
+    finally:
+        del sys.modules[lists.__name__]
+    assert _differences(policy, lists), f"{name} changes no probe outcome"

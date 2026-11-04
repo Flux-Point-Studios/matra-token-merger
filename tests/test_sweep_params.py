@@ -118,6 +118,18 @@ def test_a_destination_that_is_not_custody_is_refused(ceremony, destination, rea
     assert not ceremony.out_dir.exists()
 
 
+@pytest.mark.parametrize("label,address", [
+    ("W2", "addr1q9s6m9d8yedfcf53yhq5j5zsg0s58wpzamwexrxpfelgz2wgk0s9l9fqc93tyc8zu4z7hp9dlska2kew9trdg8nscjcq3sk5s3"),
+    ("attacker", "addr1qxqf5syeture53vzrjgh2j3gwknylp62famesvv9hf5manv7jwqtqyr950fw8anzxavs6c8l6jxg033jquchc8dxns7qm366em"),
+])
+def test_a_destination_on_the_denylist_is_refused(ceremony, label, address):
+    ceremony.set_destination(address)
+    result = ceremony.run("apply")
+    assert result.returncode != 0
+    assert "deny-list" in result.stderr
+    assert not ceremony.out_dir.exists()
+
+
 def test_the_destination_comes_only_from_the_params(ceremony):
     ceremony.set_destination(CUSTODY)
     result = ceremony.run("--to", PINNED["ADMIN_1_ADDR"], "apply")

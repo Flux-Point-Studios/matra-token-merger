@@ -3,9 +3,10 @@ corpus in tests/cosign_cases.py."""
 
 from __future__ import annotations
 
-import pytest
-
 import random
+from dataclasses import replace
+
+import pytest
 
 from services.cosign_policy import (
     CosignRejected,
@@ -23,6 +24,7 @@ from tests.cosign_cases import (
     ADMIN_1,
     ADMIN_2,
     CASES,
+    COMMITTED_DENYLIST,
     DECODE_ACCEPTED,
     DECODE_REFUSED,
     OUTPUTS_ACCEPTED,
@@ -259,18 +261,35 @@ ENV = {
     "CMATRA_ASSET_HEX": MAINNET.cmatra_name.hex(),
     "RATE_TABLE_PATH": str(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"),
     "REDEMPTION_PIN_PATH": str(ROOT / "audit_pack/2026-09-27/redemption_pin.json"),
+    "DENYLIST_PATH": str(ROOT / "audit_pack/2026-11-01/denylist.json"),
     "SURRENDER_DEADLINE_POSIX_MS": "1795910400000",
     "MAX_CMATRA_PER_TX": str(MAINNET.max_payout_per_tx),
 }
 
 
+# What the signers load from ENV: the mainnet policy with the committed deny-list.
+DEPLOYED = replace(MAINNET, denylist=COMMITTED_DENYLIST)
+
+
 def test_config_from_environment_matches_mainnet():
-    assert load_config(ENV, [ADMIN_1, ADMIN_2]) == MAINNET
+    assert load_config(ENV, [ADMIN_1, ADMIN_2]) == DEPLOYED
 
 
-def test_config_defaults_to_the_committed_rate_table_and_pin():
-    env = {k: v for k, v in ENV.items() if k not in ("RATE_TABLE_PATH", "REDEMPTION_PIN_PATH")}
-    assert load_config(env, [ADMIN_1, ADMIN_2]) == MAINNET
+def test_config_defaults_to_the_committed_rate_table_pin_and_denylist():
+    env = {k: v for k, v in ENV.items() if k not in ("RATE_TABLE_PATH", "REDEMPTION_PIN_PATH", "DENYLIST_PATH")}
+    assert load_config(env, [ADMIN_1, ADMIN_2]) == DEPLOYED
+
+
+def test_config_refuses_to_start_without_its_denylist(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_config({**ENV, "DENYLIST_PATH": str(tmp_path / "absent.json")}, [ADMIN_1, ADMIN_2])
+
+
+def test_config_refuses_a_malformed_denylist(tmp_path):
+    malformed = tmp_path / "denylist.json"
+    malformed.write_text('{"version": 1, "credentials": [], "allow": []}')
+    with pytest.raises(ValueError, match="credentials"):
+        load_config({**ENV, "DENYLIST_PATH": str(malformed)}, [ADMIN_1, ADMIN_2])
 
 
 @pytest.mark.parametrize("missing", [

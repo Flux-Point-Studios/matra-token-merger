@@ -30,11 +30,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+DEFAULT_DENYLIST_PATH = Path(__file__).resolve().parent.parent / "audit_pack/2026-11-01/denylist.json"
 _HASH = re.compile(r"[0-9a-f]{56}")
 
 
@@ -77,6 +79,12 @@ class DenyList:
             if credential in self.labels:
                 return self.labels[credential]
         return None
+
+
+def log_denylist(logger: logging.Logger, denylist: DenyList) -> None:
+    """The line each signer logs at startup, by which its hosts are compared."""
+    logger.info("deny-list %s: %d credentials denied, %d allowed",
+                denylist.sha256, len(denylist.labels), len(denylist.allowed))
 
 
 def _object(value: Any, keys: set[str], where: str) -> dict:

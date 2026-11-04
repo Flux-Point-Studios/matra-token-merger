@@ -36,6 +36,7 @@ os.environ.setdefault("SURRENDER_API_SECRET", "test-secret")
 
 import services.surrender_api as api  # noqa: E402
 from services.pool_tip import PoolTipManager, VOID_DATUM_HEX  # noqa: E402
+from tests.cosign_cases import COMMITTED_DENYLIST  # noqa: E402
 
 SCRIPT_ADDR = "addr_test1wrs6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg7n8k3c"
 # 58-char placeholder — satisfies BuildSurrenderRequest min_length(40).
@@ -80,8 +81,12 @@ def wired(monkeypatch):
         payment_part = b"\x00" * 28  # not a PycScriptHash
         staking_part = None
         network = 0
+
+        def to_primitive(self):
+            return b"\x61" + self.payment_part  # on no deny-list
     monkeypatch.setattr(api.Address, "from_primitive",
                         staticmethod(lambda s: _FakeAddr()))
+    monkeypatch.setattr(api.state, "denylist", COMMITTED_DENYLIST)
 
     api.state.rate_table = {"tokens": {"AGENT": {"rate_base_per_unit": 1}}}
     api.state.script_cbor_hex = "00"

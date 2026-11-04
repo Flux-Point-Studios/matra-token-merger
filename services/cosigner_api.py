@@ -28,7 +28,8 @@ Environment (all required unless noted):
   plus the policy variables read by services.cosign_policy.load_config
   (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
   CMATRA_ASSET_HEX, SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, and
-  optionally RATE_TABLE_PATH / REDEMPTION_PIN_PATH).
+  optionally RATE_TABLE_PATH / REDEMPTION_PIN_PATH / DENYLIST_PATH; it does
+  not start without the deny-list).
 
 Usage:
   uvicorn services.cosigner_api:app --host <lan-ip> --port 8421
@@ -59,6 +60,7 @@ from services.cosign_policy import (
 )
 from services.redemption_ledger import RedemptionLedger
 from tools.api_clients import BlockfrostClient
+from tools.credential_denylist import log_denylist
 from tools.config import chain_api_base_url, chain_api_key
 
 logger = logging.getLogger("cosigner_api")
@@ -136,6 +138,7 @@ def startup() -> None:
         state.pkh_hex, cfg.network, cfg.max_payout_per_tx, ledger.max_per_day,
         len(cfg.redemption_limits),
     )
+    log_denylist(logger, cfg.denylist)
 
 
 @app.middleware("http")
