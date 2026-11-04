@@ -119,6 +119,11 @@ def derive_script_address(
 # ---------------------------------------------------------------------------
 
 
+def plutus_v3_script_hash(script: bytes) -> bytes:
+    """The hash of a PlutusV3 script given as its serialised (compiledCode) bytes."""
+    return hashlib.blake2b(b"\x03" + script, digest_size=28).digest()
+
+
 # POSIX seconds minus slot number, per network (1-second slots since Shelley).
 # Mainnet's first Shelley slot, 4492800, began at 2020-07-29T21:44:51Z.
 SLOT_OFFSET_S = {

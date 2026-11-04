@@ -85,6 +85,7 @@ from tools.config import (
     NETWORK,
     NETWORK_MAGIC_FLAG,
 )
+from tools.sweep_helpers import encode_admin_withdraw_redeemer
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +297,7 @@ def build_reclaim_tx_body(
             datum = RawPlutusData(cbor2.loads(b"\xd8\x79\x80"))
 
         utxo = UTxO(tx_in, TransactionOutput(script_addr, value, datum=datum))
-        redeemer = Redeemer(RawPlutusData(cbor2.loads(b"\xd8\x79\x80")))
+        redeemer = Redeemer(RawPlutusData(cbor2.loads(encode_admin_withdraw_redeemer())))
 
         builder.add_script_input(utxo, script=script, redeemer=redeemer)
 

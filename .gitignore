@@ -57,3 +57,6 @@ scripts/_*
 
 # HW interop gate vendored deps (scripts/hw-gate/package-lock.json is committed)
 scripts/hw-gate/node_modules/
+
+# C1 simulation output (python ceremony/c1/sim.py)
+ceremony/c1/out/

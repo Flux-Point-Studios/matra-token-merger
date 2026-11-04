@@ -266,6 +266,49 @@ class TestBuildReclaimTxBody:
         pkh_hexes = sorted(rs.payload.hex() for rs in required)
         assert pkh_hexes == sorted([cfg.admin_pkh_1, cfg.admin_pkh_2])
 
+    def test_spends_with_admin_withdraw(self, tmp_path, mocker):
+        # SurrenderAction is { ProcessSurrender, AdminWithdraw }: after the
+        # deadline only constructor 1 validates.
+        cfg = _make_dual_admin_cfg(tmp_path)
+        redeemers = []
+
+        class _StubBuilder:
+            def __init__(self, *a, **kw):
+                self.required_signers = None
+                self.validity_start = None
+
+            def add_script_input(self, utxo, script=None, redeemer=None, **kw):
+                redeemers.append(redeemer)
+
+            def add_input_address(self, *a, **kw):
+                pass
+
+            def build(self, change_address=None):
+                stub = mocker.MagicMock()
+                stub.hash.return_value.payload = b"\x00" * 32
+                stub.to_cbor.return_value = b"\x00" * 64
+                return stub
+
+        mocker.patch("tools.admin_reclaim.TransactionBuilder", _StubBuilder)
+        mocker.patch("tools.admin_reclaim.BlockFrostChainContext")
+        bf = mocker.MagicMock()
+        bf.project_id = "p"
+        bf.base_url = "u"
+
+        build_reclaim_tx_body(
+            bf=bf,
+            cfg=cfg,
+            script_address=SCRIPT_ADDR,
+            script_cbor_hex="4d01000033222220051200120011",
+            unclaimed=[{"tx_hash": "aa" * 32, "output_index": 0, "ada_lovelace": 2_000_000,
+                        "flux_units": 500_000, "datum_pkh": None}],
+            flux_policy_hex=SAMPLE_FLUX_POLICY,
+            deadline_posix_ms=1_795_910_400_000,
+            tx_body_path=tmp_path / "body.json",
+        )
+
+        assert [r.data.to_cbor() for r in redeemers] == [bytes.fromhex("d87a80")]
+
 
 # ---------------------------------------------------------------------------
 # SSH stage_sign2 — the critical surviving pattern from mint-ceremony.sh

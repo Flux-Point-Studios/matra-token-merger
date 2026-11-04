@@ -1,0 +1,49 @@
+# Server A: surrender-api as cmatra-a1, the one user that can read admin_1.
+# services/deploy/install-signer.sh a1 lays out these paths and installs this
+# unit; it never enables or starts it.
+#   /opt/cmatra-a1/app       one commit's files and their .venv, root-owned
+#   /etc/cmatra-a1/          0700 root: env.surrender-api (0600), which systemd
+#                            reads for the service; the service user cannot
+#   /var/lib/cmatra-a1/      0700 cmatra-a1: keys/admin_1.skey (0400), the files
+#                            the env names, and ledger/, the one path it may write
+[Unit]
+Description=cMATRA surrender API (Server A: admin_1 signer and transaction builder)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cmatra-a1
+Group=cmatra-a1
+WorkingDirectory=/opt/cmatra-a1/app
+EnvironmentFile=/etc/cmatra-a1/env.surrender-api
+ExecStart=/opt/cmatra-a1/app/.venv/bin/uvicorn services.surrender_api:app --host 127.0.0.1 --port 8420 --log-level info
+Restart=on-failure
+RestartSec=10s
+SyslogIdentifier=surrender-api
+UMask=0077
+ReadWritePaths=/var/lib/cmatra-a1/ledger
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+KeyringMode=private
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

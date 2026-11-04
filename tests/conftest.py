@@ -51,6 +51,18 @@ SAMPLE_NFT_POLICY = "0889a2d542897f0c7eefed47d2d809bd8d8ec78881bd4ff9464f683a"
 
 
 @pytest.fixture
+def live_pool_blueprint(tmp_path) -> Path:
+    """An applied blueprint holding the live v2 pool script (e1a181b2), as a
+    signing host's BLUEPRINT_PATH does."""
+    code = (Path(__file__).parent / "fixtures/pool_migration/pool_e1a181b2.script.hex").read_text().strip()
+    path = tmp_path / "plutus.applied.json"
+    path.write_text(json.dumps({"validators": [
+        {"title": "claim_validator.surrender_pool.spend", "compiledCode": code},
+    ]}))
+    return path
+
+
+@pytest.fixture
 def mock_block() -> dict[str, Any]:
     """A realistic Blockfrost block response."""
     return {
