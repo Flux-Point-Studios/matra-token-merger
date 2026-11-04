@@ -6,7 +6,8 @@
 # Spends the cMATRA surrender-pool UTxO via the `AdminWithdraw` redeemer
 # AFTER the on-chain deadline (2026-11-29 00:00:00 UTC). Both admins must
 # co-sign. The pool is one UTxO carrying remaining cMATRA + min-ADA — we
-# sweep its full contents (less fee) to a configurable destination.
+# sweep its full contents (less fee) to SWEEP_DEST_ADDR in sweep_params.env,
+# the custody address. No stage runs while it is unset.
 #
 # This script does NOT auto-submit. The submit stage is gated behind an
 # interactive type-the-word confirmation, and the --dry-run flag below
@@ -28,7 +29,6 @@
 #
 # Flags (parsed before the stage name):
 #
-#   --to <addr>      Override the sweep destination (default: admin_1 reserve)
 #   --fee-input <utxo>  txhash#idx of a fee-input UTxO at admin_1 (auto-discovered
 #                    by stage_preflight if omitted). Required if the pool UTxO has
 #                    insufficient ADA to cover the fee.
@@ -45,7 +45,6 @@ set -euo pipefail
 # ---- Pre-stage arg parsing ----
 DRY_RUN=0
 USE_SNAPSHOT=0
-SWEEP_DEST_ADDR_OVERRIDE=""
 FEE_INPUT_OVERRIDE=""
 OUT_DIR_OVERRIDE=""
 
@@ -58,9 +57,8 @@ while [[ $# -gt 0 ]]; do
       USE_SNAPSHOT=1
       shift ;;
     --to)
-      [[ $# -ge 2 ]] || { echo "ERROR: --to requires an address" >&2; exit 2; }
-      SWEEP_DEST_ADDR_OVERRIDE="$2"
-      shift 2 ;;
+      echo "ERROR: --to is not accepted: the destination is SWEEP_DEST_ADDR in sweep_params.env" >&2
+      exit 2 ;;
     --fee-input)
       [[ $# -ge 2 ]] || { echo "ERROR: --fee-input requires <txhash>#<idx>" >&2; exit 2; }
       FEE_INPUT_OVERRIDE="$2"
@@ -91,12 +89,21 @@ fi
 # shellcheck disable=SC1090
 source "$PARAMS_FILE"
 
-# Apply --to override after params load so DEFAULT_SWEEP_DEST_ADDR is fallback.
-SWEEP_DEST_ADDR="${SWEEP_DEST_ADDR_OVERRIDE:-$DEFAULT_SWEEP_DEST_ADDR}"
-
 REPO_ROOT="${REPO_ROOT:?REPO_ROOT must be set by sweep_params.env}"
 PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 export PYTHONPATH
+
+# The remainder goes only to the custody address the params name.
+if [[ "$STAGE" != "help" ]]; then
+  [[ -n "${SWEEP_DEST_ADDR:-}" ]] || {
+    echo "ERROR: SWEEP_DEST_ADDR is unset in $PARAMS_FILE: name the custody address there first" >&2; exit 1; }
+  [[ "$SWEEP_DEST_ADDR" =~ ^addr1[02-9ac-hj-np-z]+$ ]] || {
+    echo "ERROR: SWEEP_DEST_ADDR is not a mainnet address" >&2; exit 1; }
+  [[ "$SWEEP_DEST_ADDR" != "$ADMIN_1_ADDR" ]] || {
+    echo "ERROR: SWEEP_DEST_ADDR is admin_1's own address; the remainder goes to custody" >&2; exit 1; }
+  python3 -m tools.sweep_helpers check-destination --addr "$SWEEP_DEST_ADDR" >&2 || {
+    echo "ERROR: SWEEP_DEST_ADDR fails the deny-list check above" >&2; exit 1; }
+fi
 
 # ---- Helpers ----
 
@@ -744,14 +751,14 @@ cMATRA Post-Deadline AdminWithdraw Sweep Ceremony — usage:
   ./admin-sweep-ceremony.sh --dry-run --snapshot dry-run   # full apply..build, no keys touched
 
 Flags:
-  --to <addr>       Override sweep destination (default: admin_1 reserve)
   --fee-input <utxo>  txhash#idx of an admin_1 UTxO to use for fee+collateral
                     (auto-discovered if omitted)
   --dry-run         Refuse to touch admin keys or submit; only build the tx body
   --snapshot        In --dry-run, use the pinned mint-time pool UTxO
   --out-dir <dir>   Override the working directory (default /home/deci/cmatra-sweep-ceremony)
 
-Locked params: see scripts/sweep_params.env. The on-chain deadline
+Locked params: see scripts/sweep_params.env, whose SWEEP_DEST_ADDR (the
+custody address) every stage needs. The on-chain deadline
 is 2026-11-29 00:00:00 UTC; this script will build a tx but the
 network will reject it until that POSIX time.
 EOF

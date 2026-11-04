@@ -3,9 +3,10 @@ corpus in tests/cosign_cases.py."""
 
 from __future__ import annotations
 
-import pytest
-
 import random
+from dataclasses import replace
+
+import pytest
 
 from services.cosign_policy import (
     CosignRejected,
@@ -23,6 +24,7 @@ from tests.cosign_cases import (
     ADMIN_1,
     ADMIN_2,
     CASES,
+    COMMITTED_DENYLIST,
     DECODE_ACCEPTED,
     DECODE_REFUSED,
     OUTPUTS_ACCEPTED,
@@ -83,6 +85,42 @@ def test_every_mainnet_surrender_is_approved_at_its_real_payout(tx_hash):
     collateral = {tuple(ref) for ref in _elements(body.get(13, []))}
     assert set(approval.spends) == spent
     assert set(approval.inputs) == spent | collateral
+
+
+@pytest.mark.parametrize("tx_hash", SURRENDERS)
+def test_an_approval_names_the_inputs_holding_what_it_quarantines(tx_hash):
+    """What the chain check follows back for the cooling-off, and when."""
+    scenario = golden_scenario(tx_hash)
+    approval = _evaluate(scenario)
+    body = decode(split_tx(scenario.tx)[0])
+    produced = {blake(parent): decode(parent)[1] for parent in scenario.parents}
+    holders = set()
+    for ref in _elements(body[0]):
+        out = parse_output(produced[ref[0]][ref[1]])
+        held = {(policy + name).hex() for policy, names in out.assets.items() for name, q in names.items() if q}
+        if out.address != MAINNET.pool_address and held & set(approval.units):
+            holders.add(tuple(ref))
+    assert holders
+    assert approval.unit_inputs == tuple(sorted(holders))
+    assert approval.checked_at == scenario.now_slot
+
+
+@pytest.mark.parametrize("tx_hash", SURRENDERS)
+def test_an_approval_counts_what_the_claimants_inputs_hold_of_what_it_quarantines(tx_hash):
+    """What the cooling-off weighs the units that arrived inside it against."""
+    scenario = golden_scenario(tx_hash)
+    approval = _evaluate(scenario)
+    body = decode(split_tx(scenario.tx)[0])
+    produced = {blake(parent): decode(parent)[1] for parent in scenario.parents}
+    held = dict.fromkeys(approval.units, 0)
+    for ref in _elements(body[0]):
+        out = parse_output(produced[ref[0]][ref[1]])
+        for policy, names in out.assets.items():
+            for name, quantity in names.items():
+                if (policy + name).hex() in held:
+                    held[(policy + name).hex()] += quantity
+    assert approval.held == held
+    assert all(held[unit] >= quantity for unit, quantity in approval.units.items())
 
 
 @pytest.mark.parametrize("tx_hash", SURRENDERS)
@@ -259,18 +297,35 @@ ENV = {
     "CMATRA_ASSET_HEX": MAINNET.cmatra_name.hex(),
     "RATE_TABLE_PATH": str(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"),
     "REDEMPTION_PIN_PATH": str(ROOT / "audit_pack/2026-09-27/redemption_pin.json"),
+    "DENYLIST_PATH": str(ROOT / "audit_pack/2026-11-01/denylist.json"),
     "SURRENDER_DEADLINE_POSIX_MS": "1795910400000",
     "MAX_CMATRA_PER_TX": str(MAINNET.max_payout_per_tx),
 }
 
 
+# What the signers load from ENV: the mainnet policy with the committed deny-list.
+DEPLOYED = replace(MAINNET, denylist=COMMITTED_DENYLIST)
+
+
 def test_config_from_environment_matches_mainnet():
-    assert load_config(ENV, [ADMIN_1, ADMIN_2]) == MAINNET
+    assert load_config(ENV, [ADMIN_1, ADMIN_2]) == DEPLOYED
 
 
-def test_config_defaults_to_the_committed_rate_table_and_pin():
-    env = {k: v for k, v in ENV.items() if k not in ("RATE_TABLE_PATH", "REDEMPTION_PIN_PATH")}
-    assert load_config(env, [ADMIN_1, ADMIN_2]) == MAINNET
+def test_config_defaults_to_the_committed_rate_table_pin_and_denylist():
+    env = {k: v for k, v in ENV.items() if k not in ("RATE_TABLE_PATH", "REDEMPTION_PIN_PATH", "DENYLIST_PATH")}
+    assert load_config(env, [ADMIN_1, ADMIN_2]) == DEPLOYED
+
+
+def test_config_refuses_to_start_without_its_denylist(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_config({**ENV, "DENYLIST_PATH": str(tmp_path / "absent.json")}, [ADMIN_1, ADMIN_2])
+
+
+def test_config_refuses_a_malformed_denylist(tmp_path):
+    malformed = tmp_path / "denylist.json"
+    malformed.write_text('{"version": 1, "credentials": [], "allow": []}')
+    with pytest.raises(ValueError, match="credentials"):
+        load_config({**ENV, "DENYLIST_PATH": str(malformed)}, [ADMIN_1, ADMIN_2])
 
 
 @pytest.mark.parametrize("missing", [

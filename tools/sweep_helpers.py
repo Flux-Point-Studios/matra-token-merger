@@ -10,6 +10,7 @@ cardano-cli orchestration + SSH dual-signing; this module owns:
   * CBOR-Plutus-Data shaping for the AdminWithdraw redeemer + Some(Void) datum
   * Validity-range slot derivation from the on-chain deadline POSIX-ms
   * Spend-script ex-units sanity checks against current protocol limits
+  * Refusing a sweep destination the credential deny-list denies
 
 Plutus encodings emitted (Aiken collapses `Some(Void)` and zero-field enum
 variants to bare CBOR Constr tags):
@@ -29,37 +30,23 @@ from dataclasses import dataclass
 from typing import Any
 
 import cbor2
+from pycardano import Address
 
 from tools.api_clients import _request_with_retry
 from tools.build_surrender_pool import encode_pool_datum
-from tools.cardano_utils import posix_ms_to_slot
+from tools.cardano_utils import SLOT_OFFSET_S, posix_ms_to_slot
+from tools.credential_denylist import DEFAULT_DENYLIST_PATH, load_denylist
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Shelley genesis epoch (used to translate slot -> POSIX for sanity output)
-# ---------------------------------------------------------------------------
-
-MAINNET_SHELLEY_START_SLOT = 4_492_800
-MAINNET_SHELLEY_START_TIME = 1_596_491_091  # POSIX seconds
-PREPROD_SHELLEY_START_TIME = 1_655_683_200
-
-
 def slot_to_posix_ms(slot: int, network: str = "mainnet") -> int:
-    """Inverse of posix_ms_to_slot. Used for sanity-checking validity windows.
-
-    posix_ms_to_slot is imported from tools.cardano_utils to avoid drift.
-    """
+    """Inverse of posix_ms_to_slot. Used for sanity-checking validity windows."""
     if slot < 0:
         raise ValueError(f"slot must be non-negative, got {slot}")
-    if network == "mainnet":
-        posix_sec = (slot - MAINNET_SHELLEY_START_SLOT) + MAINNET_SHELLEY_START_TIME
-    elif network in ("preprod", "preview"):
-        posix_sec = slot + PREPROD_SHELLEY_START_TIME
-    else:
+    if network not in SLOT_OFFSET_S:
         raise ValueError(f"unknown network: {network!r}")
-    return posix_sec * 1000
+    return (slot + SLOT_OFFSET_S[network]) * 1000
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +316,14 @@ def compute_sweep_change(
     return remaining
 
 
+def check_destination(address: str) -> None:
+    """Raise ValueError unless the sweep may pay ``address``: an address
+    whose credentials the committed deny-list can check and does not list."""
+    label = load_denylist(DEFAULT_DENYLIST_PATH).denied(Address.from_primitive(address).to_primitive())
+    if label is not None:
+        raise ValueError(f"{address} is on the deny-list: {label}")
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point — used by stages that want a single helper invocation
 # ---------------------------------------------------------------------------
@@ -359,6 +354,9 @@ def _main() -> int:
     p_emit = sub.add_parser("emit-cbor", help="emit datum+redeemer JSON files")
     p_emit.add_argument("--datum-out", required=True)
     p_emit.add_argument("--redeemer-out", required=True)
+
+    p_destination = sub.add_parser("check-destination", help="refuse a destination the deny-list denies")
+    p_destination.add_argument("--addr", required=True)
 
     p_validate = sub.add_parser("validate-ex-units", help="check ex-units vs pparams")
     p_validate.add_argument("--pparams", required=True)
@@ -393,6 +391,9 @@ def _main() -> int:
                 "redeemer_file": args.redeemer_out,
                 "redeemer_cbor_hex": encode_admin_withdraw_redeemer().hex(),
             }
+        elif args.cmd == "check-destination":
+            check_destination(args.addr)
+            out = {"ok": True, "destination": args.addr}
         elif args.cmd == "validate-ex-units":
             with open(args.pparams) as f:
                 pp = json.load(f)

@@ -7,6 +7,17 @@ Wraps tools/process_surrender.py to provide HTTP endpoints for:
   - Submitting them once the user has signed, with both admins' signatures
   - Pool status queries
 
+An address that names a credential on the deny-list (or that the list cannot
+check) is refused with 403 at every route that takes one, before any chain
+query, key use or pool-tip lock; the service does not start without the list.
+Every surrender admin 1 is about to sign, and every refusal under a deny rule,
+pages the on-call channel through services.pager (PAGER_DISCORD_WEBHOOK_URL,
+PAGER_OUTBOX_PATH, optionally PAGER_GRACE_S); the service does not start
+without its pager either. While one of its pages has gone undelivered past
+the grace it builds and signs nothing, and a co-signer paused for its own
+pages is answered the same way: 503 pager_backlog. /health answers 503 while
+paging fails.
+
 Signing flow:
   1. Frontend sends user's address + assets to surrender
   2. Server builds tx: pool UTxO (script) + user UTxOs → cMATRA to user + legacy to quarantine
@@ -26,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -35,6 +47,7 @@ import sys
 import time
 import uuid
 from collections import UserList
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +59,7 @@ import httpx
 from cbor2 import CBORTag
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # Ensure project root is on path
@@ -87,6 +101,13 @@ from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenLis
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada
 from tools.config import FLUX_DECIMALS, ALL_MERGE_ASSETS
+from tools.credential_denylist import (
+    DEFAULT_DENYLIST_PATH,
+    DenyList,
+    PointerAddress,
+    load_denylist,
+    log_denylist,
+)
 from tools.process_surrender import (
     compute_redemption,
     find_pool_utxos,
@@ -108,9 +129,10 @@ from services.cosign_policy import (
     split_tx,
 )
 from services.cosign_policy import evaluate_surrender as check_surrender
-from services.chain_check import ChainUnavailable, confirm_on_chain
+from services.chain_check import MAX_PROVENANCE_LOOKUPS, ChainUnavailable, confirm_on_chain, placed_at
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
+from services.pager import Pager, PagesUndelivered
 from services.pool_tip import (
     PoolSettlingError,
     PoolTipError,
@@ -130,6 +152,7 @@ RATE_TABLE_PATH: str = os.environ.get("RATE_TABLE_PATH") or str(DEFAULT_RATE_TAB
 REDEMPTION_PIN_PATH: str = (
     os.environ.get("REDEMPTION_PIN_PATH") or str(DEFAULT_REDEMPTION_PIN_PATH)
 )
+DENYLIST_PATH: str = os.environ.get("DENYLIST_PATH") or str(DEFAULT_DENYLIST_PATH)
 BLUEPRINT_PATH: str = os.environ.get(
     "BLUEPRINT_PATH",
     str(_PROJECT_ROOT / "onchain/claim_validator/plutus.json"),
@@ -232,6 +255,10 @@ BUILT_BODIES_KEPT = 256
 
 # The 503 detail when a chain view cannot confirm a surrender.
 _CHAIN_UNAVAILABLE = {"code": "chain_unavailable", "message": "Please retry shortly."}
+# The 503 details while a signer's pages cannot be shown delivered.
+_PAGER_BACKLOG = {"code": PagesUndelivered.code,
+                  "message": "Surrenders are temporarily paused. Please retry shortly."}
+_PAGER_UNAVAILABLE = {"code": "pager_unavailable", "message": "Surrenders are paused."}
 
 # Shared secret — the Next.js proxy must send this in X-API-Secret header.
 # Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -374,6 +401,9 @@ class AppState:
     # The co-signer's own policy, run here first: this service refuses to sign
     # a transaction the co-signer would refuse.
     cosign_config: CosignConfig | None = None
+    # The credentials no route serves, the same list the policy refuses.
+    denylist: DenyList | None = None
+    pager: Pager | None = None
     ledger: RedemptionLedger | None = None
     built_bodies: dict[str, bytes] = {}
     # tx hash -> (producing bodies, language views) for the co-signer.
@@ -523,7 +553,8 @@ app.add_middleware(
 
 @app.middleware("http")
 async def verify_api_secret(request: Request, call_next):
-    """Reject requests to mutating endpoints without valid API secret."""
+    """Reject requests to mutating endpoints without the API secret,
+    compared in constant time."""
     # Health and pool-status are read-only — allow without secret
     if request.url.path in ("/health", "/pool-status", "/docs", "/openapi.json"):
         return await call_next(request)
@@ -532,15 +563,13 @@ async def verify_api_secret(request: Request, call_next):
 
     if not API_SECRET:
         logger.error("SURRENDER_API_SECRET not set — refusing all mutating requests")
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=503,
             content={"detail": "Service not configured"},
         )
 
-    provided = request.headers.get("x-api-secret", "")
-    if not provided or provided != API_SECRET:
-        from fastapi.responses import JSONResponse
+    provided = request.headers.get("x-api-secret", "").encode()
+    if not hmac.compare_digest(provided, API_SECRET.encode()):
         return JSONResponse(
             status_code=403,
             content={"detail": "Forbidden"},
@@ -564,6 +593,10 @@ async def startup():
     )
     state.redeemable_nfts = load_redemption_pin(Path(REDEMPTION_PIN_PATH)).nft_units
     logger.info("Loaded %d redeemable NFT unit(s)", len(state.redeemable_nfts))
+    state.denylist = load_denylist(DENYLIST_PATH)
+    log_denylist(logger, state.denylist)
+    state.pager = Pager.from_env(os.environ, "surrender-api, admin_1")
+    state.pager.start()
 
     # Script
     if Path(BLUEPRINT_PATH).exists():
@@ -618,12 +651,14 @@ async def startup():
                 "COSIGNER_URL needs COSIGNER_PKH, SURRENDER_LEDGER_PATH, MAX_CMATRA_PER_DAY and the admin key"
             )
         state.cosigner_pkh = VerificationKeyHash(bytes.fromhex(COSIGNER_PKH))
-        state.cosign_config = load_config(
+        state.cosign_config = replace(load_config(
             {**os.environ, "RATE_TABLE_PATH": RATE_TABLE_PATH,
-             "REDEMPTION_PIN_PATH": REDEMPTION_PIN_PATH},
+             "REDEMPTION_PIN_PATH": REDEMPTION_PIN_PATH, "DENYLIST_PATH": DENYLIST_PATH},
             [state.admin_pkh.payload, state.cosigner_pkh.payload],
+        ), denylist=state.denylist)
+        state.ledger = RedemptionLedger(
+            SURRENDER_LEDGER_PATH, int(MAX_CMATRA_PER_DAY), state.cosign_config.funded_limits,
         )
-        state.ledger = RedemptionLedger(SURRENDER_LEDGER_PATH, int(MAX_CMATRA_PER_DAY))
         logger.info("Co-signer PKH: %s", COSIGNER_PKH[:16])
 
     # Pool-tip chainer. Seeds lazily on the first build (so startup never
@@ -651,7 +686,9 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Cancel the background watchdog cleanly."""
+    """Cancel the background watchdog cleanly, and stop the pager's sender."""
+    if state.pager is not None:
+        state.pager.stop()
     if state.watchdog_task is not None:
         state.watchdog_task.cancel()
         try:
@@ -721,6 +758,42 @@ async def _pool_tip_watchdog() -> None:
 # ---------------------------------------------------------------------------
 # Build surrender — two-party co-signing
 # ---------------------------------------------------------------------------
+
+
+def _refuse_denied_address(address: Address) -> None:
+    """403 for an address that names a credential on the deny-list, or whose
+    credentials the list cannot check, paged once an hour per address; 503
+    while no list or no pager is loaded."""
+    if state.denylist is None or state.pager is None:
+        raise HTTPException(503, "Deny-list or pager not loaded")
+    try:
+        label = state.denylist.denied(address.to_primitive())
+    except PointerAddress:
+        logger.warning("Refused pointer address %s", address)
+        state.pager.refusal(
+            "pointer_address", f"{address} names its stake credential by pointer", str(address))
+        raise HTTPException(403, {"code": "pointer_address",
+                                  "message": "Use a base or enterprise address to surrender."})
+    except ValueError:
+        raise HTTPException(400, "Invalid Cardano address encoding")
+    if label is not None:
+        logger.warning("Refused %s: denied credential (%s)", address, label)
+        state.pager.refusal("denied_credential", f"{address}: {label}", str(address))
+        raise HTTPException(403, {"code": "denied_credential",
+                                  "message": "This address cannot use the merger."})
+
+
+def _refuse_while_pages_undelivered() -> None:
+    """503 while a page has gone undelivered past the pager's grace, or its
+    outbox cannot be read."""
+    try:
+        state.pager.require_delivered()
+    except PagesUndelivered as exc:
+        logger.error("Refused to build or sign a surrender: %s", exc)
+        raise HTTPException(503, _PAGER_BACKLOG)
+    except sqlite3.Error as exc:
+        logger.error("Refused to build or sign a surrender: pager outbox unreadable: %s", exc)
+        raise HTTPException(503, _PAGER_UNAVAILABLE)
 
 
 def _build_asset_lookup() -> dict[str, Any]:
@@ -864,6 +937,7 @@ async def build_surrender(req: BuildSurrenderRequest):
         raise
     except Exception:
         raise HTTPException(400, "Invalid Cardano address encoding")
+    _refuse_denied_address(user_addr_check)
 
     # Closed-beta whitelist gate. If ALLOWED_USER_ADDRESSES is non-empty, only
     # those exact bech32 addresses may build a surrender tx. Empty = open
@@ -872,6 +946,7 @@ async def build_surrender(req: BuildSurrenderRequest):
     # consume the single-flight lock.
     if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
         raise HTTPException(403, "Surrender window not yet open")
+    _refuse_while_pages_undelivered()
 
     # Validate state
     if not state.rate_table:
@@ -952,6 +1027,7 @@ async def build_surrender(req: BuildSurrenderRequest):
     except CosignRejected as e:
         state.tip_mgr.release_build(build_token)
         logger.warning("Refused to build a surrender for %s: %s", req.user_address[:24], e)
+        state.pager.refusal(e.code, f"{req.user_address}: {e.detail}", req.user_address)
         raise HTTPException(422, {"code": e.code, "message": e.detail})
     except ChainUnavailable as e:
         state.tip_mgr.release_build(build_token)
@@ -1002,7 +1078,8 @@ def _get_cosigner_witness(
     Returns its [key, signature] witness, refused with 503 unless the key
     hashes to COSIGNER_PKH and the signature is that key's signature of the
     transaction body: any other answer could not land, or could stand in for
-    admin 1's own witness.
+    admin 1's own witness. A co-signer paused for its own undelivered pages
+    is answered as this service's own pause.
     """
     try:
         resp = httpx.post(
@@ -1021,7 +1098,11 @@ def _get_cosigner_witness(
         vkey, signature = bytes.fromhex(data["vkey_hex"]), bytes.fromhex(data["signature_hex"])
     except httpx.HTTPStatusError as e:
         logger.error("Co-signer returned %d: %s", e.response.status_code, e.response.text[:200])
-        raise HTTPException(503, "Co-signer service error")
+        try:
+            code = e.response.json()["detail"]["code"]
+        except (ValueError, KeyError, TypeError):
+            code = None
+        raise HTTPException(503, _PAGER_BACKLOG if code == PagesUndelivered.code else "Co-signer service error")
     except Exception as e:
         logger.error("Co-signer call failed: %s", e)
         raise HTTPException(503, "Co-signer service unavailable")
@@ -1101,7 +1182,7 @@ def _check_locally(
     if signed:
         require_claimant_signature(tx, approval)
     state.ledger.check(approval, now, cfg.redemption_limits)
-    confirm_on_chain(approval, cfg, state.bf, state.ledger.recorded)
+    confirm_on_chain(approval, cfg, state.bf, state.ledger.claimant_spends)
     return approval
 
 
@@ -1120,6 +1201,7 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
         state.ledger.record(approval, now, state.cosign_config.redemption_limits)
     except CosignRejected as exc:
         logger.warning("Refused to co-sign %s: %s", tx_hash_hex[:16], exc)
+        state.pager.refusal(exc.code, f"{tx_hash_hex}: {exc.detail}", exc.detail)
         raise HTTPException(400, {"code": exc.code, "message": exc.detail})
     except ChainUnavailable as exc:
         logger.error("Refused to co-sign %s: chain view unavailable: %s", tx_hash_hex[:16], exc)
@@ -1127,6 +1209,11 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
     except sqlite3.Error as exc:
         logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
         raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})
+    try:
+        state.pager.surrender(approval)
+    except sqlite3.Error as exc:
+        logger.error("Refused to sign %s: pager outbox unavailable: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(503, _PAGER_UNAVAILABLE)
     return witness
 
 
@@ -1136,7 +1223,9 @@ def _signed_by_admins(tx_hash_hex: str, tx: bytes) -> bytes:
     admin 1 signs only once this service has checked the claimant's
     signature and the co-signer's, and recorded the surrender in its own
     ledger. Admin 1's pair goes first: the merge keeps the first of repeated
-    keys, so no pair the co-signer step returns displaces it."""
+    keys, so no pair the co-signer step returns displaces it. Neither admin
+    is asked while a page has gone undelivered past the grace."""
+    _refuse_while_pages_undelivered()
     cosigner = [_cosign(tx_hash_hex, tx)] if COSIGNER_URL else []
     body_hash = hashlib.blake2b(split_tx(tx)[0], digest_size=32).digest()
     own = [VerificationKey.from_signing_key(state.admin_sk).payload, state.admin_sk.sign(body_hash)]
@@ -1355,6 +1444,44 @@ def _ada_only_utxos(
         and not (exclude_reserved
                  and f"{u.input.transaction_id}#{u.input.index}" in state.reserved_collateral)
     ]
+
+
+def _later_holders(utxos: list[UTxO], legacy_assets: list[dict[str, Any]]) -> list[UTxO]:
+    """The UTxOs among ``utxos`` holding a legacy asset surrendered that the
+    surrender need not spend: taking each asset's holders in the order the
+    chain made them, those after the ones that already hold the quantity
+    surrendered. Left to itself the builder spends the UTxOs with the most
+    ADA first, and could spend units that reached the claimant inside the
+    cooling-off, which both signers refuse, while units held longer sit
+    unspent. The chain is asked where at most MAX_PROVENANCE_LOOKUPS of the
+    holders' transactions are; holders made by any others go after them."""
+    made: dict[str, tuple[bool, int]] = {}
+
+    def age(utxo: UTxO) -> tuple[bool, int, str, int]:
+        tx_hash = str(utxo.input.transaction_id)
+        if tx_hash not in made:
+            slot = placed_at(tx_hash, state.bf) if len(made) < MAX_PROVENANCE_LOOKUPS else None
+            made[tx_hash] = (slot is None, slot or 0)
+        return *made[tx_hash], tx_hash, utxo.input.index
+
+    needed: list[UTxO] = []
+    holding: list[UTxO] = []
+    for asset in legacy_assets:
+        policy = PycScriptHash(bytes.fromhex(asset["policy_hex"]))
+        name = AssetName(bytes.fromhex(asset["asset_hex"]))
+        holds = {u.input: u.output.amount.multi_asset.get(policy, {}).get(name, 0) for u in utxos}
+        holders = [u for u in utxos if holds[u.input]]
+        if len(holders) > 1:
+            holders.sort(key=age)
+        held = sum(holds[u.input] for u in needed)
+        for utxo in holders:
+            if held >= asset["quantity"]:
+                break
+            if utxo not in needed:
+                needed.append(utxo)
+                held += holds[utxo.input]
+        holding += holders
+    return [u for u in dict.fromkeys(holding) if u not in needed]
 
 
 class WalletShortfall(Exception):
@@ -1650,8 +1777,9 @@ def _build_surrender_tx(
         spendable = [u for u in builder.inputs if u.output.address == user_addr]
         spendable += builder.potential_inputs
     else:
+        builder.excluded_inputs = _later_holders(address_utxos or [], legacy_assets)
         builder.add_input_address(user_addr)
-        spendable = address_utxos or []
+        spendable = [u for u in address_utxos or [] if u not in builder.excluded_inputs]
 
     # Output 1: cMATRA to user
     user_multi = MultiAsset()
@@ -1919,6 +2047,7 @@ async def prepare_defrag(req: PrepareDefragRequest):
         raise
     except Exception:
         raise HTTPException(400, "Invalid Cardano address encoding")
+    _refuse_denied_address(addr_check)
 
     # Same closed-beta gate as /build-surrender.
     if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
@@ -2176,6 +2305,11 @@ def evaluate_surrender(req: BuildSurrenderRequest):
     """
     if not req.user_address.startswith("addr1"):
         raise HTTPException(400, "Invalid Cardano mainnet address")
+    try:
+        user_addr = Address.from_primitive(req.user_address)
+    except Exception:
+        raise HTTPException(400, "Invalid Cardano address encoding")
+    _refuse_denied_address(user_addr)
     if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
         raise HTTPException(403, "Surrender window not yet open")
     if not state.rate_table:
@@ -2222,6 +2356,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")
     except CosignRejected as e:
+        state.pager.refusal(e.code, f"{req.user_address}: {e.detail}", req.user_address)
         raise HTTPException(422, {"code": e.code, "message": e.detail})
     except ChainUnavailable as e:
         logger.error("Evaluate: chain view unavailable for %s: %s", req.user_address[:24], e)
@@ -2312,14 +2447,19 @@ def pool_status():
 
 
 @app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "rate_table_loaded": state.rate_table is not None,
-        "script_loaded": state.script_cbor_hex is not None,
-        "admin_key_loaded": state.admin_sk is not None,
-        "configured": bool(SCRIPT_ADDRESS and CMATRA_POLICY_HEX and QUARANTINE_ADDRESS),
-    }
+def health() -> JSONResponse:
+    """503 while paging fails: signing is paused, or Discord refuses the webhook."""
+    paging = state.pager.health()
+    return JSONResponse(
+        {
+            **paging,
+            "rate_table_loaded": state.rate_table is not None,
+            "script_loaded": state.script_cbor_hex is not None,
+            "admin_key_loaded": state.admin_sk is not None,
+            "configured": bool(SCRIPT_ADDRESS and CMATRA_POLICY_HEX and QUARANTINE_ADDRESS),
+        },
+        status_code=200 if paging["status"] == "ok" else 503,
+    )
 
 
 # ---------------------------------------------------------------------------

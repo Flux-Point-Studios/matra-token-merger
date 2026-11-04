@@ -30,6 +30,7 @@ import hashlib
 import io
 import os
 import sys
+import tempfile
 import unittest.mock as mock
 from pathlib import Path
 
@@ -55,6 +56,8 @@ from pycardano.hash import VerificationKeyHash  # noqa: E402
 
 import services.cosign_policy as cosign_policy  # noqa: E402
 import services.surrender_api as api  # noqa: E402
+from services.pager import Pager  # noqa: E402
+from tests.cosign_cases import TEST_WEBHOOK  # noqa: E402
 from tests.test_surrender_redeemer_index import (  # noqa: E402
     _CMATRA_ASSET,
     _CMATRA_POLICY,
@@ -170,8 +173,10 @@ def build_real_surrender_tx(tag_sets_on: bool) -> tuple[str, str]:
 
 def signed_by_admin_1(tx_hex: str, tx_hash_hex: str, tag_sets_on: bool) -> bytes:
     """The build with admin_1's witness added as /submit-surrender adds it
-    without a co-signer."""
-    with mock.patch.object(api, "COSIGNER_URL", ""), \
+    without a co-signer, with nothing owed to the on-call channel."""
+    with tempfile.TemporaryDirectory() as outbox, \
+         mock.patch.object(api.state, "pager", Pager(TEST_WEBHOOK, f"{outbox}/pager.sqlite3", "surrender-api")), \
+         mock.patch.object(api, "COSIGNER_URL", ""), \
          mock.patch.object(api, "TAG_SETS_258", tag_sets_on):
         return api._signed_by_admins(tx_hash_hex, bytes.fromhex(tx_hex))
 

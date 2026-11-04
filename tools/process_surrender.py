@@ -217,6 +217,21 @@ class RedemptionPin:
     supply_slot: int
     """The slot the supplies were read at. The signers refuse an NFT unit
     minted or burned after it."""
+    paid: Mapping[str, int]
+    """Per unit: what the pool had paid for at the pin, the quarantine
+    address's holding less waived units already in it."""
+
+
+def funded_limits(rate_table: Mapping[str, Any], pin: RedemptionPin) -> dict[str, int]:
+    """Per merge asset's policy id, how much of it the pool was funded to
+    redeem after the pin: the redeemable supply the rate table priced it for
+    less what the pool had paid for at the pin."""
+    return {
+        asset.policy_id: rate_table["tokens"][asset.name]["redeemable_supply_base"] - sum(
+            paid for unit, paid in pin.paid.items() if unit.startswith(asset.policy_id)
+        )
+        for asset in ALL_MERGE_ASSETS
+    }
 
 
 def waived_already_quarantined(row: Mapping[str, Any]) -> int:
@@ -264,6 +279,7 @@ def load_redemption_pin(path: Path) -> RedemptionPin:
     nft_units: set[str] = set()
     remaining: dict[str, int] = {}
     supply: dict[str, int] = {}
+    paid: dict[str, int] = {}
     for asset in ALL_MERGE_ASSETS:
         entry = doc["assets"].get(asset.name)
         if entry is None or entry["policy_id"] != asset.policy_id:
@@ -279,9 +295,10 @@ def load_redemption_pin(path: Path) -> RedemptionPin:
                 raise ValueError(f"{path}: {asset.name} {unit}: {exc}") from exc
             remaining[unit] = max(0, row["supply"] - (row["waiver"] - already) - row["quarantined"])
             supply[unit] = row["supply"]
+            paid[unit] = row["quarantined"] - already
             if not fungible:
                 nft_units.add(unit)
-    return RedemptionPin(frozenset(nft_units), remaining, supply, supply_slot)
+    return RedemptionPin(frozenset(nft_units), remaining, supply, supply_slot, paid)
 
 
 def surrendered_entitlement(

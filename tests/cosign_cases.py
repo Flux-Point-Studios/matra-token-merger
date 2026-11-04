@@ -3,7 +3,12 @@
 The golden fixture (tests/fixtures/cosign_golden.json.gz, rebuilt by
 scripts/fetch_cosign_golden.py) holds every transaction that ever touched the
 surrender pool address, the bodies of the transactions that produced their
-inputs, and the PlutusV3 language views in force when each was built.
+inputs, and the PlutusV3 language views in force when each was built. The
+recent-claims fixture (tests/fixtures/recent_claims.json.gz, rebuilt by the
+same script with --recent) holds, in the same form, every surrender after
+those up to the stop: the 19 the attacker made with passes taken from W1
+(kind "forfeited") and the legitimate ones beside them, with what a signer's
+chain view is asked about where their units came from.
 
 Each adversarial case starts from a real surrender and changes one thing an
 attacker holding one admin key could change. The expected value is the exact
@@ -27,8 +32,11 @@ import nacl.signing
 import requests
 from pycardano import Address
 
+import services.pager
+
 from services.cosign_policy import (
     CosignConfig,
+    Output,
     Simple,
     Tag,
     decode,
@@ -37,14 +45,17 @@ from services.cosign_policy import (
 )
 from tests.cbor_encode import encode
 from tools.config import AGENT, T1_ADAM_PASS
+from tools.credential_denylist import DenyList, load_denylist
 from tools.process_surrender import (
     compute_redemption,
+    funded_limits,
     load_rate_table,
     load_redemption_pin,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_PATH = ROOT / "tests/fixtures/cosign_golden.json.gz"
+RECENT_PATH = ROOT / "tests/fixtures/recent_claims.json.gz"
 
 POOL_BECH32 = "addr1w8s6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg9mn27a"
 QUARANTINE_BECH32 = "addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl"
@@ -60,6 +71,14 @@ RATES = load_rate_table(ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json")
 PIN_PATH = ROOT / "audit_pack/2026-09-27/redemption_pin.json"
 PIN = load_redemption_pin(PIN_PATH)
 REDEEMABLE = PIN.nft_units
+COMMITTED_DENYLIST = load_denylist(ROOT / "audit_pack/2026-11-01/denylist.json")
+
+# Credentials only the corpus denies; no mainnet surrender names them.
+DENIED_KEY, DENIED_STAKE, DENIED_SCRIPT = b"\xd1" * 28, b"\xd2" * 28, b"\xd3" * 28
+CORPUS_DENYLIST = DenyList(
+    labels={DENIED_KEY: "corpus payment key", DENIED_STAKE: "corpus stake key", DENIED_SCRIPT: "corpus script"},
+    allowed=frozenset(), sha256="corpus",
+)
 
 MAINNET = CosignConfig(
     network="mainnet",
@@ -75,6 +94,8 @@ MAINNET = CosignConfig(
     pinned_supply=PIN.supply,
     supply_slot=PIN.supply_slot,
     max_payout_per_tx=20_000_000 * 10**6,
+    denylist=CORPUS_DENYLIST,
+    funded_limits=funded_limits(RATES, PIN),
 )
 # The pin's limits before any surrender landed (nothing quarantined), so the
 # mainnet surrenders can be replayed through a signer's ledger.
@@ -83,6 +104,32 @@ MAINNET_BEFORE_SURRENDERS = replace(MAINNET, redemption_limits={
     for entry in json.loads(PIN_PATH.read_text())["assets"].values()
     for name, row in entry["units"].items()
 })
+
+# The Discord webhook every test pager is configured with; tests/conftest.py
+# keeps any page from reaching it.
+TEST_WEBHOOK = "https://discord.com/api/webhooks/1/cmatra-test"
+
+
+# Discord's answer to a post through a webhook that was deleted.
+DELETED_WEBHOOK = (404, {"message": "Unknown Webhook", "code": 10015}, None)
+
+
+def discord_answering(monkeypatch, answer) -> None:
+    """Discord answers every post with ``answer`` (status, JSON body,
+    Retry-After header), or raises it."""
+    def post(url, payload, headers):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(services.pager, "_post", post)
+
+
+def owed_pages(outbox: str | Path) -> list[str]:
+    """The pages in a pager's outbox, oldest first."""
+    with closing(sqlite3.connect(outbox)) as conn:
+        return [text for (text,) in conn.execute("SELECT text FROM pages ORDER BY id")]
+
 
 # Output layout surrender_api produces (and every golden surrender has).
 PAYOUT, CONTINUATION, QUARANTINE_OUT, CHANGE = 0, 1, 2, 3
@@ -116,7 +163,15 @@ def golden() -> dict[str, Any]:
         return json.load(fh)
 
 
+@lru_cache(maxsize=1)
+def recent() -> dict[str, Any]:
+    with gzip.open(RECENT_PATH, "rt") as fh:
+        return json.load(fh)
+
+
 SURRENDER_HASHES = [t["tx_hash"] for t in golden()["transactions"] if t["kind"] == "surrender"]
+FORFEITED_HASHES = [t["tx_hash"] for t in recent()["transactions"] if t["kind"] == "forfeited"]
+RECENT_SURRENDER_HASHES = [t["tx_hash"] for t in recent()["transactions"] if t["kind"] == "surrender"]
 
 
 @dataclass(frozen=True)
@@ -129,7 +184,14 @@ class Scenario:
 
 
 def golden_scenario(tx_hash: str) -> Scenario:
-    doc = golden()
+    return _scenario(golden(), tx_hash)
+
+
+def recent_scenario(tx_hash: str) -> Scenario:
+    return _scenario(recent(), tx_hash)
+
+
+def _scenario(doc: dict[str, Any], tx_hash: str) -> Scenario:
     row = next(t for t in doc["transactions"] if t["tx_hash"] == tx_hash)
     tx = bytes.fromhex(row["tx_cbor"])
     body = decode(split_tx(tx)[0])
@@ -333,22 +395,61 @@ def not_found() -> requests.HTTPError:
 MINTED_AT_THE_PIN = "5e" * 32
 
 
+def _listed(output: Output) -> dict:
+    """An output's address and amounts as Blockfrost lists them."""
+    amount = [{"unit": "lovelace", "quantity": str(output.coin)}] + [
+        {"unit": (policy + name).hex(), "quantity": str(quantity)}
+        for policy, names in output.assets.items() for name, quantity in names.items()
+    ]
+    return {"address": Address.from_primitive(output.address).encode(), "amount": amount}
+
+
+def utxos_answer(bodies: Mapping[str, bytes], tx_hash: str, spent: Mapping[tuple[str, int], str]) -> dict:
+    """What Blockfrost's /txs/{tx_hash}/utxos answers for a transaction whose
+    body is in ``bodies``: its outputs, unspent unless ``spent`` names their
+    spender, and each input, collateral input and reference input whose
+    producing body ``bodies`` holds. A valid transaction's collateral return
+    is listed although the ledger never created it."""
+    body = decode(bodies[tx_hash])
+    outputs = [
+        {"output_index": i, **_listed(parse_output(raw)), "collateral": False,
+         "consumed_by_tx": spent.get((tx_hash, i))}
+        for i, raw in enumerate(body[1])
+    ]
+    outputs.append({"output_index": len(body[1]), "address": "", "amount": [], "collateral": True,
+                    "consumed_by_tx": None})
+    inputs = [
+        {"tx_hash": ref_tx.hex(), "output_index": index,
+         **_listed(parse_output(decode(bodies[ref_tx.hex()])[1][index])),
+         "collateral": key == 13, "reference": key == 18}
+        for key in (0, 13, 18) for ref_tx, index in _elements(body.get(key, []))
+        if ref_tx.hex() in bodies
+    ]
+    return {"hash": tx_hash, "inputs": inputs, "outputs": outputs}
+
+
 class FakeChain:
     """A signer's view of the chain: the BlockfrostClient calls
     services.chain_check makes. The transactions whose bodies it holds are on
-    chain, their outputs unspent unless listed in ``spent``; each unit's
-    supply is the pinned one unless ``supply`` says otherwise, and its history
-    one mint at the pin unless ``history`` says otherwise; ``failure``, when
-    set, is raised by every call."""
+    chain, their outputs unspent unless listed in ``spent``, each placed at
+    slot 0 (long before any surrender) unless ``slots`` is given, which then
+    places exactly the transactions it names; each unit's supply is the
+    pinned one unless ``supply`` says otherwise, and its history one mint at
+    the pin unless ``history`` says otherwise; ``failure``, when set, is
+    raised by every call."""
 
     def __init__(self, bodies: Mapping[str, bytes] | None = None,
                  supply: Mapping[str, int] | None = None,
-                 failure: Exception | None = None) -> None:
+                 failure: Exception | None = None,
+                 slots: Mapping[str, int] | None = None) -> None:
         self.bodies = dict(bodies or {})
         self.spent: dict[tuple[str, int], str] = {}
         self.supply = {**PIN.supply, **(supply or {})}
         self.history: dict[str, list[dict]] = {}
-        self.slots: dict[str, int] = {MINTED_AT_THE_PIN: PIN.supply_slot}
+        self.slots: dict[str, int] = {
+            MINTED_AT_THE_PIN: PIN.supply_slot,
+            **(dict(slots) if slots is not None else dict.fromkeys(self.bodies, 0)),
+        }
         self.failure = failure
 
     def change_after_pin(self, unit: str, action: str) -> None:
@@ -367,22 +468,23 @@ class FakeChain:
         output unspent, as when those surrenders were built."""
         return cls({tx: bytes.fromhex(body) for tx, body in golden()["parents"].items()})
 
-    def publish(self, *bodies: bytes) -> None:
+    @classmethod
+    def as_at_the_recent_builds(cls) -> "FakeChain":
+        """What the recent claims' chain checks read: their producing bodies,
+        each output unspent, and the slots mainnet placed them in."""
+        doc = recent()
+        return cls({tx: bytes.fromhex(body) for tx, body in doc["parents"].items()}, slots=doc["slots"])
+
+    def publish(self, *bodies: bytes, slot: int = 0) -> None:
         for body in bodies:
             self.bodies[blake(body).hex()] = body
+            self.slots[blake(body).hex()] = slot
 
     def get_tx_utxos(self, tx_hash: str) -> dict:
         self._answer()
         if tx_hash not in self.bodies:
             raise not_found()
-        count = len(decode(self.bodies[tx_hash])[1])
-        outputs = [
-            {"output_index": i, "collateral": False, "consumed_by_tx": self.spent.get((tx_hash, i))}
-            for i in range(count)
-        ]
-        # A valid transaction's collateral return is listed but never created.
-        outputs.append({"output_index": count, "collateral": True, "consumed_by_tx": None})
-        return {"hash": tx_hash, "inputs": [], "outputs": outputs}
+        return utxos_answer(self.bodies, tx_hash, self.spent)
 
     def _answer(self) -> None:
         if self.failure is not None:
@@ -753,9 +855,77 @@ def claimant_pays_from_a_script_with_a_script_stake_part(d):
     _retarget_claimant(d, bytes([0x31]) + b"\xab" * 28 + b"\xcd" * 28)
 
 
-@case("claimant_not_key_address")
+@case("pointer_address")
 def claimant_pays_from_a_script_pointer_address(d):
     _retarget_claimant(d, bytes([0x51]) + b"\xab" * 28 + b"\x01\x01\x01")
+
+
+# -- the deny-list -------------------------------------------------------------
+
+CLEAN = b"\x0c" * 28  # a credential no list names
+BYRON = bytes.fromhex("82d818582183581c") + b"\x01" * 28 + bytes.fromhex("a0001a01020304")
+
+
+def _input_at(d: Draft, address: bytes) -> list:
+    """A reference to a new 2 ADA output at ``address``."""
+    return [d.add_parent([[address, 2_000_000]]), 0]
+
+
+@case("denied_credential")
+def claimant_denied_by_its_payment_key(d):
+    _retarget_claimant(d, bytes([0x01]) + DENIED_KEY + CLEAN)
+
+
+@case("denied_credential")
+def claimant_denied_by_its_stake_key(d):
+    _retarget_claimant(d, bytes([0x01]) + CLEAN + DENIED_STAKE)
+
+
+@case("denied_credential")
+def claimant_denied_by_a_script_as_its_stake_part(d):
+    _retarget_claimant(d, bytes([0x21]) + CLEAN + DENIED_SCRIPT)
+
+
+@case("denied_credential")
+def claimant_denied_at_an_enterprise_address(d):
+    _retarget_claimant(d, bytes([0x61]) + DENIED_KEY)
+
+
+@case("pointer_address")
+def claimant_pays_from_a_key_pointer_address(d):
+    """A pointer names the stake credential by a chain certificate, which the
+    deny-list cannot check."""
+    _retarget_claimant(d, bytes([0x41]) + CLEAN + b"\x81\x00\x01")
+
+
+@case("denied_credential")
+def an_input_from_a_denied_address(d):
+    d.set_inputs(d.inputs() + [_input_at(d, bytes([0x61]) + DENIED_KEY)])
+
+
+@case("denied_credential")
+def collateral_from_a_denied_address(d):
+    d.body[13] = Tag(258, [_input_at(d, bytes([0x01]) + CLEAN + DENIED_STAKE)])
+
+
+@case("denied_credential")
+def collateral_return_to_a_denied_address(d):
+    d.body[16][0] = bytes([0x01]) + CLEAN + DENIED_STAKE
+
+
+@case("denied_credential")
+def change_paid_to_a_denied_address(d):
+    d.body[1][CHANGE][0] = bytes([0x61]) + DENIED_KEY
+
+
+@case("output_shape")
+def change_paid_to_a_byron_address(d):
+    d.body[1][CHANGE][0] = BYRON
+
+
+@case("output_shape")
+def change_paid_to_an_address_one_byte_long(d):
+    d.body[1][CHANGE][0] = d.claimant() + b"\x00"
 
 
 @case("collateral_not_claimant")

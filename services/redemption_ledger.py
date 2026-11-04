@@ -1,13 +1,17 @@
 """A signer's record of the surrenders it approved, and the limits it holds them to.
 
 Each signer keeps its own ledger and records an approval before its signature
-leaves the process. Two limits are checked against the record:
+leaves the process. Three limits are checked against the record:
 
   * the cMATRA the pool can lose to transactions approved in the last 24 hours
     stays within a cap;
   * what each legacy unit redeems after the pin stays within what the pin
     says remains of it, so an edition minted after the pin, or a unit already
-    locked in quarantine, is never paid for again.
+    locked in quarantine, is never paid for again;
+  * what each merge asset redeems after the pin, all its units together,
+    stays within what the pool was funded to pay for of it
+    (tools.process_surrender.funded_limits), so editions beyond the supply
+    the rate table priced are not paid from the others' share.
 
 Both count what could actually land. Transactions that spend the same pool
 output conflict, so at most one of them lands; a transaction spending another's
@@ -61,6 +65,11 @@ def create_ledger(path: str) -> None:
     os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     with closing(sqlite3.connect(path)) as conn, conn:
         conn.execute(_SCHEMA)
+
+
+def _refs(spends: str) -> frozenset[tuple[bytes, int]]:
+    """The outputs a row's ``spends`` column names."""
+    return frozenset((bytes.fromhex(ref), index) for ref, index in json.loads(spends))
 
 
 @dataclass(frozen=True)
@@ -143,9 +152,11 @@ class RedemptionLedger:
     """SQLite record of approved surrenders, shared by every process that
     signs with one key."""
 
-    def __init__(self, path: str, max_per_day: int) -> None:
-        """Open the ledger at ``path``. Raises FileNotFoundError if there is
-        none, and ValueError if the file there is not a ledger."""
+    def __init__(self, path: str, max_per_day: int, funded: Mapping[str, int]) -> None:
+        """Open the ledger at ``path``, holding each asset policy to what
+        ``funded`` says the pool was funded to redeem of it after the pin.
+        Raises FileNotFoundError if there is none, and ValueError if the file
+        there is not a ledger."""
         if not os.path.isfile(path):
             raise FileNotFoundError(
                 f"{path}: no redemption ledger. Find the one this signer has been using;"
@@ -153,6 +164,7 @@ class RedemptionLedger:
             )
         self.path = path
         self.max_per_day = max_per_day
+        self.funded = dict(funded)
         # mode=rw: a connection never creates the file, so a ledger removed
         # while the service runs fails every write instead of starting over.
         self._uri = Path(path).resolve().as_uri() + "?mode=rw"
@@ -166,12 +178,17 @@ class RedemptionLedger:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._uri, uri=True, timeout=10, isolation_level=None)
 
-    def recorded(self, tx_hash: bytes) -> bool:
-        """Whether this signer recorded an approval of ``tx_hash``."""
+    def claimant_spends(self, tx_hash: bytes) -> tuple[tuple[bytes, int], ...] | None:
+        """The outputs besides the pool's that the surrender ``tx_hash``
+        spends, or None if this signer recorded no approval of it."""
         with closing(self._connect()) as conn:
-            return conn.execute(
-                "SELECT 1 FROM approvals WHERE tx_hash = ?", (tx_hash,)
-            ).fetchone() is not None
+            found = conn.execute(
+                "SELECT pool_tx, pool_index, spends FROM approvals WHERE tx_hash = ?", (tx_hash,)
+            ).fetchone()
+        if found is None:
+            return None
+        pool_tx, pool_index, spends = found
+        return tuple(sorted(_refs(spends) - {(pool_tx, pool_index)}))
 
     def check(self, approval: Approval, now: float, limits: Mapping[str, int]) -> None:
         """Raise :class:`CosignRejected` if ``approval`` could never land after
@@ -189,9 +206,7 @@ class RedemptionLedger:
             conn.execute("BEGIN IMMEDIATE" if record else "BEGIN")
             try:
                 rows = [
-                    _Row(tx, (pool_tx, pool_index), payout, json.loads(units),
-                         frozenset((bytes.fromhex(ref), index) for ref, index in json.loads(spends)),
-                         signed_at)
+                    _Row(tx, (pool_tx, pool_index), payout, json.loads(units), _refs(spends), signed_at)
                     for tx, pool_tx, pool_index, payout, units, spends, signed_at in conn.execute(
                         "SELECT tx_hash, pool_tx, pool_index, payout, units, spends, signed_at"
                         " FROM approvals"
@@ -223,6 +238,16 @@ class RedemptionLedger:
                 raise CosignRejected(
                     "redemption_limit",
                     f"{unit}: {redeemed} redeemed would pass the {limits.get(unit, 0)} the pin leaves",
+                )
+        for policy in sorted({unit[:56] for unit in approval.units}):
+            redeemed = _heaviest(
+                rows, lambda row: sum(q for unit, q in row.units.items() if unit[:56] == policy),
+            )
+            if redeemed > self.funded.get(policy, 0):
+                raise CosignRejected(
+                    "funded_supply",
+                    f"{policy}: {redeemed} redeemed after the pin would pass the"
+                    f" {self.funded.get(policy, 0)} the pool was funded for",
                 )
         paid = _heaviest((row for row in rows if row.signed_at > now - DAY_S), lambda row: row.payout)
         if paid > self.max_per_day:

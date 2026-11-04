@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -29,6 +30,7 @@ from pycardano import (
     Network,
     PaymentSigningKey,
     PlutusV3Script,
+    PointerAddress,
     RawPlutusData,
     TransactionBody,
     TransactionInput,
@@ -37,7 +39,7 @@ from pycardano import (
     Value,
     plutus_script_hash,
 )
-from pycardano.hash import ScriptHash, TransactionId
+from pycardano.hash import ScriptHash, TransactionId, VerificationKeyHash
 
 import services.cosigner_api as cosigner
 import services.surrender_api as api
@@ -45,7 +47,22 @@ from services.chain_check import ChainUnavailable
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger, create_ledger
-from tests.cosign_cases import PIN, FakeChain, ledger_refusing_writes, not_found
+from services.pager import Pager
+from tests.cosign_cases import (
+    COMMITTED_DENYLIST,
+    DELETED_WEBHOOK,
+    PIN,
+    TEST_WEBHOOK,
+    FakeChain,
+    _elements,
+    discord_answering,
+    key_address,
+    ledger_refusing_writes,
+    not_found,
+    owed_pages,
+    throwaway_key,
+    utxos_answer,
+)
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
 from tools.process_surrender import load_rate_table, load_redemption_pin, surrendered_entitlement
@@ -57,9 +74,16 @@ T1_UNITS = sorted(u for u in REDEEMABLE if u.startswith(T1_ADAM_PASS.policy_id))
 FLUX_UNIT = next(u for u in sorted(REDEEMABLE) if u.startswith(FLUX_PASS.policy_id))
 # A pinned pass the pin still redeems; the synthetic claimant holds it.
 PASS = next(u for u in T1_UNITS if PIN.remaining[u] > 0)
-MAINNET_USER = (
-    "addr1q9s6m9d8yedfcf53yhq5j5zsg0s58wpzamwexrxpfelgz2wgk0s9l9fqc93tyc8zu4z7hp9dlska2kew9trdg8nscjcq3sk5s3"
-)
+MAINNET_USER = Address.from_primitive(key_address(throwaway_key(7))).encode()
+# Addresses the committed deny-list names: W1, W2 (the FPS treasury), and the
+# attacker's collection and claim addresses.
+DENIED_USERS = {
+    "W1": "addr1q9jzvg6qqefx4c8eqsez4fnsxfdmcjtz4ku9f0fgju6ymc7ehhk8tdd2j0fqtn7975krepy8a7l8cepk5gyzyq7g6l6sktytnt",
+    "W2": "addr1q9s6m9d8yedfcf53yhq5j5zsg0s58wpzamwexrxpfelgz2wgk0s9l9fqc93tyc8zu4z7hp9dlska2kew9trdg8nscjcq3sk5s3",
+    "attacker": "addr1qxqf5syeture53vzrjgh2j3gwknylp62famesvv9hf5manv7jwqtqyr950fw8anzxavs6c8l6jxg033jquchc8dxns7qm366em",
+    "claims": "addr1qx53hw2d3xhh3eqt6skfnqw0r7cjvm09yw3f6exvrlk4j88pjuvalvn7yf4ec5msyjgan7ur5hjs7d7x59jnfmjchngs5sp0tr",
+}
+POINTER_USER = Address(VerificationKeyHash(b"\x0c" * 28), PointerAddress(1, 2, 3), Network.MAINNET).encode()
 
 
 # ---------------------------------------------------------------------------
@@ -72,10 +96,12 @@ def _item(asset_key: str, quantity: int, nft_units: list[str] | None = None):
 
 
 @pytest.fixture
-def validating(monkeypatch):
+def validating(monkeypatch, tmp_path):
     """Everything wired up to the build; the build itself records its
-    arguments and stops."""
+    arguments and stops. Pages go to the outbox at tmp_path/pager.sqlite3."""
     seen: dict = {}
+    monkeypatch.setattr(api.state, "pager", Pager(
+        TEST_WEBHOOK, str(tmp_path / "pager.sqlite3"), "surrender-api, admin_1"))
 
     def build(user_address, total_cmatra, legacy_assets, pool_utxo, pending=False, user_inputs=None):
         seen.update(total=total_cmatra, legacy=legacy_assets)
@@ -88,6 +114,7 @@ def validating(monkeypatch):
     monkeypatch.setattr(api, "CMATRA_ASSET_HEX", "634d41545241")
     monkeypatch.setattr(api, "QUARANTINE_ADDRESS", script_addr.encode())
     monkeypatch.setattr(api, "ALLOWED_USER_ADDRESSES", frozenset())
+    monkeypatch.setattr(api.state, "denylist", COMMITTED_DENYLIST)
     monkeypatch.setattr(api.state, "rate_table", RATES)
     monkeypatch.setattr(api.state, "redeemable_nfts", REDEEMABLE)
     monkeypatch.setattr(api.state, "script_cbor_hex", _SCRIPT_HEX)
@@ -99,9 +126,95 @@ def validating(monkeypatch):
     return seen
 
 
-def _build(assets) -> None:
+def _build(assets, user: str = MAINNET_USER) -> None:
     asyncio.run(api.build_surrender(
-        api.BuildSurrenderRequest(user_address=MAINNET_USER, assets=assets)))
+        api.BuildSurrenderRequest(user_address=user, assets=assets)))
+
+
+def _defrag(user: str) -> None:
+    asyncio.run(api.prepare_defrag(api.PrepareDefragRequest(user_address=user)))
+
+
+def _evaluate(user: str) -> None:
+    api.evaluate_surrender(api.BuildSurrenderRequest(user_address=user, assets=[_item("AGENT", 1000)]))
+
+
+ROUTES = {"build": lambda user: _build([_item("AGENT", 1000)], user), "evaluate": _evaluate, "defrag": _defrag}
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("who", DENIED_USERS)
+def test_a_denied_address_is_refused_before_anything_is_built(validating, monkeypatch, route, who):
+    built = []
+    monkeypatch.setattr(api, "_build_defrag_tx_blocking", lambda *args: built.append(args))
+    monkeypatch.setattr(api, "find_pool_utxos", lambda *args: built.append(args))
+    with pytest.raises(HTTPException) as err:
+        ROUTES[route](DENIED_USERS[who])
+    assert err.value.status_code == 403
+    assert err.value.detail["code"] == "denied_credential"
+    assert validating == {} and built == []
+    assert api.state.tip_mgr.chain_state() is None
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_a_pointer_address_is_refused_before_anything_is_built(validating, monkeypatch, route):
+    built = []
+    monkeypatch.setattr(api, "_build_defrag_tx_blocking", lambda *args: built.append(args))
+    monkeypatch.setattr(api, "find_pool_utxos", lambda *args: built.append(args))
+    with pytest.raises(HTTPException) as err:
+        ROUTES[route](POINTER_USER)
+    assert err.value.status_code == 403
+    assert err.value.detail["code"] == "pointer_address"
+    assert validating == {} and built == []
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("unloaded", ["denylist", "pager"])
+def test_without_a_denylist_or_a_pager_nothing_is_built(validating, monkeypatch, route, unloaded):
+    monkeypatch.setattr(api.state, unloaded, None)
+    with pytest.raises(HTTPException) as err:
+        ROUTES[route](MAINNET_USER)
+    assert err.value.status_code == 503
+    assert validating == {}
+
+
+def test_a_denied_address_pages_once_an_hour(validating, tmp_path):
+    for _ in range(3):
+        with pytest.raises(HTTPException):
+            _build([_item("AGENT", 1000)], DENIED_USERS["W1"])
+    with pytest.raises(HTTPException):
+        _build([_item("AGENT", 1000)], DENIED_USERS["claims"])
+    pages = owed_pages(tmp_path / "pager.sqlite3")
+    assert [page.split(":")[0] for page in pages] == ["refused denied_credential"] * 2
+    assert DENIED_USERS["W1"] in pages[0] and DENIED_USERS["claims"] in pages[1]
+
+
+def test_a_flood_of_refused_addresses_pages_within_the_hours_budget_and_a_surrender_goes_first(
+        validating, tmp_path, monkeypatch):
+    """A base address pairing W1's payment key with a stake key of its own,
+    and a pointer address, are each refused before any build: free to make,
+    one after another."""
+    w1 = Address.from_primitive(DENIED_USERS["W1"]).payment_part
+    users = [Address(w1, VerificationKeyHash(n.to_bytes(28, "big")), Network.MAINNET).encode() for n in range(40)]
+    users += [Address(VerificationKeyHash(b"\x0c" * 28), PointerAddress(n + 1, 2, 3), Network.MAINNET).encode()
+              for n in range(40)]
+    for user in users:
+        with pytest.raises(HTTPException):
+            _build([_item("AGENT", 1000)], user)
+    pages = owed_pages(tmp_path / "pager.sqlite3")
+    assert len(pages) == 2 * 11  # ten pages a rule, and each rule's count of the rest
+    api.state.pager.page("signing surrender abc: 3,191,874.488548 cMATRA")
+    saved: list[str] = []
+
+    def discord(url, payload, headers):  # saves five messages, then rate-limits
+        if len(saved) == 5:
+            return 429, {"retry_after": 900}, "900"
+        saved.append(payload["content"])
+        return 200, {"id": str(len(saved))}, None
+
+    monkeypatch.setattr("services.pager._post", discord)
+    assert api.state.pager.deliver() == 900
+    assert saved[0].endswith("signing surrender abc: 3,191,874.488548 cMATRA")
 
 
 @pytest.mark.parametrize("assets,reason", [
@@ -168,7 +281,9 @@ def _body_hash(body: TransactionBody) -> str:
 
 class World:
     """A synthetic pool, quarantine and claimant whose every UTxO is an output
-    of a producing body the fake Blockfrost can serve."""
+    of a producing body the fake Blockfrost can serve, each placed at slot 0
+    unless ``slots`` says otherwise. The claimant got its tokens from a
+    seller's output."""
 
     def __init__(self, tmp_path, monkeypatch):
         self.monkeypatch = monkeypatch
@@ -180,6 +295,7 @@ class World:
         self.user_sk = PaymentSigningKey.generate()
         self.user_addr = Address(self.user_sk.to_verification_key().hash(), network=Network.TESTNET)
         self.chain: dict[str, bytes] = {}
+        self.slots: dict[str, int] = {}
         self.supply: dict[str, int] = dict(PIN.supply)
         self.spent: set[tuple[str, int]] = set()
         self.chain_failure: Exception | None = None
@@ -192,10 +308,13 @@ class World:
         agent = MultiAsset()
         agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 5_000})
         agent[ScriptHash(bytes.fromhex(PASS[:56]))] = Asset({AssetName(bytes.fromhex(PASS[56:])): 1})
+        seller = self._produce([TransactionOutput(
+            Address(VerificationKeyHash(b"\x05" * 28), network=Network.TESTNET), Value(5_000_000, agent))])
         user_body = self._produce([
             TransactionOutput(self.user_addr, Value(100_000_000)),
             TransactionOutput(self.user_addr, Value(5_000_000, agent)),
-        ])
+        ], inputs=[TransactionInput(TransactionId(bytes.fromhex(seller)), 0)])
+        self.user_body = user_body
         self.user_utxos = [
             UTxO(TransactionInput(TransactionId(bytes.fromhex(user_body)), i), out)
             for i, out in enumerate(TransactionBody.from_cbor(self.chain[user_body]).outputs)
@@ -222,6 +341,8 @@ class World:
             "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
             "COSIGNER_SKEY_PATH": str(tmp_path / "throwaway.skey"),
             "BLOCKFROST_PROJECT_ID": "preprod-test-project",
+            "PAGER_DISCORD_WEBHOOK_URL": TEST_WEBHOOK,
+            "PAGER_OUTBOX_PATH": str(tmp_path / "cosigner-pager.sqlite3"),
         }
         self.cosigner_sk.save(env["COSIGNER_SKEY_PATH"])
         self.ledger = env["COSIGNER_LEDGER_PATH"]
@@ -233,17 +354,20 @@ class World:
         self.client = TestClient(cosigner.app)
         self.client.__enter__()
         self.signed_by_admin: list[bytes] = []
-        # The primary ledger's approvals at each admin_1 signature.
+        # The primary ledger's approvals, and its pages, at each admin_1 signature.
         self.primary_rows_when_signed: list[int] = []
+        self.outbox = tmp_path / "primary-pager.sqlite3"
+        self.pages_when_signed: list[list[str]] = []
         self.cosign_calls = 0
         self._wire_surrender_api(env)
         create_ledger(str(tmp_path / "primary.sqlite3"))
-        self.primary_ledger = RedemptionLedger(str(tmp_path / "primary.sqlite3"), 10**15)
+        self.primary_ledger = RedemptionLedger(
+            str(tmp_path / "primary.sqlite3"), 10**15, api.state.cosign_config.funded_limits)
         monkeypatch.setattr(api.state, "ledger", self.primary_ledger)
 
-    def _produce(self, outputs) -> str:
+    def _produce(self, outputs, inputs=None) -> str:
         body = TransactionBody(
-            inputs=[TransactionInput(TransactionId(bytes(32)), len(self.chain))],
+            inputs=inputs or [TransactionInput(TransactionId(bytes(32)), len(self.chain))],
             outputs=outputs, fee=0,
         )
         self.chain[_body_hash(body)] = body.to_cbor()
@@ -258,6 +382,7 @@ class World:
             def sign(self, data):
                 world.signed_by_admin.append(data)
                 world.primary_rows_when_signed.append(world.primary_rows())
+                world.pages_when_signed.append(owed_pages(world.outbox))
                 return world.admin_sk.sign(data)
 
             def __getattr__(self, name):
@@ -281,12 +406,7 @@ class World:
                     raise world.chain_failure
                 if tx_hash not in world.chain:
                     raise not_found()
-                count = len(TransactionBody.from_cbor(world.chain[tx_hash]).outputs)
-                return {"hash": tx_hash, "outputs": [
-                    {"output_index": i, "collateral": False,
-                     "consumed_by_tx": "ee" * 32 if (tx_hash, i) in world.spent else None}
-                    for i in range(count)
-                ]}
+                return utxos_answer(world.chain, tx_hash, dict.fromkeys(world.spent, "ee" * 32))
 
             def get_asset_info(self, unit):
                 if world.chain_failure is not None:
@@ -299,6 +419,8 @@ class World:
                 return world.history.get_asset_history(unit)
 
             def get_tx(self, tx_hash):
+                if tx_hash in world.chain:
+                    return {"hash": tx_hash, "slot": world.slots.get(tx_hash, 0)}
                 return world.history.get_tx(tx_hash)
 
         def post(url, json, headers, timeout):
@@ -326,11 +448,13 @@ class World:
         m.setattr(api.state, "admin_addr", Address(admin_pkh, network=Network.TESTNET))
         m.setattr(api.state, "cosigner_pkh", cosigner_pkh)
         m.setattr(api.state, "bf", _BF())
+        m.setattr(api.state, "pager", Pager(TEST_WEBHOOK, str(self.outbox), "surrender-api, admin_1"))
         # Both signers ask the same (fake) chain; each through its own client.
         m.setattr(cosigner.state, "chain", api.state.bf)
         m.setattr(api.state, "built_bodies", {})
         m.setattr(api.state, "cosign_config", load_config(env, [admin_pkh.payload, cosigner_pkh.payload]))
         m.setattr(api, "ALLOWED_USER_ADDRESSES", frozenset())
+        m.setattr(api.state, "denylist", COMMITTED_DENYLIST)
         m.setattr(api.state, "rate_table", RATES)
         m.setattr(api.state, "redeemable_nfts", REDEEMABLE)
         m.setattr(api.state, "tip_mgr", PoolTipManager(
@@ -359,7 +483,7 @@ class World:
     def build_route(self, agent: int, passes: tuple[str, ...] = ()) -> api.BuildSurrenderResponse:
         """POST /build-surrender for ``agent`` AGENT and the T1 ``passes``
         from the claimant."""
-        assets = [api.AssetToSurrender(asset_key="AGENT", quantity_base=agent)]
+        assets = [api.AssetToSurrender(asset_key="AGENT", quantity_base=agent)] if agent else []
         if passes:
             assets.append(api.AssetToSurrender(
                 asset_key="T1_ADAM_PASS", quantity_base=len(passes), nft_units=list(passes)))
@@ -419,7 +543,8 @@ def test_chained_builds_carry_no_signature_past_the_primary_cap(world, monkeypat
     daily cap obtain nothing that either ledger has not recorded."""
     e = _entitlement(1_000)
     create_ledger(str(tmp_path / "small-cap.sqlite3"))
-    small_cap = RedemptionLedger(str(tmp_path / "small-cap.sqlite3"), int(1.5 * e))
+    small_cap = RedemptionLedger(
+        str(tmp_path / "small-cap.sqlite3"), int(1.5 * e), api.state.cosign_config.funded_limits)
     monkeypatch.setattr(api.state, "ledger", small_cap)
     pool, user_inputs = world.pool_utxo, None
     for _ in range(3):
@@ -664,6 +789,242 @@ def test_a_unit_minted_past_its_pinned_supply_is_refused_before_either_admin_sig
     assert err.value.code == "supply_grown"
     assert world.signed_by_admin == []
     assert world.cosign_calls == 0
+
+
+def test_a_surrender_is_paged_before_admin_1_signs(world):
+    built = world.build_route(1_000)
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    [pages] = world.pages_when_signed
+    assert len(pages) == 1 and pages[0].startswith(f"signing surrender {built.tx_hash}: ")
+
+
+def test_an_unwritable_outbox_stops_the_surrender_before_admin_1_signs(world):
+    built = world.build_route(1_000)
+    with sqlite3.connect(world.outbox) as conn:
+        conn.execute("CREATE TRIGGER refuse BEFORE INSERT ON pages BEGIN SELECT RAISE(ABORT, 'full'); END")
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 503
+    assert err.value.detail["code"] == "pager_unavailable"
+    assert world.signed_by_admin == [] and world.submitted == []
+
+
+PAUSED = {"code": "pager_backlog", "message": "Surrenders are temporarily paused. Please retry shortly."}
+
+
+def _page_owed_past_the_grace(world, pager: Pager) -> None:
+    """The page of an earlier surrender, owed since a second past the grace."""
+    world.monkeypatch.setattr(api.time, "time", lambda: NOW + SLOT_OFFSET_S[NETWORK] - 601)
+    pager.page("signing surrender EARLIER")
+    world.monkeypatch.setattr(api.time, "time", lambda: NOW + SLOT_OFFSET_S[NETWORK])
+
+
+def test_a_page_undelivered_past_the_grace_pauses_the_primary_until_discord_saves_it(world):
+    """admin 1's page of an earlier surrender has waited past the grace
+    behind a deleted webhook: a surrender already built is not signed, no
+    new one is built, and the claimant is told to retry."""
+    built = world.build_route(1_000)
+    discord_answering(world.monkeypatch, DELETED_WEBHOOK)
+    _page_owed_past_the_grace(world, api.state.pager)
+    with pytest.raises(HTTPException) as unsigned:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    with pytest.raises(HTTPException) as unbuilt:
+        world.build_route(1_000)
+    for refused in (unsigned, unbuilt):
+        assert refused.value.status_code == 503
+        assert refused.value.detail == PAUSED
+    assert world.signed_by_admin == [] and world.cosign_calls == 0 and world.submitted == []
+    assert world.primary_rows() == 0
+    discord_answering(world.monkeypatch, (200, {"id": "1"}, None))
+    assert api.state.pager.deliver() is None
+    resumed = world.build_route(1_000)  # the pool tip was released
+    world.submit_route(resumed.tx_hash, world.wallet_witnesses(resumed.tx_hash))
+    (tx,) = world.submitted
+    _assert_signed_by(tx, resumed.tx_hash, world.user_sk, world.admin_sk, world.cosigner_sk)
+
+
+def test_the_cosigners_pause_reaches_the_claimant_as_its_code(world):
+    built = world.build_route(1_000)
+    discord_answering(world.monkeypatch, DELETED_WEBHOOK)
+    _page_owed_past_the_grace(world, cosigner.state.pager)
+    with pytest.raises(HTTPException) as refused:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert refused.value.status_code == 503
+    assert refused.value.detail == PAUSED
+    assert world.cosign_calls == 1 and world.cosigned_rows() == 0
+    assert world.signed_by_admin == [] and world.primary_rows() == 0 and world.submitted == []
+    world.build_route(1_000)  # the pool tip was released
+
+
+def test_an_unreadable_outbox_stops_the_build_and_the_signature(world):
+    built = world.build_route(1_000)
+    with sqlite3.connect(world.outbox) as conn:
+        conn.execute("DROP TABLE pages")
+    with pytest.raises(HTTPException) as unsigned:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    with pytest.raises(HTTPException) as unbuilt:
+        world.build_route(1_000)
+    for refused in (unsigned, unbuilt):
+        assert refused.value.status_code == 503
+        assert refused.value.detail["code"] == "pager_unavailable"
+    assert world.signed_by_admin == [] and world.cosign_calls == 0 and world.submitted == []
+
+
+def test_health_answers_503_while_paging_fails(validating, monkeypatch):
+    healthy = api.health()
+    assert healthy.status_code == 200
+    assert json.loads(healthy.body)["status"] == "ok"
+    discord_answering(monkeypatch, DELETED_WEBHOOK)
+    api.state.pager.page("signing surrender abc")
+    api.state.pager.deliver()
+    refused = api.health()
+    assert refused.status_code == 503
+    assert {key: json.loads(refused.body)[key] for key in ("status", "pages_owed", "webhook_refused")} == {
+        "status": "paging_failed", "pages_owed": 1, "webhook_refused": 404,
+    }
+
+
+def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(world):
+    world.slots[world.user_body] = NOW - 3600
+    with pytest.raises(HTTPException) as err:
+        world.build_route(1_000)
+    assert err.value.status_code == 422
+    assert err.value.detail["code"] == "cooling_off"
+    assert world.user_body in err.value.detail["message"]
+    assert world.signed_by_admin == [] and world.cosign_calls == 0
+    world.monkeypatch.setattr(api.time, "time", lambda: NOW + 60 + SLOT_OFFSET_S[NETWORK])
+    with pytest.raises(HTTPException):
+        world.build_route(1_000)  # refused again a minute later: paged once
+    assert [page.split(":")[0] for page in owed_pages(world.outbox)] == ["refused cooling_off"]
+    world.slots[world.user_body] = NOW + 60 - 72 * 3600
+    world.build_route(1_000)  # held as long as the window, and the tip was released
+
+
+def test_a_surrender_spends_the_units_held_longest_first(world):
+    """Beside the AGENT held long before, AGENT from another key reached the
+    claimant an hour ago in an output with more ADA, which the builder's own
+    selection, largest first, would spend instead: the surrender would wait
+    out the cooling-off for nothing."""
+    agent = MultiAsset()
+    agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 5_000})
+    seller = world._produce([TransactionOutput(
+        Address(VerificationKeyHash(b"\x06" * 28), network=Network.TESTNET), Value(50_000_000, agent))])
+    received = world._produce([TransactionOutput(world.user_addr, Value(50_000_000, agent))],
+                              inputs=[TransactionInput(TransactionId(bytes.fromhex(seller)), 0)])
+    world.slots[received] = NOW - 3600
+    world.user_utxos.append(UTxO(TransactionInput(TransactionId(bytes.fromhex(received)), 0),
+                                 TransactionBody.from_cbor(world.chain[received]).outputs[0]))
+    built = world.build_route(1_000)
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    (tx,) = world.submitted
+    spent = {(ref[0].hex(), ref[1]) for ref in _elements(decode(split_tx(tx)[0])[0])}
+    assert (world.user_body, 1) in spent
+    assert (received, 0) not in spent
+
+
+def test_the_build_leaves_out_only_the_holders_it_need_not_spend(monkeypatch):
+    def utxo(n: int, *units: tuple[str, int]) -> UTxO:
+        multi = MultiAsset()
+        for unit, quantity in units:
+            multi.setdefault(ScriptHash(bytes.fromhex(unit[:56])), Asset())[AssetName(bytes.fromhex(unit[56:]))] = (
+                quantity)
+        user = Address(VerificationKeyHash(b"\x02" * 28), network=Network.TESTNET)
+        return UTxO(TransactionInput(TransactionId(bytes([n]) * 32), 0), TransactionOutput(user, Value(2_000_000, multi)))
+
+    old, new, unplaced = utxo(1, (AGENT.unit, 600)), utxo(2, (AGENT.unit, 600), (PASS, 1)), utxo(3, (AGENT.unit, 600))
+    slots = {str(old.input.transaction_id): 10, str(new.input.transaction_id): 20}
+    asked: list[str] = []
+
+    class Chain:
+        def get_tx(self, tx_hash):
+            asked.append(tx_hash)
+            if tx_hash not in slots:
+                raise not_found()
+            return {"hash": tx_hash, "slot": slots[tx_hash]}
+
+    monkeypatch.setattr(api.state, "bf", Chain())
+    agent = {"policy_hex": AGENT_POLICY, "asset_hex": AGENT_NAME, "quantity": 600}
+    a_pass = {"policy_hex": PASS[:56], "asset_hex": PASS[56:], "quantity": 1}
+    utxos = [unplaced, new, old]
+    assert api._later_holders(utxos, [agent]) == [new, unplaced]
+    assert api._later_holders(utxos, [{**agent, "quantity": 601}]) == [unplaced]
+    assert api._later_holders(utxos, [agent, a_pass]) == [unplaced]
+    asked.clear()
+    assert api._later_holders([old, new], [a_pass]) == []
+    assert asked == []
+
+
+def test_the_build_asks_where_at_most_256_holders_were_made(monkeypatch):
+    """An address can hold a unit in any number of outputs, each made by a
+    transaction of its own. The build asks where 256 of them are; the rest
+    go after those."""
+    asked: list[str] = []
+
+    class Chain:
+        def get_tx(self, tx_hash):
+            asked.append(tx_hash)
+            return {"hash": tx_hash, "slot": 10}
+
+    monkeypatch.setattr(api.state, "bf", Chain())
+    agent = MultiAsset()
+    agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 1})
+    user = Address(VerificationKeyHash(b"\x02" * 28), network=Network.TESTNET)
+    holders = [UTxO(TransactionInput(TransactionId(n.to_bytes(32, "big")), 0),
+                    TransactionOutput(user, Value(2_000_000, agent))) for n in range(1, 301)]
+    later = api._later_holders(holders, [{"policy_hex": AGENT_POLICY, "asset_hex": AGENT_NAME, "quantity": 1}])
+    assert len(asked) == len(set(asked)) == 256
+    [spent] = [u for u in holders if u not in later]
+    assert str(spent.input.transaction_id) in asked
+
+
+def _merge_a_pass_from_another_key_into_the_agent(world) -> str:
+    """A T1 pass from another key reaches the claimant 15 minutes ago and is
+    merged 10 minutes ago into the output holding its long-held AGENT. Returns
+    the pass."""
+    unit = next(u for u in T1_UNITS if PIN.remaining[u] > 0 and u != PASS)
+    one = MultiAsset()
+    one[ScriptHash(bytes.fromhex(unit[:56]))] = Asset({AssetName(bytes.fromhex(unit[56:])): 1})
+    seller = world._produce([TransactionOutput(
+        Address(VerificationKeyHash(b"\x06" * 28), network=Network.TESTNET), Value(2_000_000, one))])
+    received = world._produce([TransactionOutput(world.user_addr, Value(2_000_000, one))],
+                              inputs=[TransactionInput(TransactionId(bytes.fromhex(seller)), 0)])
+    held = world.user_utxos[1]
+    merged = world._produce([TransactionOutput(world.user_addr, held.output.amount + Value(2_000_000, one))],
+                            inputs=[held.input, TransactionInput(TransactionId(bytes.fromhex(received)), 0)])
+    world.slots[received], world.slots[merged] = NOW - 900, NOW - 600
+    world.user_utxos[1] = UTxO(TransactionInput(TransactionId(bytes.fromhex(merged)), 0),
+                               TransactionBody.from_cbor(world.chain[merged]).outputs[0])
+    return unit
+
+
+def test_a_pass_that_rode_through_a_recorded_surrender_waits_out_the_cooling_off(world):
+    """An AGENT surrender spends the merged output and returns the pass as
+    change; both signers record it. Surrendered from that change while the
+    AGENT surrender is still in the mempool, the pass is refused."""
+    passed = _merge_a_pass_from_another_key_into_the_agent(world)
+    first = world.build_route(1_000)
+    world.submit_route(first.tx_hash, world.wallet_witnesses(first.tx_hash))
+    with pytest.raises(HTTPException) as err:
+        world.build_route(0, passes=(passed,))
+    assert err.value.status_code == 422
+    assert err.value.detail["code"] == "cooling_off"
+    assert err.value.detail["message"].startswith(f"{passed} reached the claimant in ")
+    assert len(world.submitted) == 1
+
+
+def test_the_cosigner_refuses_a_pass_that_rode_through_if_the_primary_skips_its_check(world, monkeypatch, tmp_path):
+    passed = _merge_a_pass_from_another_key_into_the_agent(world)
+    first = world.build_route(1_000)
+    world.submit_route(first.tx_hash, world.wallet_witnesses(first.tx_hash))
+    monkeypatch.setattr(api, "_check_locally", lambda *a, **k: None)
+    second = world.build_route(0, passes=(passed,))
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(second.tx_hash, world.wallet_witnesses(second.tx_hash))
+    assert err.value.status_code == 503
+    assert world.cosigned_rows() == 1
+    assert len(world.submitted) == 1
+    assert [page.split(":")[0] for page in owed_pages(tmp_path / "cosigner-pager.sqlite3")][-1] == (
+        "refused cooling_off")
 
 
 def test_the_build_route_answers_a_grown_supply_with_its_code(world):

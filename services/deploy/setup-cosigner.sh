@@ -101,19 +101,21 @@ echo ""
 echo "============================================"
 
 # --- Step 3: Write the settings .env.cosigner lacks ---
-# The co-signer refuses to start without its policy. Export these before
-# running this script (values for the deployed pool are in the ceremony
+# The co-signer refuses to start without its policy and its pager. Export these
+# before running this script (values for the deployed pool are in the ceremony
 # record): COSIGNER_PRIMARY_ADMIN_PKH, SURRENDER_SCRIPT_ADDRESS,
 # QUARANTINE_ADDRESS, CMATRA_POLICY_HEX, CMATRA_ASSET_HEX,
-# SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY, and
-# BLOCKFROST_PROJECT_ID (this host's own view of the chain; Blockfrost default).
+# SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, MAX_CMATRA_PER_DAY,
+# BLOCKFROST_PROJECT_ID (this host's own view of the chain; Blockfrost default)
+# and PAGER_DISCORD_WEBHOOK_URL (the on-call channel's webhook; never printed).
 # Insight provider settings belong to the separately authorized cutover.
 # A setting already in .env.cosigner is kept as it is, so on an existing host
 # only the settings it lacks are added and its API secret stays.
 ENV_FILE="$SCRIPT_DIR/.env.cosigner"
 EXPORTED=(COSIGNER_PRIMARY_ADMIN_PKH SURRENDER_SCRIPT_ADDRESS QUARANTINE_ADDRESS
           CMATRA_POLICY_HEX CMATRA_ASSET_HEX SURRENDER_DEADLINE_POSIX_MS
-          MAX_CMATRA_PER_TX MAX_CMATRA_PER_DAY BLOCKFROST_PROJECT_ID)
+          MAX_CMATRA_PER_TX MAX_CMATRA_PER_DAY BLOCKFROST_PROJECT_ID
+          PAGER_DISCORD_WEBHOOK_URL)
 has_setting() { [[ -f "$ENV_FILE" ]] && grep -q "^$1=" "$ENV_FILE"; }
 
 UNSET=()
@@ -151,6 +153,7 @@ if ! has_setting COSIGNER_API_SECRET; then
 fi
 has_setting COSIGNER_LEDGER_PATH || FIRST_LEDGER=1
 add_setting COSIGNER_LEDGER_PATH /app/data/cosigned.sqlite3
+add_setting PAGER_OUTBOX_PATH /app/data/pager-outbox.sqlite3
 add_setting NETWORK "${NETWORK:-mainnet}"
 for name in "${EXPORTED[@]}"; do
     add_setting "$name" "${!name:-}"

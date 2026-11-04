@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import hmac
 import sqlite3
+import time
+from contextlib import closing
+from dataclasses import replace
 
 import nacl.signing
 import pytest
@@ -17,6 +20,7 @@ from fastapi.testclient import TestClient
 from pycardano import PaymentSigningKey
 
 import services.cosigner_api as cosigner
+import services.pager
 from services.cosign_policy import SLOT_OFFSET_S, decode, evaluate_surrender, split_tx
 from services.redemption_ledger import create_ledger
 from tests.cosign_cases import (
@@ -28,8 +32,10 @@ from tests.cosign_cases import (
     CMATRA_NAME,
     CMATRA_POLICY,
     CONTINUATION,
+    DELETED_WEBHOOK,
     MAINNET,
     MAINNET_BEFORE_SURRENDERS,
+    TEST_WEBHOOK,
     Draft,
     FakeChain,
     Scenario,
@@ -37,8 +43,10 @@ from tests.cosign_cases import (
     _add_coin,
     another_pool_utxo,
     blake,
+    discord_answering,
     golden_scenario,
     ledger_refusing_writes,
+    owed_pages,
     throwaway_key,
     without_claimant_witness,
 )
@@ -75,6 +83,8 @@ def service(tmp_path, monkeypatch):
         "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
         "MAX_CMATRA_PER_DAY": str(10**18),
         "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
+        "PAGER_DISCORD_WEBHOOK_URL": TEST_WEBHOOK,
+        "PAGER_OUTBOX_PATH": str(tmp_path / "pager.sqlite3"),
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -83,6 +93,7 @@ def service(tmp_path, monkeypatch):
     class Service:
         vkey = bytes(sk.to_verification_key().payload)
         ledger = tmp_path / "cosigned.sqlite3"
+        outbox = tmp_path / "pager.sqlite3"
         chain = FakeChain.as_at_the_golden_builds()
 
         clock = [0]
@@ -189,6 +200,7 @@ def test_daily_cap_is_persisted_across_restarts(service, monkeypatch):
     client = service.start(service.client(first.now_slot))
     try:
         assert client.post("/cosign", json=_request(first), headers=HEADERS).status_code == 200
+        cosigner.state.pager.deliver()  # as the sender does, before the clock moves past the grace
         service.at(second.now_slot)
         refused = client.post("/cosign", json=_request(second), headers=HEADERS)
         assert refused.status_code == 422
@@ -538,3 +550,188 @@ def test_chain_provider_uses_policy_network(service, monkeypatch):
     with service.client(0):
         assert cosigner.state.chain.base_url == "https://cardano-mainnet.blockfrost.io/api/v0"
         assert cosigner.state.chain.project_id == "mainnet-policy-fixture"
+
+
+def test_the_denylist_loaded_at_startup_refuses_a_w1_surrender(service):
+    """A real surrender W1 made in May, sent to the co-signer with the
+    deny-list it loaded at startup: refused for W1's credential, nothing
+    recorded. The real admins replace the throwaway one, as in start()."""
+    s = golden_scenario("6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580")
+    with service.client(s.now_slot) as client:
+        cosigner.state.cfg = replace(MAINNET_BEFORE_SURRENDERS, denylist=cosigner.state.cfg.denylist)
+        cosigner.state.chain = service.chain
+        resp = client.post("/cosign", json=_request(s), headers=HEADERS)
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "denied_credential"
+    assert "W1" in resp.json()["detail"]["detail"]
+    assert service.rows() == 0
+
+
+# -- paging ------------------------------------------------------------------
+
+
+def test_a_surrender_is_paged_before_its_signature_leaves(service, monkeypatch):
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    pages_at_signing = []
+    real = cosigner.state.sk
+
+    class Spy:
+        def sign(self, data):
+            pages_at_signing.append(owed_pages(service.outbox))
+            return real.sign(data)
+
+    monkeypatch.setattr(cosigner.state, "sk", Spy())
+    try:
+        assert client.post("/cosign", json=_request(s), headers=HEADERS).status_code == 200
+    finally:
+        client.__exit__(None, None, None)
+    [pages] = pages_at_signing
+    assert len(pages) == 1 and pages[0].startswith(f"signing surrender {BASE_T1}: ")
+
+
+def test_a_refusal_under_a_deny_rule_is_paged_and_no_other_is(service):
+    w1 = golden_scenario("6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580")
+    mint = next(c for c in CASES if c.name == "extra_mint").build()
+    with service.client(w1.now_slot) as client:
+        cosigner.state.cfg = replace(MAINNET_BEFORE_SURRENDERS, denylist=cosigner.state.cfg.denylist)
+        cosigner.state.chain = service.chain
+        assert client.post("/cosign", json=_request(w1), headers=HEADERS).status_code == 422
+        cosigner.state.pager.deliver()  # as the sender does, before the clock moves past the grace
+        service.at(mint.now_slot)
+        assert client.post("/cosign", json=_request(mint), headers=HEADERS).status_code == 422
+    assert [page.split(":")[0] for page in owed_pages(service.outbox)] == ["refused denied_credential"]
+
+
+def test_an_unwritable_outbox_refuses_to_sign(service):
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    try:
+        with closing(sqlite3.connect(service.outbox)) as conn, conn:
+            conn.execute("CREATE TRIGGER refuse BEFORE INSERT ON pages BEGIN SELECT RAISE(ABORT, 'full'); END")
+        resp = client.post("/cosign", json=_request(s), headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["code"] == "pager_unavailable"
+    assert "signature_hex" not in resp.text
+
+
+def test_health_reports_the_pages_owed(service):
+    with service.client(0) as client:
+        health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok", "key_loaded": True, "pkh": health.json()["pkh"], "pages_owed": 0,
+                             "oldest_page_owed_s": None, "signing_paused": False, "webhook_refused": None}
+
+
+def test_a_deleted_webhook_pauses_signing_once_a_page_has_waited_past_the_grace(service, monkeypatch):
+    """The webhook is deleted, so Discord answers 404 for good. The co-signer
+    signs while the page of the first surrender has waited up to ten
+    minutes, then refuses, and says why on /health."""
+    discord_answering(monkeypatch, DELETED_WEBHOOK)
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    try:
+        assert client.post("/cosign", json=_request(s), headers=HEADERS).status_code == 200
+        cosigner.state.pager.deliver()
+        service.at(s.now_slot + 600)
+        assert client.post("/cosign", json=_request(s), headers=HEADERS).status_code == 200
+        service.at(s.now_slot + 601)
+        refused = client.post("/cosign", json=_request(s), headers=HEADERS)
+        health = client.get("/health")
+    finally:
+        client.__exit__(None, None, None)
+    assert refused.status_code == 503
+    assert refused.json()["detail"]["code"] == "pager_backlog"
+    assert "600 s grace" in refused.json()["detail"]["detail"]
+    assert "signature_hex" not in refused.text
+    assert len(owed_pages(service.outbox)) == 2
+    assert health.status_code == 503
+    assert {key: health.json()[key] for key in ("status", "signing_paused", "webhook_refused", "key_loaded")} == {
+        "status": "paging_failed", "signing_paused": True, "webhook_refused": 404, "key_loaded": True,
+    }
+
+
+def test_signing_resumes_on_its_own_once_discord_saves_the_pages(service, monkeypatch):
+    """The sender keeps retrying (here every 50 ms); once Discord saves the
+    page, the next surrender is signed, with no restart."""
+    monkeypatch.setattr(services.pager, "FIRST_RETRY_S", 0.05)
+    monkeypatch.setattr(services.pager, "LAST_RETRY_S", 0.05)
+    discord_answering(monkeypatch, DELETED_WEBHOOK)
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    try:
+        assert client.post("/cosign", json=_request(s), headers=HEADERS).status_code == 200
+        service.at(s.now_slot + 601)
+        assert client.post("/cosign", json=_request(s), headers=HEADERS).status_code == 503
+        discord_answering(monkeypatch, (200, {"id": "1"}, None))
+        deadline = time.monotonic() + 10
+        while cosigner.state.pager.owed() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        resumed = client.post("/cosign", json=_request(s), headers=HEADERS)
+        health = client.get("/health")
+    finally:
+        client.__exit__(None, None, None)
+    assert resumed.status_code == 200 and "signature_hex" in resumed.json()
+    assert health.status_code == 200 and health.json()["status"] == "ok"
+
+
+def test_a_slow_discord_inside_the_grace_never_pauses_signing(service, monkeypatch):
+    """Discord times out on every post for ten minutes; each surrender asked
+    meanwhile is signed, and paged once Discord answers again."""
+    discord_answering(monkeypatch, requests.Timeout("slow"))
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    try:
+        for seconds in (0, 300, 600):
+            service.at(s.now_slot + seconds)
+            cosigner.state.pager.deliver()
+            assert client.post("/cosign", json=_request(s), headers=HEADERS).status_code == 200
+        health = client.get("/health")
+        discord_answering(monkeypatch, (200, {"id": "1"}, None))
+        assert cosigner.state.pager.deliver() is None
+    finally:
+        client.__exit__(None, None, None)
+    assert health.status_code == 200
+    paging = {key: health.json()[key] for key in ("status", "pages_owed", "oldest_page_owed_s", "signing_paused")}
+    assert paging == {"status": "ok", "pages_owed": 3, "oldest_page_owed_s": 600, "signing_paused": False}
+
+
+def test_an_unreadable_outbox_refuses_before_anything_is_recorded(service):
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    try:
+        with closing(sqlite3.connect(service.outbox)) as conn, conn:
+            conn.execute("DROP TABLE pages")
+        resp = client.post("/cosign", json=_request(s), headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["code"] == "pager_unavailable"
+    assert service.rows() == 0
+
+
+@pytest.mark.parametrize("missing", ["PAGER_DISCORD_WEBHOOK_URL", "PAGER_OUTBOX_PATH"])
+def test_refuses_to_start_without_its_pager(service, monkeypatch, missing):
+    monkeypatch.delenv(missing)
+    with pytest.raises(ValueError, match=missing):
+        cosigner.startup()
+
+
+def test_a_cooling_off_refusal_repeated_a_minute_later_pages_once(service):
+    """The units' producing transaction landed inside the window, from
+    outputs this chain view has no body for."""
+    s = golden_scenario(BASE_T1)
+    approval = evaluate_surrender(s.tx, s.language_views, s.parents, s.now_slot, MAINNET)
+    for tx_id, _ in approval.unit_inputs:
+        service.chain.slots[tx_id.hex()] = s.now_slot - 60
+    client = service.start(service.client(s.now_slot))
+    try:
+        for minutes in (0, 1):
+            service.at(s.now_slot + 60 * minutes)
+            refused = client.post("/cosign", json=_request(s), headers=HEADERS)
+            assert refused.json()["detail"]["code"] == "cooling_off"
+    finally:
+        client.__exit__(None, None, None)
+    assert [page.split(":")[0] for page in owed_pages(service.outbox)] == ["refused cooling_off"]
