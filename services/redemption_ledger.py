@@ -33,12 +33,23 @@ A ledger that went missing would reset every limit, so it is created once,
 deliberately, and never implicitly:
 
     python -m services.redemption_ledger init <path>
+
+For the same reason a signer that moves keeps its ledger. `copy` moves it
+byte for byte with a proof and leaves the old file read-only; `digest` counts
+the approvals and digests what every signer records alike, so two signers'
+ledgers can be compared from their own hosts:
+
+    python -m services.redemption_ledger copy [--owner USER] <source> <destination>
+    python -m services.redemption_ledger digest <path>
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
+import pwd
 import sqlite3
 import sys
 from collections import defaultdict
@@ -169,11 +180,8 @@ class RedemptionLedger:
         # while the service runs fails every write instead of starting over.
         self._uri = Path(path).resolve().as_uri() + "?mode=rw"
         with closing(self._connect()) as conn:
-            found = conn.execute(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'approvals'"
-            ).fetchone()
-        if found is None or found[0] != _SCHEMA:
-            raise ValueError(f"{path} is not a redemption ledger of this version")
+            if not _is_ledger(conn):
+                raise ValueError(f"{path} is not a redemption ledger of this version")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._uri, uri=True, timeout=10, isolation_level=None)
@@ -254,11 +262,147 @@ class RedemptionLedger:
             raise CosignRejected("daily_cap", f"{paid} in 24h would pass {self.max_per_day}")
 
 
-if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] != "init":
-        sys.exit("usage: python -m services.redemption_ledger init <path>")
+def _is_ledger(conn: sqlite3.Connection) -> bool:
+    found = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'approvals'").fetchone()
+    return found is not None and found[0] == _SCHEMA
+
+
+def _read_only(path: str) -> sqlite3.Connection:
+    return sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, isolation_level=None)
+
+
+def _rows(conn: sqlite3.Connection) -> list[tuple]:
+    return conn.execute("SELECT * FROM approvals ORDER BY tx_hash").fetchall()
+
+
+def _digest(conn: sqlite3.Connection) -> tuple[int, str]:
+    rows = conn.execute(
+        "SELECT tx_hash, pool_tx, pool_index, payout, units, spends FROM approvals ORDER BY tx_hash"
+    ).fetchall()
+    text = "\n".join(json.dumps([tx.hex(), pool_tx.hex(), index, payout, units, spends])
+                     for tx, pool_tx, index, payout, units, spends in rows)
+    return len(rows), hashlib.sha256(text.encode()).hexdigest()
+
+
+def approvals_digest(path: str) -> tuple[int, str]:
+    """How many approvals the ledger at ``path`` holds, and a sha256 over every
+    column but signed_at, in tx_hash order: two signers that approved the same
+    surrenders give the same digest, however far apart they signed."""
+    with closing(_read_only(path)) as conn:
+        if not _is_ledger(conn):
+            raise ValueError(f"{path} is not a redemption ledger of this version")
+        return _digest(conn)
+
+
+def copy_ledger(source: str, destination: str, owner: str | None = None) -> dict:
+    """Copy the ledger at ``source`` to ``destination`` byte for byte, prove the
+    copy, and only then make ``source`` read-only (0400), so the old file is
+    kept as it was.
+
+    Refuses a source that is not a ledger, one with a journal beside it (a
+    write in flight or interrupted, so the file alone may be inconsistent),
+    and any existing destination. The bytes are read under a shared lock, so
+    no writer can change the source meanwhile. The destination is created
+    owner-only (0600), for ``owner`` if named. The proof: both files have the
+    same sha256, the copy passes SQLite's integrity check and holds the same
+    approvals row for row. A copy that fails it is removed."""
     try:
-        create_ledger(sys.argv[2])
-    except FileExistsError:
-        sys.exit(f"{sys.argv[2]} exists; a ledger is never replaced")
-    print(f"created an empty redemption ledger at {sys.argv[2]}")
+        account = pwd.getpwnam(owner) if owner else None
+    except KeyError:
+        raise ValueError(f"no user {owner!r}") from None
+    busy = [source + suffix for suffix in ("-journal", "-wal", "-shm") if os.path.exists(source + suffix)]
+    if busy:
+        raise ValueError(f"{busy[0]} exists: a write to {source} is in flight or was interrupted. Stop the signer,"
+                         " open the ledger once as its owner so SQLite finishes or rolls it back, and copy again")
+    created = False
+    try:
+        with closing(_read_only(source)) as conn:
+            conn.execute("BEGIN")
+            if not _is_ledger(conn):
+                raise ValueError(f"{source} is not a redemption ledger of this version")
+            rows = _rows(conn)
+            data = Path(source).read_bytes()
+            try:
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                raise FileExistsError(f"{destination} exists; a ledger is never replaced") from None
+            created = True
+            try:
+                if account is not None:
+                    os.fchown(fd, account.pw_uid, account.pw_gid)
+                remaining = memoryview(data)
+                while remaining:
+                    remaining = remaining[os.write(fd, remaining):]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            conn.execute("COMMIT")
+        directory = os.open(os.path.dirname(os.path.abspath(destination)), os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        proof = _prove_copy(source, destination, hashlib.sha256(data).hexdigest(), rows)
+    except BaseException:
+        if created:
+            os.remove(destination)
+        raise
+    os.chmod(source, 0o400)
+    return {**proof, "source": source, "destination": destination, "bytes": len(data),
+            "owner": owner or pwd.getpwuid(os.geteuid()).pw_name, "source_mode": "0400"}
+
+
+def _prove_copy(source: str, destination: str, sha256: str, rows: list[tuple]) -> dict:
+    """The proof that ``destination`` is ``source`` as read: its sha256, SQLite's
+    integrity check and every approval row. Raises ValueError naming the
+    first that fails."""
+    failed = None
+    if hashlib.sha256(Path(destination).read_bytes()).hexdigest() != sha256:
+        failed = "sha256"
+    else:
+        try:
+            with closing(_read_only(destination)) as copy:
+                if copy.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                    failed = "integrity_check"
+                elif not _is_ledger(copy) or _rows(copy) != rows:
+                    failed = "approvals"
+                else:
+                    count, digest = _digest(copy)
+        except sqlite3.DatabaseError:
+            failed = "integrity_check"
+    if failed:
+        raise ValueError(f"the copy at {destination} does not match {source} ({failed}); it was removed")
+    return {"sha256": sha256, "integrity_check": "ok", "approvals": count, "approvals_digest": digest}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m services.redemption_ledger",
+                                     description="Create, move or digest a signer's redemption ledger.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("init", help="an empty ledger, for a signer that has never signed").add_argument("path")
+    copy = commands.add_parser("copy", help="move a ledger: byte copy, proof, source left read-only")
+    copy.add_argument("--owner", help="the user the copy belongs to (the signer's service user)")
+    copy.add_argument("source")
+    copy.add_argument("destination")
+    commands.add_parser("digest", help="count and digest the approvals every signer records alike").add_argument("path")
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "init":
+            try:
+                create_ledger(args.path)
+            except FileExistsError:
+                raise FileExistsError(f"{args.path} exists; a ledger is never replaced") from None
+            print(f"created an empty redemption ledger at {args.path}")
+        elif args.command == "copy":
+            print(json.dumps(copy_ledger(args.source, args.destination, args.owner), indent=2))
+        else:
+            count, digest = approvals_digest(args.path)
+            print(json.dumps({"path": args.path, "approvals": count, "approvals_digest": digest}, indent=2))
+    except (OSError, ValueError) as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
