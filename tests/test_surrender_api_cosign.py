@@ -451,7 +451,7 @@ class World:
     def build_route(self, agent: int, passes: tuple[str, ...] = ()) -> api.BuildSurrenderResponse:
         """POST /build-surrender for ``agent`` AGENT and the T1 ``passes``
         from the claimant."""
-        assets = [api.AssetToSurrender(asset_key="AGENT", quantity_base=agent)]
+        assets = [api.AssetToSurrender(asset_key="AGENT", quantity_base=agent)] if agent else []
         if passes:
             assets.append(api.AssetToSurrender(
                 asset_key="T1_ADAM_PASS", quantity_base=len(passes), nft_units=list(passes)))
@@ -791,6 +791,56 @@ def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(wo
     assert [page.split(":")[0] for page in owed_pages(world.outbox)] == ["refused cooling_off"]
     world.slots[world.user_body] = NOW + 60 - 72 * 3600
     world.build_route(1_000)  # held as long as the window, and the tip was released
+
+
+def _merge_a_pass_from_another_key_into_the_agent(world) -> str:
+    """A T1 pass from another key reaches the claimant 15 minutes ago and is
+    merged 10 minutes ago into the output holding its long-held AGENT. Returns
+    the pass."""
+    unit = next(u for u in T1_UNITS if PIN.remaining[u] > 0 and u != PASS)
+    one = MultiAsset()
+    one[ScriptHash(bytes.fromhex(unit[:56]))] = Asset({AssetName(bytes.fromhex(unit[56:])): 1})
+    seller = world._produce([TransactionOutput(
+        Address(VerificationKeyHash(b"\x06" * 28), network=Network.TESTNET), Value(2_000_000, one))])
+    received = world._produce([TransactionOutput(world.user_addr, Value(2_000_000, one))],
+                              inputs=[TransactionInput(TransactionId(bytes.fromhex(seller)), 0)])
+    held = world.user_utxos[1]
+    merged = world._produce([TransactionOutput(world.user_addr, held.output.amount + Value(2_000_000, one))],
+                            inputs=[held.input, TransactionInput(TransactionId(bytes.fromhex(received)), 0)])
+    world.slots[received], world.slots[merged] = NOW - 900, NOW - 600
+    world.user_utxos[1] = UTxO(TransactionInput(TransactionId(bytes.fromhex(merged)), 0),
+                               TransactionBody.from_cbor(world.chain[merged]).outputs[0])
+    return unit
+
+
+def test_a_pass_that_rode_through_a_recorded_surrender_waits_out_the_cooling_off(world):
+    """An AGENT surrender spends the merged output and returns the pass as
+    change; both signers record it. Surrendered from that change while the
+    AGENT surrender is still in the mempool, the pass is refused."""
+    passed = _merge_a_pass_from_another_key_into_the_agent(world)
+    first = world.build_route(1_000)
+    world.submit_route(first.tx_hash, world.wallet_witnesses(first.tx_hash))
+    with pytest.raises(HTTPException) as err:
+        world.build_route(0, passes=(passed,))
+    assert err.value.status_code == 422
+    assert err.value.detail["code"] == "cooling_off"
+    assert err.value.detail["message"].startswith(f"{passed} reached the claimant in ")
+    assert len(world.submitted) == 1
+
+
+def test_the_cosigner_refuses_a_pass_that_rode_through_if_the_primary_skips_its_check(world, monkeypatch, tmp_path):
+    passed = _merge_a_pass_from_another_key_into_the_agent(world)
+    first = world.build_route(1_000)
+    world.submit_route(first.tx_hash, world.wallet_witnesses(first.tx_hash))
+    monkeypatch.setattr(api, "_check_locally", lambda *a, **k: None)
+    second = world.build_route(0, passes=(passed,))
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(second.tx_hash, world.wallet_witnesses(second.tx_hash))
+    assert err.value.status_code == 503
+    assert world.cosigned_rows() == 1
+    assert len(world.submitted) == 1
+    assert [page.split(":")[0] for page in owed_pages(tmp_path / "cosigner-pager.sqlite3")][-1] == (
+        "refused cooling_off")
 
 
 def test_the_build_route_answers_a_grown_supply_with_its_code(world):

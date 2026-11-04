@@ -298,12 +298,16 @@ def test_an_approval_already_recorded_is_admitted_again_unchanged(ledger):
     assert rows(ledger) == 1
 
 
-def test_recorded_names_the_approvals_written_and_nothing_else(ledger):
-    ledger.check(approval(1, POOL_ROOT), 1000.0, LIMITS)
-    assert not ledger.recorded(_tx(1))
-    ledger.record(approval(1, POOL_ROOT), 1000.0, LIMITS)
-    assert ledger.recorded(_tx(1))
-    assert not ledger.recorded(_tx(2))
+def test_claimant_spends_names_what_a_recorded_approval_spends_besides_the_pool(ledger):
+    """The outputs the chain check follows a recorded surrender's change back
+    through: not its collateral, which it keeps when it lands, nor the pool's."""
+    held = ((b"\x07" * 32, 0), (b"\x07" * 32, 2))
+    spends = approval(1, POOL_ROOT, claimant_inputs=held, collateral=((b"\x08" * 32, 0),))
+    ledger.check(spends, 1000.0, LIMITS)
+    assert ledger.claimant_spends(_tx(1)) is None
+    ledger.record(spends, 1000.0, LIMITS)
+    assert ledger.claimant_spends(_tx(1)) == held
+    assert ledger.claimant_spends(_tx(2)) is None
 
 
 def test_check_writes_nothing(ledger):

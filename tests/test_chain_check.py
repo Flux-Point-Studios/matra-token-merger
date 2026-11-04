@@ -17,8 +17,8 @@ A surrendered unit must have reached the claimant's payment key at least 72
 hours before the check. Its arrival is followed back through transactions
 inside that window while they only move it between the claimant's own
 addresses; arriving from anyone else, or minted, inside the window refuses
-the surrender. Change of a surrender this signer recorded passed this check
-when it was recorded.
+the surrender. Change of a surrender this signer recorded is followed back
+through that surrender's own inputs, whether or not the chain has seen it.
 
 Each scenario is a probe; tests/test_chain_check_mutation.py runs every probe
 against mutants of services.chain_check."""
@@ -52,7 +52,9 @@ CLAIMANT = b"\x61" + b"\x02" * 28
 PARENT = encode({0: [], 1: [[CLAIMANT, 1_000_000], [CLAIMANT, 2_000_000]], 2: 0})
 PARENT_ID = blake(PARENT)
 RECORDED_ID = b"\x09" * 32
-NOTHING_RECORDED = frozenset().__contains__
+# What a signer recorded: a surrender's outputs, besides the pool's, that it spends.
+RECORDED_SURRENDER = {RECORDED_ID: ((PARENT_ID, 1),)}.get
+NOTHING_RECORDED = {}.get
 
 
 def _chain(**kwargs) -> FakeChain:
@@ -201,7 +203,7 @@ def outputs_of_a_surrender_this_signer_recorded(confirm):
     """A chained surrender spends its parent's outputs while the parent is
     still in the mempool; they need no chain answer."""
     approval = _approval({AGENT.unit: 5}, [(RECORDED_ID, 1), (PARENT_ID, 0)])
-    confirm(approval, MAINNET, _chain(), {RECORDED_ID}.__contains__)
+    confirm(approval, MAINNET, _chain(), RECORDED_SURRENDER)
 
 
 @probe("unavailable")
@@ -295,7 +297,7 @@ class Blockfrost:
                 served.get(f"{BASE}{path}", **answer)
             chain = BlockfrostClient("recorded-mainnet", BASE)
             try:
-                confirm(_approval(units, RECORDED_INPUTS), MAINNET, chain, {RECORDED_ID}.__contains__)
+                confirm(_approval(units, RECORDED_INPUTS), MAINNET, chain, RECORDED_SURRENDER)
             finally:
                 self.requests = [call.request.url for call in served.calls]
 
@@ -543,6 +545,11 @@ class Provenance:
         self.chain.publish(encoded, slot=slot)
         return blake(encoded)
 
+    @staticmethod
+    def in_the_mempool(outputs: list, inputs) -> bytes:
+        """A transaction this chain view has not seen yet."""
+        return blake(encode({0: [list(ref) for ref in inputs], 1: outputs, 2: 0}))
+
     def seller(self, *assets, address: bytes = SELLER) -> tuple[bytes, int]:
         """An output at ``address`` holding ``assets`` long before the window."""
         return self.tx([_holding(address, *assets)]), 0
@@ -639,10 +646,92 @@ def a_reference_input_holding_the_units_elsewhere(confirm):
     world.confirm(confirm, (moved, 0))
 
 
-@probe("confirmed")
+# -- change of a surrender this signer recorded -----------------------------------
+
+QUARANTINE = b"\x71" + b"\x0c" * 28
+POOL = b"\x71" + b"\x0d" * 28
+
+
+def _surrender_of(units: tuple, change: tuple) -> list:
+    """A surrender's outputs, as surrender_api lays them out: the payout, the
+    pool continuation, ``units`` to quarantine, then ``change`` back to the
+    claimant (output 3)."""
+    return [_holding(CLAIMANT), _holding(POOL), _holding(QUARANTINE, *units), _holding(CLAIMANT, *change)]
+
+
+@probe("cooling_off", detail=AGENT.unit)
 def units_in_the_change_of_a_surrender_this_signer_recorded(confirm):
-    """Its inputs passed this check when it was recorded; nothing is asked."""
-    Provenance().confirm(confirm, (RECORDED_ID, 3), recorded={RECORDED_ID}.__contains__)
+    """Its change is followed back through the inputs it recorded: units that
+    reached those from another key inside the window still wait."""
+    world = Provenance()
+    bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 9))],
+                      inputs=[world.seller((T1, 1), (AGENT_ID, 9))], slot=NOW - 3600)
+    parent = world.in_the_mempool(_surrender_of(((AGENT_ID, 4),), ((T1, 1), (AGENT_ID, 5))), [(bought, 0)])
+    world.confirm(confirm, (parent, 3), recorded={parent: ((bought, 0),)}.get)
+
+
+@probe("confirmed")
+def units_in_the_change_of_a_recorded_surrender_still_in_the_mempool(confirm):
+    """A chained surrender spends its parent's change before the chain has
+    seen the parent; units the parent's inputs held long before pass."""
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 9))], inputs=[world.seller((T1, 1), (AGENT_ID, 9))])
+    parent = world.in_the_mempool(_surrender_of(((AGENT_ID, 4),), ((T1, 1), (AGENT_ID, 5))), [(held, 0)])
+    world.confirm(confirm, (parent, 3), recorded={parent: ((held, 0),)}.get)
+
+
+@probe("confirmed")
+def units_in_the_change_of_two_chained_surrenders_still_in_the_mempool(confirm):
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 9))], inputs=[world.seller((T1, 1), (AGENT_ID, 9))])
+    first = world.in_the_mempool(_surrender_of(((AGENT_ID, 2),), ((T1, 1), (AGENT_ID, 7))), [(held, 0)])
+    second = world.in_the_mempool(_surrender_of(((AGENT_ID, 2),), ((T1, 1), (AGENT_ID, 5))), [(first, 3)])
+    world.confirm(confirm, (second, 3), recorded={first: ((held, 0),), second: ((first, 3),)}.get)
+
+
+@probe("confirmed")
+def units_in_the_change_of_a_recorded_surrender_on_chain_before_the_window(confirm):
+    """That change has been the claimant's since before the window, so the
+    surrender's inputs, which this chain view does not know, are not asked
+    about."""
+    world = Provenance()
+    parent = world.tx(_surrender_of(((AGENT_ID, 4),), ((T1, 1), (AGENT_ID, 5))),
+                      inputs=[(INVENTED, 0)], slot=NOW - COOLING_OFF)
+    world.confirm(confirm, (parent, 3), recorded={parent: ((INVENTED, 0),)}.get)
+
+
+def _ride_through(merged_first: bool, parent_on_chain: bool) -> Callable:
+    """A pass from another key reaches the claimant minutes before a surrender
+    of AGENT it has held long before. That surrender spends the pass beside
+    the AGENT, unsurrendered (in one output if ``merged_first``), and returns
+    it as change; this signer checks and records it. A minute later the pass
+    is surrendered from that change."""
+    def run(confirm):
+        world = Provenance()
+        aged = world.tx([_holding(CLAIMANT, (AGENT_ID, 5))], inputs=[world.seller((AGENT_ID, 5))])
+        stolen = world.tx([_holding(CLAIMANT, (T1, 1))], inputs=[world.seller((T1, 1))], slot=NOW - 900)
+        spends = [(aged, 0), (stolen, 0)]
+        if merged_first:
+            spends = [(world.tx([_holding(CLAIMANT, (AGENT_ID, 5), (T1, 1))], inputs=spends, slot=NOW - 600), 0)]
+        pool = (world.tx([_holding(POOL)]), 0)
+        outputs = _surrender_of(((AGENT_ID, 5),), ((T1, 1),))
+        parent = world.tx(outputs, inputs=[pool, *spends], slot=NOW - 60) if parent_on_chain else (
+            world.in_the_mempool(outputs, [pool, *spends]))
+        first = Approval(
+            tx_hash=parent, payout=1, claimant=CLAIMANT, pool_input=pool, units={AGENT.unit: 5},
+            inputs=tuple(sorted([pool, *spends])), spends=tuple(sorted([pool, *spends])),
+            unit_inputs=(spends[0],), checked_at=NOW - 120,
+        )
+        confirm(first, MAINNET, world.chain, NOTHING_RECORDED)
+        world.confirm(confirm, (parent, 3), units={T1_UNIT: 1}, recorded={parent: tuple(spends)}.get)
+    return run
+
+for _merged, _on_chain in ((False, True), (True, False)):
+    PROBES.append(Probe(
+        f"a_pass_that_rode_through_a_recorded_surrender{'_merged_into_its_agent' if _merged else ''}"
+        f"_{'on_chain' if _on_chain else 'in_the_mempool'}",
+        "cooling_off", _ride_through(_merged, _on_chain), T1_UNIT,
+    ))
 
 
 @probe("cooling_off")

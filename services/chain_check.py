@@ -25,9 +25,12 @@ Blockfrost project queried from the signer's own host:
     a unit that arrived from another key, or that no input carried (a mint),
     inside the window refuses the surrender, and so does a walk through more
     than MAX_PROVENANCE_TXS transactions inside it. Change of a surrender
-    this signer recorded passed this check when it was recorded. Stolen units
-    are surrendered within hours of being taken; a holder waits at most the
-    window.
+    this signer recorded is followed back through that surrender's own
+    inputs, as the signer recorded them, unless the chain places the
+    surrender before the window: a surrender checks only the units it
+    quarantines, so its change may carry others that arrived inside the
+    window. Stolen units are surrendered within hours of being taken; a
+    holder waits at most the window.
 
 A view that cannot answer raises :class:`ChainUnavailable`, and nothing is
 signed. That includes an answer of the wrong shape: a page of a history that
@@ -53,6 +56,8 @@ from tools.api_clients import BlockfrostUnavailable
 
 COOLING_OFF_SLOTS = 72 * 3600
 MAX_PROVENANCE_TXS = 32
+
+Recorded = Callable[[bytes], tuple[tuple[bytes, int], ...] | None]
 
 
 class ChainUnavailable(RuntimeError):
@@ -156,7 +161,7 @@ def _payment_key(entry: Any, tx_hash: str) -> bytes | None:
     return None if payment is None else payment.payload
 
 
-def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Callable[[bytes], bool]) -> None:
+def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded) -> None:
     """Raise :class:`CosignRejected` unless every unit ``approval``
     surrenders reached the claimant's payment key COOLING_OFF_SLOTS or more
     before it was checked."""
@@ -166,13 +171,20 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Callable
     pending, seen, inside = list(approval.unit_inputs), set(), set()
     while pending:
         ref = pending.pop()
-        tx_id, index = ref
-        if ref in seen or recorded(tx_id):
+        if ref in seen:
             continue
         seen.add(ref)
+        tx_id, index = ref
         tx_hash = tx_id.hex()
-        slot = _slot(tx_hash, _ask(chain.get_tx, tx_hash))
-        if slot <= cutoff:
+        spends, placed = recorded(tx_id), _ask(chain.get_tx, tx_hash)
+        slot = None if placed is None and spends is not None else _slot(tx_hash, placed)
+        if slot is not None and slot <= cutoff:
+            continue
+        if spends is not None:
+            # A recorded surrender, possibly still in the mempool. The policy
+            # held all its inputs but the pool's to the claimant, so its
+            # change carries only what those inputs brought.
+            pending.extend(spends)
             continue
         inside.add(tx_id)
         if len(inside) > MAX_PROVENANCE_TXS:
@@ -210,12 +222,12 @@ def mints_and_burns_after(unit: str, slot: int, chain: Any) -> Iterator[tuple[st
             yield event.get("action"), tx_hash, tx_slot
 
 
-def confirm_on_chain(
-    approval: Approval, cfg: CosignConfig, chain: Any, recorded: Callable[[bytes], bool],
-) -> None:
+def confirm_on_chain(approval: Approval, cfg: CosignConfig, chain: Any, recorded: Recorded) -> None:
     """Raise :class:`CosignRejected` if the chain contradicts ``approval``,
     or :class:`ChainUnavailable` if ``chain`` (a BlockfrostClient) cannot say.
-    ``recorded(tx_hash)``: this signer recorded an approval of ``tx_hash``."""
+    ``recorded(tx_hash)``: the outputs besides the pool's that a surrender
+    this signer recorded spends, or None if it recorded no approval of
+    ``tx_hash`` (RedemptionLedger.claimant_spends)."""
     for unit in sorted(approval.units):
         info = _ask(chain.get_asset_info, unit)
         if info is None:
@@ -227,7 +239,7 @@ def confirm_on_chain(
             )
 
     for tx_id in sorted({tx_id for tx_id, _ in approval.inputs}):
-        if recorded(tx_id):
+        if recorded(tx_id) is not None:
             continue
         answer = _ask(chain.get_tx_utxos, tx_id.hex())
         if answer is None:

@@ -184,7 +184,7 @@ def cosign(req: CosignRequest) -> CosignResponse:
             state.cfg,
         )
         require_claimant_signature(tx, approval)
-        confirm_on_chain(approval, state.cfg, state.chain, state.ledger.recorded)
+        confirm_on_chain(approval, state.cfg, state.chain, state.ledger.claimant_spends)
         state.ledger.record(approval, now, state.cfg.redemption_limits)
     except CosignRejected as exc:
         logger.warning("Refused to co-sign: %s", exc)

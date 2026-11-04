@@ -67,6 +67,11 @@ def create_ledger(path: str) -> None:
         conn.execute(_SCHEMA)
 
 
+def _refs(spends: str) -> frozenset[tuple[bytes, int]]:
+    """The outputs a row's ``spends`` column names."""
+    return frozenset((bytes.fromhex(ref), index) for ref, index in json.loads(spends))
+
+
 @dataclass(frozen=True)
 class _Row:
     tx_hash: bytes
@@ -173,12 +178,17 @@ class RedemptionLedger:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._uri, uri=True, timeout=10, isolation_level=None)
 
-    def recorded(self, tx_hash: bytes) -> bool:
-        """Whether this signer recorded an approval of ``tx_hash``."""
+    def claimant_spends(self, tx_hash: bytes) -> tuple[tuple[bytes, int], ...] | None:
+        """The outputs besides the pool's that the surrender ``tx_hash``
+        spends, or None if this signer recorded no approval of it."""
         with closing(self._connect()) as conn:
-            return conn.execute(
-                "SELECT 1 FROM approvals WHERE tx_hash = ?", (tx_hash,)
-            ).fetchone() is not None
+            found = conn.execute(
+                "SELECT pool_tx, pool_index, spends FROM approvals WHERE tx_hash = ?", (tx_hash,)
+            ).fetchone()
+        if found is None:
+            return None
+        pool_tx, pool_index, spends = found
+        return tuple(sorted(_refs(spends) - {(pool_tx, pool_index)}))
 
     def check(self, approval: Approval, now: float, limits: Mapping[str, int]) -> None:
         """Raise :class:`CosignRejected` if ``approval`` could never land after
@@ -196,9 +206,7 @@ class RedemptionLedger:
             conn.execute("BEGIN IMMEDIATE" if record else "BEGIN")
             try:
                 rows = [
-                    _Row(tx, (pool_tx, pool_index), payout, json.loads(units),
-                         frozenset((bytes.fromhex(ref), index) for ref, index in json.loads(spends)),
-                         signed_at)
+                    _Row(tx, (pool_tx, pool_index), payout, json.loads(units), _refs(spends), signed_at)
                     for tx, pool_tx, pool_index, payout, units, spends, signed_at in conn.execute(
                         "SELECT tx_hash, pool_tx, pool_index, payout, units, spends, signed_at"
                         " FROM approvals"

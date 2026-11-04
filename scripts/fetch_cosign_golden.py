@@ -208,7 +208,7 @@ def recent(bf: BlockfrostClient) -> dict:
         views = bytes.fromhex(fetch.views[row["language_views"]])
         approval = evaluate_surrender(tx, views, parents, body.get(8, row["slot"]), cfg)
         try:
-            refuse_inside_cooling_off(approval, WalkRecorder(fetch), lambda _tx_id: False)
+            refuse_inside_cooling_off(approval, WalkRecorder(fetch), lambda _tx_id: None)
             walk = "held"
         except CosignRejected as exc:
             walk = exc.code

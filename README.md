@@ -270,8 +270,9 @@ The threat model is **dual-admin compromise**:
 - Neither signer pays for a unit that reached the claimant's payment key less
   than 72 hours before: units taken from a compromised wallet are surrendered
   within hours, and the wait gives the deny-list and the on-call channel time
-  to act. A unit moved between the claimant's own addresses is followed back
-  to where it came from.
+  to act. A unit moved between the claimant's own addresses, or returned as
+  change of an earlier surrender (on chain or still in the mempool), is
+  followed back to where it came from.
 - No merge asset redeems more than the pool was funded for: T2_ADAM_PASS has
   150 editions on chain but was priced for 95. No per-surrender cap may be
   below what one unit pays (one T1_ADAM_PASS); the reopen caps are 4M cMATRA

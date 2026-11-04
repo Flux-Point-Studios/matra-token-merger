@@ -101,7 +101,17 @@ OPERATOR_MUTANTS = {
     "inputs_without_the_unit_followed": ("if unit in _units(entry, tx_hash)]", "]"),
     "a_mint_inside_the_window_passed": ("if not sources or any(", "if any("),
     "the_walk_limit_reached_one_early": ("len(inside) > MAX_PROVENANCE_TXS", "len(inside) >= MAX_PROVENANCE_TXS"),
-    "a_recorded_surrenders_change_followed": ("if ref in seen or recorded(tx_id):", "if ref in seen:"),
+    "a_recorded_surrenders_change_passed_unfollowed": (
+        "            pending.extend(spends)\n            continue", "            continue",
+    ),
+    "a_recorded_surrender_read_from_the_chain": ("        if spends is not None:\n", "        if False:\n"),
+    "a_recorded_surrender_in_the_mempool_placed_like_any_other": (
+        "slot = None if placed is None and spends is not None else _slot(tx_hash, placed)",
+        "slot = _slot(tx_hash, placed)",
+    ),
+    "a_recorded_surrender_followed_back_however_old": (
+        "if slot is not None and slot <= cutoff:", "if spends is None and slot <= cutoff:",
+    ),
     "self_transfers_not_followed_back": (
         "pending.extend(_input_ref(entry, tx_hash) for entry in sources)",
         "[_input_ref(entry, tx_hash) for entry in sources]",

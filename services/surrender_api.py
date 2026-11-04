@@ -1156,7 +1156,7 @@ def _check_locally(
     if signed:
         require_claimant_signature(tx, approval)
     state.ledger.check(approval, now, cfg.redemption_limits)
-    confirm_on_chain(approval, cfg, state.bf, state.ledger.recorded)
+    confirm_on_chain(approval, cfg, state.bf, state.ledger.claimant_spends)
     return approval
 
 

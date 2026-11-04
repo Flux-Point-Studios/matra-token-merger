@@ -34,7 +34,7 @@ from tests.cosign_cases import (
 from tools.credential_denylist import DenyList
 
 NO_DENYLIST = replace(MAINNET, denylist=DenyList(labels={}, allowed=frozenset(), sha256="none"))
-NOTHING_RECORDED = frozenset().__contains__
+NOTHING_RECORDED = {}.get
 ATTACKER_COLLECTION_KEY = bytes.fromhex("809a40995f079a45821c91754a2875a64f874a4f77983185ba69becd")
 WAITED = {
     "72fe86ba4e7fa9eceb266ea880f65f7c5266a9ae3d9c71e1a28e67b23d1203e4": "bought",
