@@ -55,7 +55,7 @@ def test_after_the_recent_surrenders_18_more_t2_editions_are_admitted(tmp_path):
         edition = Approval(
             tx_hash=bytes([0xC0 + n]) * 32, payout=1, claimant=b"\x61" + b"\x01" * 28,
             pool_input=pool_output, units={unit: 1}, inputs=(pool_output,), spends=(pool_output,),
-            unit_inputs=(), checked_at=0,
+            unit_inputs=(), held={unit: 1}, checked_at=0,
         )
         if n < 18:
             ledger.record(edition, 0.0, PIN.remaining)

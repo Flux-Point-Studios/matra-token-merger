@@ -135,6 +135,7 @@ OPERATOR_MUTANTS = {
         "unit_inputs.update(spent)",
     ),
     "checked_at_the_ttl": ("checked_at=now_slot", "checked_at=ttl"),
+    "the_holding_counted_as_what_is_quarantined": ("held=held,", "held=quarantined,"),
 }
 
 # Changes to tools.credential_denylist, run through the policy's corpus.
@@ -203,8 +204,10 @@ def _differences(module: types.ModuleType, lists: types.ModuleType = denylist) -
         got = _outcome(lambda: approvals.append(module.evaluate_surrender(*args)))
         if got != "accepted":
             diffs.append(f"approval of {base[:16]}: {got}")
-        elif (approvals[0].unit_inputs, approvals[0].checked_at) != (expected.unit_inputs, expected.checked_at):
-            diffs.append(f"approval of {base[:16]}: names {approvals[0].unit_inputs} at {approvals[0].checked_at}")
+        elif (approvals[0].unit_inputs, approvals[0].held, approvals[0].checked_at) != (
+                expected.unit_inputs, expected.held, expected.checked_at):
+            diffs.append(f"approval of {base[:16]}: names {approvals[0].unit_inputs} holding"
+                         f" {approvals[0].held} at {approvals[0].checked_at}")
     return diffs
 
 

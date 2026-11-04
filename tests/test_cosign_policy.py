@@ -106,6 +106,24 @@ def test_an_approval_names_the_inputs_holding_what_it_quarantines(tx_hash):
 
 
 @pytest.mark.parametrize("tx_hash", SURRENDERS)
+def test_an_approval_counts_what_the_claimants_inputs_hold_of_what_it_quarantines(tx_hash):
+    """What the cooling-off weighs the units that arrived inside it against."""
+    scenario = golden_scenario(tx_hash)
+    approval = _evaluate(scenario)
+    body = decode(split_tx(scenario.tx)[0])
+    produced = {blake(parent): decode(parent)[1] for parent in scenario.parents}
+    held = dict.fromkeys(approval.units, 0)
+    for ref in _elements(body[0]):
+        out = parse_output(produced[ref[0]][ref[1]])
+        for policy, names in out.assets.items():
+            for name, quantity in names.items():
+                if (policy + name).hex() in held:
+                    held[(policy + name).hex()] += quantity
+    assert approval.held == held
+    assert all(held[unit] >= quantity for unit, quantity in approval.units.items())
+
+
+@pytest.mark.parametrize("tx_hash", SURRENDERS)
 def test_every_mainnet_surrender_carries_its_claimants_signature(tx_hash):
     scenario = golden_scenario(tx_hash)
     require_claimant_signature(scenario.tx, _evaluate(scenario))

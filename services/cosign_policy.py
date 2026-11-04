@@ -473,6 +473,8 @@ class Approval:
     collateral is consumed only if a script fails, when nothing else is."""
     unit_inputs: tuple[tuple[bytes, int], ...]
     """The claimant's inputs that hold a unit it quarantines."""
+    held: Mapping[str, int]
+    """What those inputs hold of each unit it quarantines."""
     checked_at: int
     """The slot it was checked at."""
 
@@ -616,11 +618,12 @@ def evaluate_surrender(
     if entitlement == 0:
         raise CosignRejected("nothing_surrendered", "no legacy asset reaches quarantine")
     unit_inputs: set[tuple[bytes, int]] = set()
+    held: dict[str, int] = {}
     for unit, quantity in quarantined.items():
         policy, name = bytes.fromhex(unit[:56]), bytes.fromhex(unit[56:])
-        held = sum(_quantity(out.assets, policy, name) for out in spent.values())
-        if held < quantity:
-            raise CosignRejected("quarantine_not_claimants", f"inputs hold {held} of {unit}")
+        held[unit] = sum(_quantity(out.assets, policy, name) for out in spent.values())
+        if held[unit] < quantity:
+            raise CosignRejected("quarantine_not_claimants", f"inputs hold {held[unit]} of {unit}")
         unit_inputs.update(ref for ref, out in spent.items() if _quantity(out.assets, policy, name))
 
     payout = pool_in_cmatra - _quantity(continuation.assets, cfg.cmatra_policy, cfg.cmatra_name)
@@ -658,6 +661,7 @@ def evaluate_surrender(
         inputs=tuple(sorted({pool_ref, *spent, *(ref for ref, _ in collateral)})),
         spends=tuple(sorted([pool_ref, *spent])),
         unit_inputs=tuple(sorted(unit_inputs)),
+        held=held,
         checked_at=now_slot,
     )
 

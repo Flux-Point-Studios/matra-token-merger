@@ -52,6 +52,7 @@ from tests.cosign_cases import (
     PIN,
     TEST_WEBHOOK,
     FakeChain,
+    _elements,
     key_address,
     ledger_refusing_writes,
     not_found,
@@ -791,6 +792,60 @@ def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(wo
     assert [page.split(":")[0] for page in owed_pages(world.outbox)] == ["refused cooling_off"]
     world.slots[world.user_body] = NOW + 60 - 72 * 3600
     world.build_route(1_000)  # held as long as the window, and the tip was released
+
+
+def test_a_surrender_spends_the_units_held_longest_first(world):
+    """Beside the AGENT held long before, AGENT from another key reached the
+    claimant an hour ago in an output with more ADA, which the builder's own
+    selection, largest first, would spend instead: the surrender would wait
+    out the cooling-off for nothing."""
+    agent = MultiAsset()
+    agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 5_000})
+    seller = world._produce([TransactionOutput(
+        Address(VerificationKeyHash(b"\x06" * 28), network=Network.TESTNET), Value(50_000_000, agent))])
+    received = world._produce([TransactionOutput(world.user_addr, Value(50_000_000, agent))],
+                              inputs=[TransactionInput(TransactionId(bytes.fromhex(seller)), 0)])
+    world.slots[received] = NOW - 3600
+    world.user_utxos.append(UTxO(TransactionInput(TransactionId(bytes.fromhex(received)), 0),
+                                 TransactionBody.from_cbor(world.chain[received]).outputs[0]))
+    built = world.build_route(1_000)
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    (tx,) = world.submitted
+    spent = {(ref[0].hex(), ref[1]) for ref in _elements(decode(split_tx(tx)[0])[0])}
+    assert (world.user_body, 1) in spent
+    assert (received, 0) not in spent
+
+
+def test_the_build_leaves_out_only_the_holders_it_need_not_spend(monkeypatch):
+    def utxo(n: int, *units: tuple[str, int]) -> UTxO:
+        multi = MultiAsset()
+        for unit, quantity in units:
+            multi.setdefault(ScriptHash(bytes.fromhex(unit[:56])), Asset())[AssetName(bytes.fromhex(unit[56:]))] = (
+                quantity)
+        user = Address(VerificationKeyHash(b"\x02" * 28), network=Network.TESTNET)
+        return UTxO(TransactionInput(TransactionId(bytes([n]) * 32), 0), TransactionOutput(user, Value(2_000_000, multi)))
+
+    old, new, unplaced = utxo(1, (AGENT.unit, 600)), utxo(2, (AGENT.unit, 600), (PASS, 1)), utxo(3, (AGENT.unit, 600))
+    slots = {str(old.input.transaction_id): 10, str(new.input.transaction_id): 20}
+    asked: list[str] = []
+
+    class Chain:
+        def get_tx(self, tx_hash):
+            asked.append(tx_hash)
+            if tx_hash not in slots:
+                raise not_found()
+            return {"hash": tx_hash, "slot": slots[tx_hash]}
+
+    monkeypatch.setattr(api.state, "bf", Chain())
+    agent = {"policy_hex": AGENT_POLICY, "asset_hex": AGENT_NAME, "quantity": 600}
+    a_pass = {"policy_hex": PASS[:56], "asset_hex": PASS[56:], "quantity": 1}
+    utxos = [unplaced, new, old]
+    assert api._later_holders(utxos, [agent]) == [new, unplaced]
+    assert api._later_holders(utxos, [{**agent, "quantity": 601}]) == [unplaced]
+    assert api._later_holders(utxos, [agent, a_pass]) == [unplaced]
+    asked.clear()
+    assert api._later_holders([old, new], [a_pass]) == []
+    assert asked == []
 
 
 def _merge_a_pass_from_another_key_into_the_agent(world) -> str:

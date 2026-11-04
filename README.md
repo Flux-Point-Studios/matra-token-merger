@@ -267,12 +267,15 @@ The threat model is **dual-admin compromise**:
   schema beside it, loader in `tools/credential_denylist.py`), in either part
   of the address; a pointer address, which the list cannot check, is refused
   too. Neither starts without the list.
-- Neither signer pays for a unit that reached the claimant's payment key less
-  than 72 hours before: units taken from a compromised wallet are surrendered
-  within hours, and the wait gives the deny-list and the on-call channel time
-  to act. A unit moved between the claimant's own addresses, or returned as
-  change of an earlier surrender (on chain or still in the mempool), is
-  followed back to where it came from.
+- Neither signer pays for more of a unit than the claimant held at its
+  payment key 72 hours before: units taken from a compromised wallet are
+  surrendered within hours, and the wait gives the deny-list and the on-call
+  channel time to act. Every unit that reached the claimant from another key,
+  or was minted, in those 72 hours counts against what its inputs hold, so
+  units sent to a holder hold back only themselves. A unit moved between the
+  claimant's own addresses, or returned as change of an earlier surrender (on
+  chain or still in the mempool), is followed back to where it came from. The
+  surrender API spends the units the claimant has held longest first.
 - No merge asset redeems more than the pool was funded for: T2_ADAM_PASS has
   150 editions on chain but was priced for 95. No per-surrender cap may be
   below what one unit pays (one T1_ADAM_PASS); the reopen caps are 4M cMATRA

@@ -124,7 +124,7 @@ from services.cosign_policy import (
     split_tx,
 )
 from services.cosign_policy import evaluate_surrender as check_surrender
-from services.chain_check import ChainUnavailable, confirm_on_chain
+from services.chain_check import ChainUnavailable, confirm_on_chain, placed_at
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
 from services.pager import Pager
@@ -1418,6 +1418,43 @@ def _ada_only_utxos(
     ]
 
 
+def _later_holders(utxos: list[UTxO], legacy_assets: list[dict[str, Any]]) -> list[UTxO]:
+    """The UTxOs among ``utxos`` holding a legacy asset surrendered that the
+    surrender need not spend: taking each asset's holders in the order the
+    chain made them, those after the ones that already hold the quantity
+    surrendered. Left to itself the builder spends the UTxOs with the most
+    ADA first, and could spend units that reached the claimant inside the
+    cooling-off, which both signers refuse, while units held longer sit
+    unspent."""
+    made: dict[str, tuple[bool, int]] = {}
+
+    def age(utxo: UTxO) -> tuple[bool, int, str, int]:
+        tx_hash = str(utxo.input.transaction_id)
+        if tx_hash not in made:
+            slot = placed_at(tx_hash, state.bf)
+            made[tx_hash] = (slot is None, slot or 0)
+        return *made[tx_hash], tx_hash, utxo.input.index
+
+    needed: list[UTxO] = []
+    holding: list[UTxO] = []
+    for asset in legacy_assets:
+        policy = PycScriptHash(bytes.fromhex(asset["policy_hex"]))
+        name = AssetName(bytes.fromhex(asset["asset_hex"]))
+        holds = {u.input: u.output.amount.multi_asset.get(policy, {}).get(name, 0) for u in utxos}
+        holders = [u for u in utxos if holds[u.input]]
+        if len(holders) > 1:
+            holders.sort(key=age)
+        held = sum(holds[u.input] for u in needed)
+        for utxo in holders:
+            if held >= asset["quantity"]:
+                break
+            if utxo not in needed:
+                needed.append(utxo)
+                held += holds[utxo.input]
+        holding += holders
+    return [u for u in dict.fromkeys(holding) if u not in needed]
+
+
 class WalletShortfall(Exception):
     """The claimant's wallet cannot fund the surrender; ``detail`` is the
     422 answer telling it what to add."""
@@ -1711,8 +1748,9 @@ def _build_surrender_tx(
         spendable = [u for u in builder.inputs if u.output.address == user_addr]
         spendable += builder.potential_inputs
     else:
+        builder.excluded_inputs = _later_holders(address_utxos or [], legacy_assets)
         builder.add_input_address(user_addr)
-        spendable = address_utxos or []
+        spendable = [u for u in address_utxos or [] if u not in builder.excluded_inputs]
 
     # Output 1: cMATRA to user
     user_multi = MultiAsset()

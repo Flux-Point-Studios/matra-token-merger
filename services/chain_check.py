@@ -18,19 +18,24 @@ Blockfrost project queried from the signer's own host:
     output would hold, not that it exists; a transaction spending an output
     that does not exist can never land, and must not use up the limits the
     ledger holds approvals to;
-  * every surrendered unit reached the claimant's payment key at least
-    COOLING_OFF_SLOTS before the check. An input made inside that window is
-    followed back through the transaction that made it, as long as the inputs
-    there that carry the unit are the claimant's own (any of its addresses);
-    a unit that arrived from another key, or that no input carried (a mint),
-    inside the window refuses the surrender, and so does a walk through more
-    than MAX_PROVENANCE_TXS transactions inside it. Change of a surrender
-    this signer recorded is followed back through that surrender's own
-    inputs, as the signer recorded them, unless the chain places the
-    surrender before the window: a surrender checks only the units it
-    quarantines, so its change may carry others that arrived inside the
-    window. Stolen units are surrendered within hours of being taken; a
-    holder waits at most the window.
+  * of each unit surrendered, the claimant's inputs held what is
+    surrendered at its payment key COOLING_OFF_SLOTS before the check. An
+    input made inside that window is followed back through the transaction
+    that made it, through those of its inputs that carry the unit and are the
+    claimant's own (any of its addresses). Whatever of the unit entered such
+    a transaction from another key, or was minted in it, arrived inside the
+    window, and the inputs must hold what is surrendered on top of all of it:
+    units of one kind cannot be told apart, so what arrived counts in full
+    wherever it went afterwards, once per transaction, and a burn does not
+    offset it. A walk through more than MAX_PROVENANCE_TXS transactions
+    inside the window refuses the surrender. Change of a surrender this
+    signer recorded is followed back through that surrender's own inputs, as
+    the signer recorded them, unless the chain places the surrender before
+    the window: a surrender checks only the units it quarantines, so its
+    change may carry others that arrived inside the window. Stolen units are
+    surrendered within hours of being taken; a holder waits at most the
+    window, and only for what arrived inside it, so units sent to a holder
+    hold back nothing it held before.
 
 A view that cannot answer raises :class:`ChainUnavailable`, and nothing is
 signed. That includes an answer of the wrong shape: a page of a history that
@@ -110,21 +115,40 @@ def _slot(tx_hash: str, answer: Any) -> int:
     return slot
 
 
-def _units(entry: Any, tx_hash: str) -> set[str]:
-    """The units, not lovelace, a /txs/{hash}/utxos entry holds."""
+def placed_at(tx_hash: str, chain: Any) -> int | None:
+    """The slot ``chain`` places ``tx_hash`` in, or None if it has not seen it."""
+    answer = _ask(chain.get_tx, tx_hash)
+    return None if answer is None else _slot(tx_hash, answer)
+
+
+def _amounts(entry: Any, tx_hash: str) -> dict[str, int]:
+    """How much of each unit, not lovelace, a /txs/{hash}/utxos entry holds."""
+    amounts: dict[str, int] = {}
     try:
-        return {a["unit"] for a in entry["amount"] if a["unit"] != "lovelace" and int(a["quantity"]) > 0}
+        for a in entry["amount"]:
+            if a["unit"] != "lovelace" and int(a["quantity"]) > 0:
+                amounts[a["unit"]] = amounts.get(a["unit"], 0) + int(a["quantity"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ChainUnavailable(f"{tx_hash}: unexpected amounts from the chain view: {exc!r}") from exc
+    return amounts
 
 
-def _held_by(answer: Any, index: int, tx_hash: str) -> set[str]:
-    """The units output ``index`` holds, by its transaction's listing."""
+def _made_outputs(answer: Any, tx_hash: str) -> list:
+    """The outputs a /txs/{hash}/utxos answer lists the transaction as
+    making: not a valid transaction's collateral return, which the ledger
+    never creates."""
     try:
-        output = next(o for o in answer["outputs"] if o["output_index"] == index and o["collateral"] is False)
-    except (KeyError, TypeError, StopIteration) as exc:
-        raise ChainUnavailable(f"{tx_hash}#{index}: the chain view lists no such output") from exc
-    return _units(output, tx_hash)
+        return [out for out in answer["outputs"] if out["collateral"] is False]
+    except (KeyError, TypeError) as exc:
+        raise ChainUnavailable(f"{tx_hash}: unexpected outputs from the chain view: {exc!r}") from exc
+
+
+def _held_by(answer: Any, index: int, tx_hash: str) -> dict[str, int]:
+    """What output ``index`` holds, by its transaction's listing."""
+    for out in _made_outputs(answer, tx_hash):
+        if out.get("output_index") == index:
+            return _amounts(out, tx_hash)
+    raise ChainUnavailable(f"{tx_hash}#{index}: the chain view lists no such output")
 
 
 def _spent_inputs(answer: Any, tx_hash: str) -> list:
@@ -162,13 +186,17 @@ def _payment_key(entry: Any, tx_hash: str) -> bytes | None:
 
 
 def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded) -> None:
-    """Raise :class:`CosignRejected` unless every unit ``approval``
-    surrenders reached the claimant's payment key COOLING_OFF_SLOTS or more
-    before it was checked."""
+    """Raise :class:`CosignRejected` unless, of each unit ``approval``
+    surrenders, its inputs held what it surrenders at the claimant's payment
+    key COOLING_OFF_SLOTS or more before it was checked. Units of one kind
+    cannot be told apart, so every unit that reached the claimant from
+    another key, or was minted, inside the window counts against what the
+    inputs hold, once, wherever it went afterwards."""
     cutoff = approval.checked_at - COOLING_OFF_SLOTS
     owner = approval.claimant[1:29]
-    surrendered = set(approval.units)
-    pending, seen, inside = list(approval.unit_inputs), set(), set()
+    arrived = dict.fromkeys(approval.units, 0)
+    latest: dict[str, tuple[int, str]] = {}
+    pending, seen, inside, counted = list(approval.unit_inputs), set(), set(), set()
     while pending:
         ref = pending.pop()
         if ref in seen:
@@ -176,8 +204,9 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded
         seen.add(ref)
         tx_id, index = ref
         tx_hash = tx_id.hex()
-        spends, placed = recorded(tx_id), _ask(chain.get_tx, tx_hash)
-        slot = None if placed is None and spends is not None else _slot(tx_hash, placed)
+        spends, slot = recorded(tx_id), placed_at(tx_hash, chain)
+        if slot is None and spends is None:
+            raise ChainUnavailable(f"{tx_hash}: the chain view gives no slot for it")
         if slot is not None and slot <= cutoff:
             continue
         if spends is not None:
@@ -193,16 +222,37 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded
                 f" transactions in the {COOLING_OFF_SLOTS} slots before the surrender",
             )
         answer = _ask(chain.get_tx_utxos, tx_hash)
-        held = _held_by(answer, index, tx_hash) & surrendered
-        inputs = _spent_inputs(answer, tx_hash)
-        for unit in sorted(held):
-            sources = [entry for entry in inputs if unit in _units(entry, tx_hash)]
-            if not sources or any(_payment_key(entry, tx_hash) != owner for entry in sources):
-                raise CosignRejected(
-                    "cooling_off", f"{unit} reached the claimant in {tx_hash} at slot {slot}; it can be"
-                    f" surrendered from slot {slot + COOLING_OFF_SLOTS}",
-                )
-            pending.extend(_input_ref(entry, tx_hash) for entry in sources)
+        held = _held_by(answer, index, tx_hash)
+        inputs = [(entry, _amounts(entry, tx_hash)) for entry in _spent_inputs(answer, tx_hash)]
+        made = [_amounts(out, tx_hash) for out in _made_outputs(answer, tx_hash)]
+        for unit in sorted(arrived.keys() & held.keys()):
+            if (tx_id, unit) in counted:
+                continue
+            counted.add((tx_id, unit))
+            own, entered = [], 0
+            for entry, amounts in inputs:
+                if unit in amounts:
+                    if _payment_key(entry, tx_hash) == owner:
+                        own.append(entry)
+                    else:
+                        entered += amounts[unit]
+            # What the outputs hold beyond what the inputs brought was minted;
+            # a burn does not offset what arrived.
+            minted = sum(out.get(unit, 0) for out in made) - sum(amounts.get(unit, 0) for _, amounts in inputs)
+            entered += max(0, minted)
+            if entered:
+                arrived[unit] += entered
+                latest[unit] = max(latest.get(unit, (slot, tx_hash)), (slot, tx_hash))
+            pending.extend(_input_ref(entry, tx_hash) for entry in own)
+
+    for unit, quantity in sorted(approval.units.items()):
+        ready = approval.held[unit] - arrived[unit]
+        if quantity > ready:
+            slot, tx_hash = latest[unit]
+            raise CosignRejected(
+                "cooling_off", f"{unit} reached the claimant in {tx_hash} at slot {slot}; {max(0, ready)} of"
+                f" the {quantity} surrendered can be surrendered now, all from slot {slot + COOLING_OFF_SLOTS}",
+            )
 
 
 def mints_and_burns_after(unit: str, slot: int, chain: Any) -> Iterator[tuple[str, str, int]]:

@@ -13,12 +13,13 @@ mempool). A producing body proves what an output would hold, not that it
 exists, so without this a caller could invent outputs, and approvals that
 can never land would still use up limits.
 
-A surrendered unit must have reached the claimant's payment key at least 72
-hours before the check. Its arrival is followed back through transactions
-inside that window while they only move it between the claimant's own
-addresses; arriving from anyone else, or minted, inside the window refuses
-the surrender. Change of a surrender this signer recorded is followed back
-through that surrender's own inputs, whether or not the chain has seen it.
+What is surrendered of a unit must have been held at the claimant's payment
+key at least 72 hours before the check. The inputs' units are followed back
+through transactions inside that window while they move between the
+claimant's own addresses; whatever of the unit arrived from anyone else, or
+was minted, inside the window counts against what the inputs hold. Change of
+a surrender this signer recorded is followed back through that surrender's
+own inputs, whether or not the chain has seen it.
 
 Each scenario is a probe; tests/test_chain_check_mutation.py runs every probe
 against mutants of services.chain_check."""
@@ -62,11 +63,13 @@ def _chain(**kwargs) -> FakeChain:
 
 
 def _approval(units: dict[str, int], inputs=((PARENT_ID, 0), (PARENT_ID, 1)),
-              unit_inputs=(), claimant=CLAIMANT, checked_at=0) -> Approval:
+              unit_inputs=(), claimant=CLAIMANT, checked_at=0, held=None) -> Approval:
+    """A surrender of ``units`` whose ``unit_inputs`` hold ``held`` of them
+    (by default exactly ``units``)."""
     return Approval(
         tx_hash=b"\x01" * 32, payout=1, claimant=claimant,
         pool_input=inputs[0], units=units, inputs=tuple(inputs), spends=tuple(inputs),
-        unit_inputs=tuple(unit_inputs), checked_at=checked_at,
+        unit_inputs=tuple(unit_inputs), held=dict(units) if held is None else held, checked_at=checked_at,
     )
 
 
@@ -554,9 +557,12 @@ class Provenance:
         """An output at ``address`` holding ``assets`` long before the window."""
         return self.tx([_holding(address, *assets)]), 0
 
-    def confirm(self, confirm, held: tuple[bytes, int], claimant: bytes = CLAIMANT,
-                units=SURRENDERED, recorded=NOTHING_RECORDED) -> None:
-        approval = _approval(units, [held], unit_inputs=[held], claimant=claimant, checked_at=NOW)
+    def confirm(self, confirm, *unit_inputs: tuple[bytes, int], claimant: bytes = CLAIMANT,
+                units=SURRENDERED, held=None, recorded=NOTHING_RECORDED) -> None:
+        """Check a surrender of ``units`` from ``unit_inputs``, which hold
+        ``held`` of them (by default exactly ``units``)."""
+        approval = _approval(units, unit_inputs, unit_inputs=unit_inputs, claimant=claimant,
+                             checked_at=NOW, held=held)
         confirm(approval, MAINNET, self.chain, recorded)
 
 
@@ -599,6 +605,104 @@ def a_self_transfer_that_merges_in_a_surrendered_unit_from_another_key(confirm):
     merged = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
                       inputs=[(held, 0), world.seller((AGENT_ID, 2))], slot=NOW - 10)
     world.confirm(confirm, (merged, 0))
+
+
+@probe("confirmed")
+def the_units_held_before_a_merge_of_units_from_another_key(confirm):
+    """Units are counted: the 3 AGENT held long before can go, the 2 that
+    arrived wait."""
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 3))], inputs=[world.seller((T1, 1), (AGENT_ID, 3))])
+    merged = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                      inputs=[(held, 0), world.seller((AGENT_ID, 2))], slot=NOW - 10)
+    world.confirm(confirm, (merged, 0), units={T1_UNIT: 1, AGENT.unit: 3}, held={T1_UNIT: 1, AGENT.unit: 5})
+
+
+def _dusted(surrendered: int, merged: bool) -> Callable:
+    """One base unit of AGENT sent from another key to a holder of 1,000,000
+    held long before, merged into that holding by the holder's wallet or
+    spent beside it."""
+    def run(confirm):
+        world = Provenance()
+        held = world.tx([_holding(CLAIMANT, (AGENT_ID, 1_000_000))], inputs=[world.seller((AGENT_ID, 1_000_000))])
+        dust = world.tx([_holding(CLAIMANT, (AGENT_ID, 1))], inputs=[world.seller((AGENT_ID, 1))], slot=NOW - 7200)
+        spent = [(held, 0), (dust, 0)]
+        if merged:
+            spent = [(world.tx([_holding(CLAIMANT, (AGENT_ID, 1_000_001))], inputs=spent, slot=NOW - 3600), 0)]
+        world.confirm(confirm, *spent, units={AGENT.unit: surrendered}, held={AGENT.unit: 1_000_001})
+    return run
+
+
+# A dusting cannot hold a holding back: only the dust waits.
+for _merged in (True, False):
+    _how = "merged" if _merged else "spent_beside_it"
+    PROBES.append(Probe(f"a_holding_dusted_from_another_key_{_how}_less_the_dust", "confirmed",
+                        _dusted(1_000_000, _merged)))
+    PROBES.append(Probe(f"a_holding_dusted_from_another_key_{_how}_with_the_dust", "cooling_off",
+                        _dusted(1_000_001, _merged), f"{AGENT.unit} reached the claimant in "))
+
+
+@probe("cooling_off", detail=f"1 of the 5000000 surrendered can be surrendered now")
+def units_from_another_key_merged_into_a_small_holding_held_long_before(confirm):
+    """Stolen units merged into a holding held long before are not that holding's."""
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (AGENT_ID, 1))], inputs=[world.seller((AGENT_ID, 1))])
+    merged = world.tx([_holding(CLAIMANT, (AGENT_ID, 5_000_001))],
+                      inputs=[(held, 0), world.seller((AGENT_ID, 5_000_000))], slot=NOW - 600)
+    world.confirm(confirm, (merged, 0), units={AGENT.unit: 5_000_000}, held={AGENT.unit: 5_000_001})
+
+
+def _arrivals_in_two_transactions(surrendered: int) -> Callable:
+    """10 AGENT held long before; 3 more arrive from another key two hours
+    ago, and 4 more an hour ago."""
+    def run(confirm):
+        world = Provenance()
+        held = world.tx([_holding(CLAIMANT, (AGENT_ID, 10))], inputs=[world.seller((AGENT_ID, 10))])
+        first = world.tx([_holding(CLAIMANT, (AGENT_ID, 13))],
+                         inputs=[(held, 0), world.seller((AGENT_ID, 3))], slot=NOW - 7200)
+        second = world.tx([_holding(CLAIMANT, (AGENT_ID, 17))],
+                          inputs=[(first, 0), world.seller((AGENT_ID, 4))], slot=NOW - 3600)
+        world.confirm(confirm, (second, 0), units={AGENT.unit: surrendered}, held={AGENT.unit: 17})
+    return run
+
+
+PROBES.append(Probe("the_units_held_before_two_arrivals", "confirmed", _arrivals_in_two_transactions(10)))
+PROBES.append(Probe("more_than_the_units_held_before_two_arrivals", "cooling_off",
+                    _arrivals_in_two_transactions(11), f"from slot {NOW - 3600 + COOLING_OFF}"))
+
+
+@probe("confirmed")
+def an_arrival_reached_through_two_outputs_of_one_transaction(confirm):
+    """It is counted once."""
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (AGENT_ID, 10))], inputs=[world.seller((AGENT_ID, 10))])
+    split = world.tx([_holding(CLAIMANT, (AGENT_ID, 6)), _holding(CLAIMANT, (AGENT_ID, 6))],
+                     inputs=[(held, 0), world.seller((AGENT_ID, 2))], slot=NOW - 600)
+    world.confirm(confirm, (split, 0), (split, 1), units={AGENT.unit: 10}, held={AGENT.unit: 12})
+
+
+@probe("cooling_off")
+def units_from_another_key_beside_a_burn(confirm):
+    """Units burned in the transaction do not offset units that arrived in it."""
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (AGENT_ID, 10))], inputs=[world.seller((AGENT_ID, 10))])
+    moved = world.tx([_holding(CLAIMANT, (AGENT_ID, 10))],
+                     inputs=[(held, 0), world.seller((AGENT_ID, 3))], slot=NOW - 600)
+    world.confirm(confirm, (moved, 0), units={AGENT.unit: 10}, held={AGENT.unit: 10})
+
+
+def _minted_beside_units_held_long_before(surrendered: int) -> Callable:
+    def run(confirm):
+        world = Provenance()
+        held = world.tx([_holding(CLAIMANT, (AGENT_ID, 5))], inputs=[world.seller((AGENT_ID, 5))])
+        minted = world.tx([_holding(CLAIMANT, (AGENT_ID, 7))], inputs=[(held, 0)], slot=NOW - 600)
+        world.confirm(confirm, (minted, 0), units={AGENT.unit: surrendered}, held={AGENT.unit: 7})
+    return run
+
+
+PROBES.append(Probe("the_units_held_before_a_mint_beside_them", "confirmed", _minted_beside_units_held_long_before(5)))
+PROBES.append(Probe("units_minted_beside_units_held_long_before", "cooling_off",
+                    _minted_beside_units_held_long_before(6)))
 
 
 @probe("confirmed")
@@ -720,7 +824,7 @@ def _ride_through(merged_first: bool, parent_on_chain: bool) -> Callable:
         first = Approval(
             tx_hash=parent, payout=1, claimant=CLAIMANT, pool_input=pool, units={AGENT.unit: 5},
             inputs=tuple(sorted([pool, *spends])), spends=tuple(sorted([pool, *spends])),
-            unit_inputs=(spends[0],), checked_at=NOW - 120,
+            unit_inputs=(spends[0],), held={AGENT.unit: 5}, checked_at=NOW - 120,
         )
         confirm(first, MAINNET, world.chain, NOTHING_RECORDED)
         world.confirm(confirm, (parent, 3), units={T1_UNIT: 1}, recorded={parent: tuple(spends)}.get)
@@ -816,23 +920,46 @@ for _name, _edit in MALFORMED_LISTINGS.items():
     PROBES.append(Probe(f"a_listing_with_{_name}", "unavailable", _a_listing_with(_edit)))
 
 
-@probe("unavailable")
-def a_source_whose_listing_lacks_the_output_followed(confirm):
-    """The units came from an output the listing of the transaction that made
-    it does not show: the chain view contradicts itself."""
-    class Lacking(FakeChain):
-        def get_tx_utxos(self, tx_hash):
-            answer = super().get_tx_utxos(tx_hash)
-            if tx_hash == bought.hex():
-                answer["outputs"].pop(0)
-            return answer
+def _a_source_whose_listing(edit: Callable[[dict], None]) -> Callable:
+    """Units the claimant moved 10 slots ago from an output it got an hour
+    before, from another key. ``edit`` changes the listing of the transaction
+    that made that output, which only the walk reads."""
+    def run(confirm):
+        class Edited(FakeChain):
+            def get_tx_utxos(self, tx_hash):
+                answer = super().get_tx_utxos(tx_hash)
+                if tx_hash == bought.hex():
+                    edit(answer)
+                return answer
 
+        world = Provenance()
+        world.chain.__class__ = Edited
+        bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                          inputs=[world.seller((T1, 1), (AGENT_ID, 5))], slot=NOW - 3600)
+        moved = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[(bought, 0)], slot=NOW - 10)
+        world.confirm(confirm, (moved, 0))
+    return run
+
+
+# The chain view contradicts itself: the units came from an output its own
+# listing of the transaction that made it does not show, or shows unreadably.
+PROBES.append(Probe("a_source_whose_listing_lacks_the_output_followed", "unavailable",
+                    _a_source_whose_listing(lambda answer: answer["outputs"].pop(0))))
+PROBES.append(Probe("a_source_whose_listing_has_an_output_without_a_collateral_flag", "unavailable",
+                    _a_source_whose_listing(lambda answer: answer["outputs"][0].pop("collateral"))))
+
+
+@probe("confirmed")
+def a_unit_that_arrived_in_another_output_of_a_transaction_followed(confirm):
+    """AGENT from another key arrives in an output nothing is surrendered
+    from. The output that is holds only the pass, held long before, and the
+    AGENT surrendered beside it was held long before elsewhere."""
     world = Provenance()
-    world.chain.__class__ = Lacking
-    bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
-                      inputs=[world.seller((T1, 1), (AGENT_ID, 5))], slot=NOW - 3600)
-    moved = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[(bought, 0)], slot=NOW - 10)
-    world.confirm(confirm, (moved, 0))
+    held = world.tx([_holding(CLAIMANT, (T1, 1)), _holding(CLAIMANT, (AGENT_ID, 5))],
+                    inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+    split = world.tx([_holding(CLAIMANT, (T1, 1)), _holding(CLAIMANT, (AGENT_ID, 3))],
+                     inputs=[(held, 0), world.seller((AGENT_ID, 3))], slot=NOW - 600)
+    world.confirm(confirm, (split, 0), (held, 1))
 
 
 # -- the probes ------------------------------------------------------------------

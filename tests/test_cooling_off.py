@@ -6,12 +6,13 @@ deny-list and nothing recorded, against what mainnet answered about where its
 units came from. Every one of the 19 claims the attacker made is refused at
 the transaction that moved the passes from the attacker's collection address
 to the claim address, within the hour before. Of the 17 legitimate claims
-beside them, 8 pass; 9 would have waited up to 72 hours: 5 surrendered AGENT
-or SHARDS bought from a DEX within the hour, 3 surrendered units sent from
-another key minutes before, and 1 had moved its AGENT to the claim address
-from another payment key of the same stake account. That last kind waits too:
-a stake credential is no proof of ownership, since anyone can pair their own
-payment key with another's stake credential."""
+beside them, 8 pass; 9 would have waited up to 72 hours, none of them holding
+any of what it surrendered before then: 5 surrendered AGENT or SHARDS bought
+from a DEX within the hour, 3 surrendered units sent from another key minutes
+before, and 1 had moved its AGENT to the claim address from another payment
+key of the same stake account. That last kind waits too: a stake credential
+is no proof of ownership, since anyone can pair their own payment key with
+another's stake credential."""
 
 from __future__ import annotations
 
@@ -94,6 +95,7 @@ def test_a_legitimate_claim_passes_unless_its_units_had_just_arrived(tx_hash):
         assert refusal is None
         return
     assert refusal is not None and refusal.code == "cooling_off"
+    assert re.search(r"; 0 of the \d+ surrendered can be surrendered now,", refusal.detail), refusal.detail
     unit, arrival, _ = _arrival(refusal)
     sources = _sources(arrival, unit)
     claimant = Address.from_primitive(approval.claimant)

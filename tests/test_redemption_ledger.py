@@ -45,11 +45,12 @@ def approval(n: int, spends: tuple[bytes, int], payout: int = 10, units=None,
     ``claimant_inputs`` and offering ``collateral``, whose pool continuation
     is ``(_tx(n), 1)``."""
     spent = (spends, *claimant_inputs)
+    units = {UNIT: 1} if units is None else units
     return Approval(
         tx_hash=_tx(n), payout=payout, claimant=b"\x61" + b"\x01" * 28,
-        pool_input=spends, units={UNIT: 1} if units is None else units,
+        pool_input=spends, units=units,
         inputs=tuple(sorted({*spent, *collateral})), spends=tuple(sorted(spent)),
-        unit_inputs=tuple(sorted(claimant_inputs)), checked_at=0,
+        unit_inputs=tuple(sorted(claimant_inputs)), held=dict(units), checked_at=0,
     )
 
 
