@@ -163,19 +163,19 @@ def pool_docs(old_script: bytes, fee_pkh: str = NEW_ADMINS[0], **overrides) -> t
     return snap_doc, plan_doc(snap_doc, old_script_hex=old_script.hex(), **overrides)
 
 
-def signing_docs(move="all"):
+def signing_docs(move="all", fee_key=2):
     """A pool of the claim validator applied to old admins 0-1, moving to it
-    applied to new admins 2-3; new admin 2's address pays the fee."""
-    keys = Keys(4)
+    applied to new admins 2-3; key ``fee_key``'s address pays the fee."""
+    keys = Keys(max(4, fee_key + 1))
     old, new = [keys.pkh(0), keys.pkh(1)], [keys.pkh(2), keys.pkh(3)]
     new_hash = blake2b_224(b"\x03" + applied(new, NEW_DEADLINE_MS)).hex()
-    snap_doc, plan = pool_docs(applied(old, OLD_DEADLINE_MS), fee_pkh=keys.pkh(2), old_admins=old, new_admins=new,
-                               new_script_hash=new_hash, move=move)
+    snap_doc, plan = pool_docs(applied(old, OLD_DEADLINE_MS), fee_pkh=keys.pkh(fee_key), old_admins=old,
+                               new_admins=new, new_script_hash=new_hash, move=move)
     return keys, snap_doc, plan
 
 
-def signing_world(move="all"):
-    keys, snap_doc, plan = signing_docs(move)
+def signing_world(move="all", fee_key=2):
+    keys, snap_doc, plan = signing_docs(move, fee_key)
     return keys, load_snapshot(snap_doc), load_plan(plan)
 
 
@@ -574,6 +574,15 @@ class TestCheckRefuses:
         with rejected("collateral"):
             check_migration_tx(mutated(snap, plan, mutate), snap, plan)
 
+    def test_collateral_above_its_cap(self):
+        snap, plan = world()
+
+        def mutate(body, _):
+            body[16][1] -= 5_000_001 - body[17]
+            body[17] = 5_000_001
+        with rejected("collateral"):
+            check_migration_tx(mutated(snap, plan, mutate), snap, plan)
+
     def test_a_collateral_return_below_its_minimum_ada(self):
         snap_doc = snapshot_doc(fee_tx=fee_parent(NEW_ADMINS[0], coin=5_500_000))
         snap, plan = load_snapshot(snap_doc), load_plan(plan_doc(snap_doc))
@@ -884,6 +893,15 @@ class TestAssemble:
         txid = blake2b_256(split_tx(unsigned)[0])
         with rejected("witnesses"):
             assemble(unsigned, [keys.witness(i, txid) for i in range(3)], snap, plan)
+
+    def test_a_fee_payer_who_is_no_admin_signs_too(self):
+        keys, snap, plan = signing_world(fee_key=4)
+        unsigned = build_migration_tx(snap, plan)
+        txid = blake2b_256(split_tx(unsigned)[0])
+        with rejected("witnesses"):
+            assemble(unsigned, [keys.witness(i, txid) for i in range(4)], snap, plan)
+        signed = assemble(unsigned, [keys.witness(i, txid) for i in range(5)], snap, plan)
+        assert check_migration_tx(signed, snap, plan)["signed_size"] == len(signed)
 
     def test_a_witness_over_another_body(self):
         keys, snap, plan = signing_world()
