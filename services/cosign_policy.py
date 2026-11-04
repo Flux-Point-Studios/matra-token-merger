@@ -33,7 +33,8 @@ policy reads the complete transaction and approves only a surrender:
 ``require_claimant_signature`` then checks that the claimant's payment key
 signed the body. services.chain_check confirms against the signer's own view
 of the chain that the inputs exist, no unit's supply grew and no NFT unit was
-minted or burned since the pin, and the per-day cap and each unit's remaining
+minted or burned since the pin, and no surrendered unit reached the claimant
+inside the cooling-off, and the per-day cap and each unit's remaining
 redemptions are enforced against every signer's own record by
 services.redemption_ledger.
 
@@ -456,6 +457,10 @@ class Approval:
     spends: tuple[tuple[bytes, int], ...]
     """The outputs it consumes when it lands, the pool's included. Its
     collateral is consumed only if a script fails, when nothing else is."""
+    unit_inputs: tuple[tuple[bytes, int], ...]
+    """The claimant's inputs that hold a unit it quarantines."""
+    checked_at: int
+    """The slot it was checked at."""
 
 
 def evaluate_surrender(
@@ -596,11 +601,13 @@ def evaluate_surrender(
         raise CosignRejected("quarantine_assets", str(exc)) from exc
     if entitlement == 0:
         raise CosignRejected("nothing_surrendered", "no legacy asset reaches quarantine")
+    unit_inputs: set[tuple[bytes, int]] = set()
     for unit, quantity in quarantined.items():
         policy, name = bytes.fromhex(unit[:56]), bytes.fromhex(unit[56:])
         held = sum(_quantity(out.assets, policy, name) for out in spent.values())
         if held < quantity:
             raise CosignRejected("quarantine_not_claimants", f"inputs hold {held} of {unit}")
+        unit_inputs.update(ref for ref, out in spent.items() if _quantity(out.assets, policy, name))
 
     payout = pool_in_cmatra - _quantity(continuation.assets, cfg.cmatra_policy, cfg.cmatra_name)
     if payout != entitlement:
@@ -636,6 +643,8 @@ def evaluate_surrender(
         pool_input=pool_ref, units=quarantined,
         inputs=tuple(sorted({pool_ref, *spent, *(ref for ref, _ in collateral)})),
         spends=tuple(sorted([pool_ref, *spent])),
+        unit_inputs=tuple(sorted(unit_inputs)),
+        checked_at=now_slot,
     )
 
 

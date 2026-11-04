@@ -17,7 +17,17 @@ Blockfrost project queried from the signer's own host:
     spends outputs still in the mempool). A producing body proves what an
     output would hold, not that it exists; a transaction spending an output
     that does not exist can never land, and must not use up the limits the
-    ledger holds approvals to.
+    ledger holds approvals to;
+  * every surrendered unit reached the claimant's payment key at least
+    COOLING_OFF_SLOTS before the check. An input made inside that window is
+    followed back through the transaction that made it, as long as the inputs
+    there that carry the unit are the claimant's own (any of its addresses);
+    a unit that arrived from another key, or that no input carried (a mint),
+    inside the window refuses the surrender, and so does a walk through more
+    than MAX_PROVENANCE_TXS transactions inside it. Change of a surrender
+    this signer recorded passed this check when it was recorded. Stolen units
+    are surrendered within hours of being taken; a holder waits at most the
+    window.
 
 A view that cannot answer raises :class:`ChainUnavailable`, and nothing is
 signed. That includes an answer of the wrong shape: a page of a history that
@@ -35,9 +45,14 @@ import re
 from typing import Any, Callable, Iterator
 
 import requests
+from pycardano import Address
+from pycardano.exception import DecodingException, DeserializeException
 
 from services.cosign_policy import Approval, CosignConfig, CosignRejected
 from tools.api_clients import BlockfrostUnavailable
+
+COOLING_OFF_SLOTS = 72 * 3600
+MAX_PROVENANCE_TXS = 32
 
 
 class ChainUnavailable(RuntimeError):
@@ -88,6 +103,91 @@ def _slot(tx_hash: str, answer: Any) -> int:
     if type(slot) is not int:
         raise ChainUnavailable(f"{tx_hash}: the chain view gives no slot for it")
     return slot
+
+
+def _units(entry: Any, tx_hash: str) -> set[str]:
+    """The units, not lovelace, a /txs/{hash}/utxos entry holds."""
+    try:
+        return {a["unit"] for a in entry["amount"] if a["unit"] != "lovelace" and int(a["quantity"]) > 0}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ChainUnavailable(f"{tx_hash}: unexpected amounts from the chain view: {exc!r}") from exc
+
+
+def _held_by(answer: Any, index: int, tx_hash: str) -> set[str]:
+    """The units output ``index`` holds, by its transaction's listing."""
+    try:
+        output = next(o for o in answer["outputs"] if o["output_index"] == index and o["collateral"] is False)
+    except (KeyError, TypeError, StopIteration) as exc:
+        raise ChainUnavailable(f"{tx_hash}#{index}: the chain view lists no such output") from exc
+    return _units(output, tx_hash)
+
+
+def _spent_inputs(answer: Any, tx_hash: str) -> list:
+    """The inputs a /txs/{hash}/utxos answer lists the transaction as
+    consuming: neither collateral, which a valid transaction keeps, nor
+    reference inputs, which it only reads."""
+    try:
+        return [entry for entry in answer["inputs"] if entry["collateral"] is False and entry["reference"] is False]
+    except (KeyError, TypeError) as exc:
+        raise ChainUnavailable(f"{tx_hash}: unexpected inputs from the chain view: {exc!r}") from exc
+
+
+def _input_ref(entry: Any, tx_hash: str) -> tuple[bytes, int]:
+    """The output an input entry spends. Its hash goes into a request path,
+    so it must be a transaction hash and nothing else."""
+    ref_tx, index = entry.get("tx_hash"), entry.get("output_index")
+    if not (isinstance(ref_tx, str) and _TX_HASH.fullmatch(ref_tx) and type(index) is int):
+        raise ChainUnavailable(f"{tx_hash}: unexpected input entry from the chain view: {entry!r:.200}")
+    return bytes.fromhex(ref_tx), index
+
+
+def _payment_key(entry: Any, tx_hash: str) -> bytes | None:
+    """The payment credential of the address an input entry names; None for
+    an address that has none (Byron)."""
+    try:
+        payment = Address.from_primitive(entry["address"]).payment_part
+    except (DecodingException, DeserializeException):
+        return None
+    except KeyError as exc:
+        raise ChainUnavailable(f"{tx_hash}: an input entry names no address") from exc
+    return None if payment is None else payment.payload
+
+
+def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Callable[[bytes], bool]) -> None:
+    """Raise :class:`CosignRejected` unless every unit ``approval``
+    surrenders reached the claimant's payment key COOLING_OFF_SLOTS or more
+    before it was checked."""
+    cutoff = approval.checked_at - COOLING_OFF_SLOTS
+    owner = approval.claimant[1:29]
+    surrendered = set(approval.units)
+    pending, seen, inside = list(approval.unit_inputs), set(), set()
+    while pending:
+        ref = pending.pop()
+        tx_id, index = ref
+        if ref in seen or recorded(tx_id):
+            continue
+        seen.add(ref)
+        tx_hash = tx_id.hex()
+        slot = _slot(tx_hash, _ask(chain.get_tx, tx_hash))
+        if slot <= cutoff:
+            continue
+        inside.add(tx_id)
+        if len(inside) > MAX_PROVENANCE_TXS:
+            raise CosignRejected(
+                "cooling_off", f"the units moved through more than {MAX_PROVENANCE_TXS} transactions"
+                f" in the {COOLING_OFF_SLOTS} slots before slot {approval.checked_at}",
+            )
+        answer = _ask(chain.get_tx_utxos, tx_hash)
+        held = _held_by(answer, index, tx_hash) & surrendered
+        inputs = _spent_inputs(answer, tx_hash)
+        for unit in sorted(held):
+            sources = [entry for entry in inputs if unit in _units(entry, tx_hash)]
+            if not sources or any(_payment_key(entry, tx_hash) != owner for entry in sources):
+                raise CosignRejected(
+                    "cooling_off", f"{unit} reached the claimant in {tx_hash} at slot {slot}; it can be"
+                    f" surrendered from slot {slot + COOLING_OFF_SLOTS}, not at slot {approval.checked_at}",
+                )
+            pending.extend(_input_ref(entry, tx_hash) for entry in sources)
 
 
 def mints_and_burns_after(unit: str, slot: int, chain: Any) -> Iterator[tuple[str, str, int]]:
@@ -144,3 +244,5 @@ def confirm_on_chain(
                 "minted_after_pin",
                 f"{unit}: {action} in {tx_hash} at slot {slot}, after the pin at slot {cfg.supply_slot}",
             )
+
+    refuse_inside_cooling_off(approval, chain, recorded)

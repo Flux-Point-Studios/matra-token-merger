@@ -4,9 +4,11 @@ The golden fixture (tests/fixtures/cosign_golden.json.gz, rebuilt by
 scripts/fetch_cosign_golden.py) holds every transaction that ever touched the
 surrender pool address, the bodies of the transactions that produced their
 inputs, and the PlutusV3 language views in force when each was built. The
-forfeited-claims fixture (tests/fixtures/forfeited_claims.json.gz, rebuilt by
-the same script with --forfeited) holds the 19 surrenders the attacker made
-with passes taken from W1, in the same form.
+recent-claims fixture (tests/fixtures/recent_claims.json.gz, rebuilt by the
+same script with --recent) holds, in the same form, every surrender after
+those up to the stop: the 19 the attacker made with passes taken from W1
+(kind "forfeited") and the legitimate ones beside them, with what a signer's
+chain view is asked about where their units came from.
 
 Each adversarial case starts from a real surrender and changes one thing an
 attacker holding one admin key could change. The expected value is the exact
@@ -32,6 +34,7 @@ from pycardano import Address
 
 from services.cosign_policy import (
     CosignConfig,
+    Output,
     Simple,
     Tag,
     decode,
@@ -49,7 +52,7 @@ from tools.process_surrender import (
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_PATH = ROOT / "tests/fixtures/cosign_golden.json.gz"
-FORFEITED_PATH = ROOT / "tests/fixtures/forfeited_claims.json.gz"
+RECENT_PATH = ROOT / "tests/fixtures/recent_claims.json.gz"
 
 POOL_BECH32 = "addr1w8s6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg9mn27a"
 QUARANTINE_BECH32 = "addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl"
@@ -131,13 +134,14 @@ def golden() -> dict[str, Any]:
 
 
 @lru_cache(maxsize=1)
-def forfeited() -> dict[str, Any]:
-    with gzip.open(FORFEITED_PATH, "rt") as fh:
+def recent() -> dict[str, Any]:
+    with gzip.open(RECENT_PATH, "rt") as fh:
         return json.load(fh)
 
 
 SURRENDER_HASHES = [t["tx_hash"] for t in golden()["transactions"] if t["kind"] == "surrender"]
-FORFEITED_HASHES = [t["tx_hash"] for t in forfeited()["transactions"]]
+FORFEITED_HASHES = [t["tx_hash"] for t in recent()["transactions"] if t["kind"] == "forfeited"]
+RECENT_SURRENDER_HASHES = [t["tx_hash"] for t in recent()["transactions"] if t["kind"] == "surrender"]
 
 
 @dataclass(frozen=True)
@@ -153,8 +157,8 @@ def golden_scenario(tx_hash: str) -> Scenario:
     return _scenario(golden(), tx_hash)
 
 
-def forfeited_scenario(tx_hash: str) -> Scenario:
-    return _scenario(forfeited(), tx_hash)
+def recent_scenario(tx_hash: str) -> Scenario:
+    return _scenario(recent(), tx_hash)
 
 
 def _scenario(doc: dict[str, Any], tx_hash: str) -> Scenario:
@@ -361,22 +365,61 @@ def not_found() -> requests.HTTPError:
 MINTED_AT_THE_PIN = "5e" * 32
 
 
+def _listed(output: Output) -> dict:
+    """An output's address and amounts as Blockfrost lists them."""
+    amount = [{"unit": "lovelace", "quantity": str(output.coin)}] + [
+        {"unit": (policy + name).hex(), "quantity": str(quantity)}
+        for policy, names in output.assets.items() for name, quantity in names.items()
+    ]
+    return {"address": Address.from_primitive(output.address).encode(), "amount": amount}
+
+
+def utxos_answer(bodies: Mapping[str, bytes], tx_hash: str, spent: Mapping[tuple[str, int], str]) -> dict:
+    """What Blockfrost's /txs/{tx_hash}/utxos answers for a transaction whose
+    body is in ``bodies``: its outputs, unspent unless ``spent`` names their
+    spender, and each input, collateral input and reference input whose
+    producing body ``bodies`` holds. A valid transaction's collateral return
+    is listed although the ledger never created it."""
+    body = decode(bodies[tx_hash])
+    outputs = [
+        {"output_index": i, **_listed(parse_output(raw)), "collateral": False,
+         "consumed_by_tx": spent.get((tx_hash, i))}
+        for i, raw in enumerate(body[1])
+    ]
+    outputs.append({"output_index": len(body[1]), "address": "", "amount": [], "collateral": True,
+                    "consumed_by_tx": None})
+    inputs = [
+        {"tx_hash": ref_tx.hex(), "output_index": index,
+         **_listed(parse_output(decode(bodies[ref_tx.hex()])[1][index])),
+         "collateral": key == 13, "reference": key == 18}
+        for key in (0, 13, 18) for ref_tx, index in _elements(body.get(key, []))
+        if ref_tx.hex() in bodies
+    ]
+    return {"hash": tx_hash, "inputs": inputs, "outputs": outputs}
+
+
 class FakeChain:
     """A signer's view of the chain: the BlockfrostClient calls
     services.chain_check makes. The transactions whose bodies it holds are on
-    chain, their outputs unspent unless listed in ``spent``; each unit's
-    supply is the pinned one unless ``supply`` says otherwise, and its history
-    one mint at the pin unless ``history`` says otherwise; ``failure``, when
-    set, is raised by every call."""
+    chain, their outputs unspent unless listed in ``spent``, each placed at
+    slot 0 (long before any surrender) unless ``slots`` is given, which then
+    places exactly the transactions it names; each unit's supply is the
+    pinned one unless ``supply`` says otherwise, and its history one mint at
+    the pin unless ``history`` says otherwise; ``failure``, when set, is
+    raised by every call."""
 
     def __init__(self, bodies: Mapping[str, bytes] | None = None,
                  supply: Mapping[str, int] | None = None,
-                 failure: Exception | None = None) -> None:
+                 failure: Exception | None = None,
+                 slots: Mapping[str, int] | None = None) -> None:
         self.bodies = dict(bodies or {})
         self.spent: dict[tuple[str, int], str] = {}
         self.supply = {**PIN.supply, **(supply or {})}
         self.history: dict[str, list[dict]] = {}
-        self.slots: dict[str, int] = {MINTED_AT_THE_PIN: PIN.supply_slot}
+        self.slots: dict[str, int] = {
+            MINTED_AT_THE_PIN: PIN.supply_slot,
+            **(dict(slots) if slots is not None else dict.fromkeys(self.bodies, 0)),
+        }
         self.failure = failure
 
     def change_after_pin(self, unit: str, action: str) -> None:
@@ -395,22 +438,23 @@ class FakeChain:
         output unspent, as when those surrenders were built."""
         return cls({tx: bytes.fromhex(body) for tx, body in golden()["parents"].items()})
 
-    def publish(self, *bodies: bytes) -> None:
+    @classmethod
+    def as_at_the_recent_builds(cls) -> "FakeChain":
+        """What the recent claims' chain checks read: their producing bodies,
+        each output unspent, and the slots mainnet placed them in."""
+        doc = recent()
+        return cls({tx: bytes.fromhex(body) for tx, body in doc["parents"].items()}, slots=doc["slots"])
+
+    def publish(self, *bodies: bytes, slot: int = 0) -> None:
         for body in bodies:
             self.bodies[blake(body).hex()] = body
+            self.slots[blake(body).hex()] = slot
 
     def get_tx_utxos(self, tx_hash: str) -> dict:
         self._answer()
         if tx_hash not in self.bodies:
             raise not_found()
-        count = len(decode(self.bodies[tx_hash])[1])
-        outputs = [
-            {"output_index": i, "collateral": False, "consumed_by_tx": self.spent.get((tx_hash, i))}
-            for i in range(count)
-        ]
-        # A valid transaction's collateral return is listed but never created.
-        outputs.append({"output_index": count, "collateral": True, "consumed_by_tx": None})
-        return {"hash": tx_hash, "inputs": [], "outputs": outputs}
+        return utxos_answer(self.bodies, tx_hash, self.spent)
 
     def _answer(self) -> None:
         if self.failure is not None:

@@ -90,6 +90,23 @@ OPERATOR_MUTANTS = {
         "next(mints_and_burns_after(unit, cfg.supply_slot, chain), None)",
         "next(iter(list(mints_and_burns_after(unit, cfg.supply_slot, chain))), None)",
     ),
+    "the_first_slot_of_the_cooling_off_read_as_inside_it": ("slot <= cutoff", "slot < cutoff"),
+    "collateral_inputs_followed": (
+        'entry["collateral"] is False and entry["reference"] is False', 'entry["reference"] is False',
+    ),
+    "reference_inputs_followed": (
+        'entry["collateral"] is False and entry["reference"] is False', 'entry["collateral"] is False',
+    ),
+    "units_not_surrendered_followed": ("& surrendered", ""),
+    "inputs_without_the_unit_followed": ("if unit in _units(entry, tx_hash)]", "]"),
+    "a_mint_inside_the_window_passed": ("if not sources or any(", "if any("),
+    "the_walk_limit_reached_one_early": ("len(inside) > MAX_PROVENANCE_TXS", "len(inside) >= MAX_PROVENANCE_TXS"),
+    "a_recorded_surrenders_change_followed": ("if ref in seen or recorded(tx_id):", "if ref in seen:"),
+    "self_transfers_not_followed_back": (
+        "pending.extend(_input_ref(entry, tx_hash) for entry in sources)",
+        "[_input_ref(entry, tx_hash) for entry in sources]",
+    ),
+    "a_bool_input_index_read_as_an_index": ("type(index) is int", "isinstance(index, int)"),
 }
 
 

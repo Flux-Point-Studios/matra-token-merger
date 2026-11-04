@@ -43,6 +43,7 @@ def approval(n: int, spends: tuple[bytes, int], payout: int = 10, units=None,
         tx_hash=_tx(n), payout=payout, claimant=b"\x61" + b"\x01" * 28,
         pool_input=spends, units={UNIT: 1} if units is None else units,
         inputs=tuple(sorted({*spent, *collateral})), spends=tuple(sorted(spent)),
+        unit_inputs=tuple(sorted(claimant_inputs)), checked_at=0,
     )
 
 

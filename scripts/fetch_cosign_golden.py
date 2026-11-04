@@ -8,11 +8,15 @@ cost-model encoding in force in its epoch. Surrenders (a pool input spent and
 legacy assets paid to quarantine) are the corpus the co-signer policy must
 accept; the rest are the mint and pool rotation ceremonies it must refuse.
 
-With --forfeited, tests/fixtures/forfeited_claims.json.gz: the 19 surrenders
-the attacker made with FLUX_PASS taken from W1, in the same form, with the
-bodies two producing transactions deep and the slot of each claim and of each
-transaction that produced a claim's inputs: what a signer's chain view is
-asked about where those passes came from.
+With --recent, tests/fixtures/recent_claims.json.gz: every surrender after
+the golden set's, up to the stop on 2026-11-02, in the same form: the 19 the
+attacker made with FLUX_PASS taken from W1 (kind "forfeited") and the
+legitimate ones beside them. Each claim's cooling-off walk
+(services.chain_check.refuse_inside_cooling_off, at the claim's validity
+start, nothing recorded) runs against the provider, and the fixture also
+holds every slot it asks and, for each listing it asks, the bodies a chain
+view derives that listing from: what a signer asks about where the
+surrendered units came from, and no more.
 
 Needs NETWORK=mainnet and the chain provider settings in the environment.
 """
@@ -30,8 +34,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pycardano import Address  # noqa: E402
 
-from services.cosign_policy import blake2b_256, decode, parse_output, split_tx  # noqa: E402
+from dataclasses import replace  # noqa: E402
+
+from services.chain_check import refuse_inside_cooling_off  # noqa: E402
+from services.cosign_policy import (  # noqa: E402
+    CosignRejected,
+    blake2b_256,
+    decode,
+    evaluate_surrender,
+    load_config,
+    parse_output,
+    split_tx,
+)
 from tools.api_clients import BlockfrostClient  # noqa: E402
+from tools.credential_denylist import DenyList  # noqa: E402
 
 POOL_ADDRESS = "addr1w8s6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg9mn27a"
 QUARANTINE_ADDRESS = "addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl"
@@ -148,15 +164,58 @@ def golden(bf: BlockfrostClient) -> dict:
     return fetch.fixture(transactions)
 
 
-def forfeited(bf: BlockfrostClient) -> dict:
-    fetch = Fetcher(bf)
+class WalkRecorder:
+    """The provider as the cooling-off walk reads it, keeping the slot of
+    every transaction it places and the bodies behind every listing."""
+
+    def __init__(self, fetch: Fetcher) -> None:
+        self.fetch = fetch
+
+    def get_tx(self, tx_hash: str) -> dict:
+        return {"hash": tx_hash, "slot": self.fetch.slot(tx_hash)}
+
+    def get_tx_utxos(self, tx_hash: str) -> dict:
+        for txid, _index in _refs(self.fetch.body(tx_hash)):
+            self.fetch.body(txid.hex())
+        return self.fetch.bf.get_tx_utxos(tx_hash)
+
+
+def _policy() -> object:
+    """The mainnet pool's policy with no deny-list and no payout cap, under
+    which every surrender the pool paid is approved."""
+    cfg = load_config({
+        "NETWORK": "mainnet", "SURRENDER_SCRIPT_ADDRESS": POOL_ADDRESS, "QUARANTINE_ADDRESS": QUARANTINE_ADDRESS,
+        "CMATRA_POLICY_HEX": "7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66",
+        "CMATRA_ASSET_HEX": "634d41545241", "SURRENDER_DEADLINE_POSIX_MS": "1795910400000",
+        "MAX_CMATRA_PER_TX": str(10**15),
+    }, [bytes.fromhex("f1eee828ae800a5bad6f3913603e20531162cdf44c5e0ffa49b6a936"),
+        bytes.fromhex("77fdb621ad5f926257ce1a2f845fc946ae3d5a683ac89128bad3410d")])
+    return replace(cfg, denylist=DenyList(labels={}, allowed=frozenset(), sha256="none"))
+
+
+def recent(bf: BlockfrostClient) -> dict:
+    with gzip.open(FIXTURES / "cosign_golden.json.gz", "rt") as fh:
+        known = {t["tx_hash"] for t in json.load(fh)["transactions"]}
+    fetch, cfg = Fetcher(bf), _policy()
     transactions = []
-    for tx_hash in FORFEITED_CLAIMS:
-        row, body = fetch.transaction(tx_hash, depth=2)
-        for txid, _index in _refs(body):
-            fetch.slot(txid.hex())
-        transactions.append({**row, "kind": "surrender"})
-        print(f"{len(transactions):4d} {tx_hash}", flush=True)
+    for entry in bf.get_address_transactions(POOL_ADDRESS):
+        tx_hash = entry["tx_hash"]
+        if tx_hash in known:
+            continue
+        row, body = fetch.transaction(tx_hash)
+        tx = bytes.fromhex(row["tx_cbor"])
+        parents = [bytes.fromhex(fetch.parents[txid.hex()]) for txid, _index in _refs(body)]
+        views = bytes.fromhex(fetch.views[row["language_views"]])
+        approval = evaluate_surrender(tx, views, parents, body.get(8, row["slot"]), cfg)
+        try:
+            refuse_inside_cooling_off(approval, WalkRecorder(fetch), lambda _tx_id: False)
+            walk = "held"
+        except CosignRejected as exc:
+            walk = exc.code
+        kind = "forfeited" if tx_hash in FORFEITED_CLAIMS else "surrender"
+        transactions.append({**row, "kind": kind})
+        print(f"{len(transactions):4d} {tx_hash} {kind} {walk}", flush=True)
+    assert {t["tx_hash"] for t in transactions if t["kind"] == "forfeited"} == set(FORFEITED_CLAIMS)
     return fetch.fixture(transactions, slots=fetch.slots)
 
 
@@ -165,18 +224,18 @@ def write(fixture: dict, out: Path) -> None:
     with gzip.open(out, "wt", compresslevel=9) as fh:
         json.dump(fixture, fh, sort_keys=True)
     kinds = [t["kind"] for t in fixture["transactions"]]
-    print(f"wrote {out}: {kinds.count('surrender')} surrenders, "
+    print(f"wrote {out}: {kinds.count('surrender')} surrenders, {kinds.count('forfeited')} forfeited, "
           f"{kinds.count('ceremony')} ceremonies, {len(fixture['parents'])} producing bodies")
 
 
 def main(argv: list[str], bf: BlockfrostClient | None = None) -> None:
     bf = bf or BlockfrostClient()
-    if argv == ["--forfeited"]:
-        write(forfeited(bf), FIXTURES / "forfeited_claims.json.gz")
+    if argv == ["--recent"]:
+        write(recent(bf), FIXTURES / "recent_claims.json.gz")
     elif not argv:
         write(golden(bf), FIXTURES / "cosign_golden.json.gz")
     else:
-        sys.exit("usage: python scripts/fetch_cosign_golden.py [--forfeited]")
+        sys.exit("usage: python scripts/fetch_cosign_golden.py [--recent]")
 
 
 if __name__ == "__main__":

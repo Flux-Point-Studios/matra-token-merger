@@ -13,6 +13,13 @@ mempool). A producing body proves what an output would hold, not that it
 exists, so without this a caller could invent outputs, and approvals that
 can never land would still use up limits.
 
+A surrendered unit must have reached the claimant's payment key at least 72
+hours before the check. Its arrival is followed back through transactions
+inside that window while they only move it between the claimant's own
+addresses; arriving from anyone else, or minted, inside the window refuses
+the surrender. Change of a surrender this signer recorded passed this check
+when it was recorded.
+
 Each scenario is a probe; tests/test_chain_check_mutation.py runs every probe
 against mutants of services.chain_check."""
 
@@ -52,10 +59,12 @@ def _chain(**kwargs) -> FakeChain:
     return FakeChain({PARENT_ID.hex(): PARENT}, **kwargs)
 
 
-def _approval(units: dict[str, int], inputs=((PARENT_ID, 0), (PARENT_ID, 1))) -> Approval:
+def _approval(units: dict[str, int], inputs=((PARENT_ID, 0), (PARENT_ID, 1)),
+              unit_inputs=(), claimant=CLAIMANT, checked_at=0) -> Approval:
     return Approval(
-        tx_hash=b"\x01" * 32, payout=1, claimant=CLAIMANT,
+        tx_hash=b"\x01" * 32, payout=1, claimant=claimant,
         pool_input=inputs[0], units=units, inputs=tuple(inputs), spends=tuple(inputs),
+        unit_inputs=tuple(unit_inputs), checked_at=checked_at,
     )
 
 
@@ -492,6 +501,246 @@ def a_mint_that_lands_while_the_inputs_are_looked_up(confirm):
             return super().get_tx_utxos(tx_hash)
 
     confirm(_approval({T1_UNIT: 1}), MAINNET, MintDuringLookups({PARENT_ID.hex(): PARENT}), NOTHING_RECORDED)
+
+
+# -- the cooling-off --------------------------------------------------------------
+
+NOW = PIN.supply_slot + 5_000_000
+COOLING_OFF = 72 * 3600
+OWNER_BASE = b"\x01" + CLAIMANT[1:] + b"\x07" * 28  # the claimant's key, with a stake part
+SELLER = b"\x61" + b"\x05" * 28
+BYRON_SELLER = "Ae2tdPwUPEZFRbyhz3cpfC2CumGzNkFBN2L42rcUc2yjQpEkxDbkPodpMAi"
+T1 = bytes.fromhex(T1_UNIT[:56]), bytes.fromhex(T1_UNIT[56:])
+AGENT_ID = bytes.fromhex(AGENT.policy_id), bytes.fromhex(AGENT.asset_name_hex)
+OTHER = b"\x09" * 28, b"other"
+SURRENDERED = {T1_UNIT: 1, AGENT.unit: 5}
+
+
+def _holding(address: bytes, *assets: tuple[tuple[bytes, bytes], int], coin: int = 2_000_000) -> list:
+    bundle: dict = {}
+    for (policy, name), quantity in assets:
+        bundle.setdefault(policy, {})[name] = quantity
+    return [address, [coin, bundle] if bundle else coin]
+
+
+class Provenance:
+    """Transactions that moved units toward the claimant, each at a slot,
+    on a chain view that knows exactly those transactions and slots."""
+
+    def __init__(self) -> None:
+        self.chain = FakeChain(slots={})
+
+    def tx(self, outputs: list, inputs=(), collateral=(), reference=(), slot: int = 0) -> bytes:
+        body = {0: [list(ref) for ref in inputs], 1: outputs, 2: 0}
+        if collateral:
+            body[13] = [list(ref) for ref in collateral]
+        if reference:
+            body[18] = [list(ref) for ref in reference]
+        encoded = encode(body)
+        self.chain.publish(encoded, slot=slot)
+        return blake(encoded)
+
+    def seller(self, *assets, address: bytes = SELLER) -> tuple[bytes, int]:
+        """An output at ``address`` holding ``assets`` long before the window."""
+        return self.tx([_holding(address, *assets)]), 0
+
+    def confirm(self, confirm, held: tuple[bytes, int], claimant: bytes = CLAIMANT,
+                units=SURRENDERED, recorded=NOTHING_RECORDED) -> None:
+        approval = _approval(units, [held], unit_inputs=[held], claimant=claimant, checked_at=NOW)
+        confirm(approval, MAINNET, self.chain, recorded)
+
+
+def _arrival(at_slot: int):
+    def run(confirm):
+        world = Provenance()
+        bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                          inputs=[world.seller((T1, 1), (AGENT_ID, 5))], slot=at_slot)
+        world.confirm(confirm, (bought, 0))
+    return run
+
+
+PROBES.append(Probe("units_that_arrived_as_the_cooling_off_began", "confirmed", _arrival(NOW - COOLING_OFF)))
+PROBES.append(Probe("units_that_arrived_one_slot_inside_the_cooling_off", "cooling_off",
+                    _arrival(NOW - COOLING_OFF + 1), f"slot {NOW}"))
+
+
+@probe("confirmed")
+def units_moved_between_the_claimants_own_addresses_after_arriving_long_before(confirm):
+    world = Provenance()
+    bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+    moved = world.tx([_holding(OWNER_BASE, (T1, 1), (AGENT_ID, 5))], inputs=[(bought, 0)], slot=NOW - 10)
+    again = world.tx([_holding(OWNER_BASE, (T1, 1), (AGENT_ID, 5))], inputs=[(moved, 0)], slot=NOW - 5)
+    world.confirm(confirm, (again, 0), claimant=OWNER_BASE)
+
+
+@probe("cooling_off")
+def units_moved_by_the_claimant_after_arriving_inside_the_window(confirm):
+    world = Provenance()
+    bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                      inputs=[world.seller((T1, 1), (AGENT_ID, 5))], slot=NOW - 3600)
+    moved = world.tx([_holding(OWNER_BASE, (T1, 1), (AGENT_ID, 5))], inputs=[(bought, 0)], slot=NOW - 10)
+    world.confirm(confirm, (moved, 0), claimant=OWNER_BASE)
+
+
+@probe("cooling_off")
+def a_self_transfer_that_merges_in_a_surrendered_unit_from_another_key(confirm):
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 3))], inputs=[world.seller((T1, 1), (AGENT_ID, 3))])
+    merged = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                      inputs=[(held, 0), world.seller((AGENT_ID, 2))], slot=NOW - 10)
+    world.confirm(confirm, (merged, 0))
+
+
+@probe("confirmed")
+def a_self_transfer_funded_with_ada_from_another_key(confirm):
+    """Only inputs that carry a surrendered unit are followed."""
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+    moved = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                     inputs=[(held, 0), world.seller()], slot=NOW - 10)
+    world.confirm(confirm, (moved, 0))
+
+
+@probe("confirmed")
+def a_unit_received_inside_the_window_that_is_not_surrendered(confirm):
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+    merged = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5), (OTHER, 1))],
+                      inputs=[(held, 0), world.seller((OTHER, 1))], slot=NOW - 10)
+    world.confirm(confirm, (merged, 0))
+
+
+@probe("cooling_off")
+def units_minted_inside_the_window(confirm):
+    world = Provenance()
+    minted = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller()], slot=NOW - 10)
+    world.confirm(confirm, (minted, 0))
+
+
+@probe("confirmed")
+def a_seller_who_posted_collateral_beside_the_claimants_inputs(confirm):
+    """A valid transaction consumes none of its collateral."""
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+    moved = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[(held, 0)],
+                     collateral=[world.seller((AGENT_ID, 5))], slot=NOW - 10)
+    world.confirm(confirm, (moved, 0))
+
+
+@probe("confirmed")
+def a_reference_input_holding_the_units_elsewhere(confirm):
+    world = Provenance()
+    held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+    moved = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[(held, 0)],
+                     reference=[world.seller((T1, 1), (AGENT_ID, 5))], slot=NOW - 10)
+    world.confirm(confirm, (moved, 0))
+
+
+@probe("confirmed")
+def units_in_the_change_of_a_surrender_this_signer_recorded(confirm):
+    """Its inputs passed this check when it was recorded; nothing is asked."""
+    Provenance().confirm(confirm, (RECORDED_ID, 3), recorded={RECORDED_ID}.__contains__)
+
+
+@probe("cooling_off")
+def units_from_a_byron_address_inside_the_window(confirm):
+    class ByronSeller(FakeChain):
+        def get_tx_utxos(self, tx_hash):
+            answer = super().get_tx_utxos(tx_hash)
+            for entry in answer["inputs"]:
+                entry["address"] = BYRON_SELLER
+            return answer
+
+    world = Provenance()
+    world.chain.__class__ = ByronSeller
+    bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                      inputs=[world.seller((T1, 1), (AGENT_ID, 5))], slot=NOW - 10)
+    world.confirm(confirm, (bought, 0))
+
+
+@probe("cooling_off", detail="transactions")
+def a_walk_through_more_self_transfers_than_the_limit(confirm):
+    world = Provenance()
+    held = (world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))]), 0)
+    for n in range(33):
+        held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[held], slot=NOW - 100 + n), 0
+    world.confirm(confirm, held)
+
+
+@probe("confirmed")
+def a_walk_through_as_many_self_transfers_as_the_limit(confirm):
+    world = Provenance()
+    held = (world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))]), 0)
+    for n in range(32):
+        held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[held], slot=NOW - 100 + n), 0
+    world.confirm(confirm, held)
+
+
+@probe("unavailable")
+def a_producing_transaction_the_chain_view_cannot_place(confirm):
+    world = Provenance()
+    bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+    del world.chain.slots[bought.hex()]
+    world.confirm(confirm, (bought, 0))
+
+
+INJECTED = "/../../blocks/1"
+
+
+def _a_listing_with(edit: Callable[[dict], None]) -> Callable:
+    """A self-transfer inside the window of units the claimant held long
+    before, whose listing ``edit`` changes. A path appended to a hash names
+    a transaction the chain view places long before, so following it
+    unchecked would pass."""
+    def run(confirm):
+        class Edited(FakeChain):
+            def get_tx_utxos(self, tx_hash):
+                answer = super().get_tx_utxos(tx_hash)
+                edit(answer)
+                return answer
+
+        world = Provenance()
+        world.chain.__class__ = Edited
+        held = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[world.seller((T1, 1), (AGENT_ID, 5))])
+        moved = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[(held, 0)], slot=NOW - 10)
+        world.chain.slots[held.hex() + INJECTED] = 0
+        world.confirm(confirm, (moved, 0))
+    return run
+
+
+MALFORMED_LISTINGS = {
+    "an_input_without_an_address": lambda a: a["inputs"][0].pop("address"),
+    "an_input_without_a_collateral_flag": lambda a: a["inputs"][0].pop("collateral"),
+    "an_input_without_a_reference_flag": lambda a: a["inputs"][0].pop("reference"),
+    "an_input_amount_that_is_not_a_list": lambda a: a["inputs"][0].update(amount=None),
+    "an_input_quantity_that_is_not_a_number": lambda a: a["inputs"][0]["amount"][1].update(quantity="x"),
+    "an_input_naming_a_path_after_its_hash": lambda a: a["inputs"][0].update(
+        tx_hash=a["inputs"][0]["tx_hash"] + INJECTED),
+    "an_input_index_that_is_text": lambda a: a["inputs"][0].update(output_index="0"),
+    "an_input_index_that_is_true": lambda a: a["inputs"][0].update(output_index=True),
+}
+PROBES.append(Probe("a_well_formed_listing", "confirmed", _a_listing_with(lambda answer: None)))
+for _name, _edit in MALFORMED_LISTINGS.items():
+    PROBES.append(Probe(f"a_listing_with_{_name}", "unavailable", _a_listing_with(_edit)))
+
+
+@probe("unavailable")
+def a_source_whose_listing_lacks_the_output_followed(confirm):
+    """The units came from an output the listing of the transaction that made
+    it does not show: the chain view contradicts itself."""
+    class Lacking(FakeChain):
+        def get_tx_utxos(self, tx_hash):
+            answer = super().get_tx_utxos(tx_hash)
+            if tx_hash == bought.hex():
+                answer["outputs"].pop(0)
+            return answer
+
+    world = Provenance()
+    world.chain.__class__ = Lacking
+    bought = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))],
+                      inputs=[world.seller((T1, 1), (AGENT_ID, 5))], slot=NOW - 3600)
+    moved = world.tx([_holding(CLAIMANT, (T1, 1), (AGENT_ID, 5))], inputs=[(bought, 0)], slot=NOW - 10)
+    world.confirm(confirm, (moved, 0))
 
 
 # -- the probes ------------------------------------------------------------------

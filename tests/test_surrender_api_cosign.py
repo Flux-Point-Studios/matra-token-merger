@@ -54,6 +54,7 @@ from tests.cosign_cases import (
     ledger_refusing_writes,
     not_found,
     throwaway_key,
+    utxos_answer,
 )
 from tests.test_surrender_redeemer_index import _SCRIPT_HEX, _FakeContext
 from tools.config import AGENT, FLUX_PASS, T1_ADAM_PASS
@@ -231,7 +232,9 @@ def _body_hash(body: TransactionBody) -> str:
 
 class World:
     """A synthetic pool, quarantine and claimant whose every UTxO is an output
-    of a producing body the fake Blockfrost can serve."""
+    of a producing body the fake Blockfrost can serve, each placed at slot 0
+    unless ``slots`` says otherwise. The claimant got its tokens from a
+    seller's output."""
 
     def __init__(self, tmp_path, monkeypatch):
         self.monkeypatch = monkeypatch
@@ -243,6 +246,7 @@ class World:
         self.user_sk = PaymentSigningKey.generate()
         self.user_addr = Address(self.user_sk.to_verification_key().hash(), network=Network.TESTNET)
         self.chain: dict[str, bytes] = {}
+        self.slots: dict[str, int] = {}
         self.supply: dict[str, int] = dict(PIN.supply)
         self.spent: set[tuple[str, int]] = set()
         self.chain_failure: Exception | None = None
@@ -255,10 +259,13 @@ class World:
         agent = MultiAsset()
         agent[ScriptHash(bytes.fromhex(AGENT_POLICY))] = Asset({AssetName(bytes.fromhex(AGENT_NAME)): 5_000})
         agent[ScriptHash(bytes.fromhex(PASS[:56]))] = Asset({AssetName(bytes.fromhex(PASS[56:])): 1})
+        seller = self._produce([TransactionOutput(
+            Address(VerificationKeyHash(b"\x05" * 28), network=Network.TESTNET), Value(5_000_000, agent))])
         user_body = self._produce([
             TransactionOutput(self.user_addr, Value(100_000_000)),
             TransactionOutput(self.user_addr, Value(5_000_000, agent)),
-        ])
+        ], inputs=[TransactionInput(TransactionId(bytes.fromhex(seller)), 0)])
+        self.user_body = user_body
         self.user_utxos = [
             UTxO(TransactionInput(TransactionId(bytes.fromhex(user_body)), i), out)
             for i, out in enumerate(TransactionBody.from_cbor(self.chain[user_body]).outputs)
@@ -304,9 +311,9 @@ class World:
         self.primary_ledger = RedemptionLedger(str(tmp_path / "primary.sqlite3"), 10**15)
         monkeypatch.setattr(api.state, "ledger", self.primary_ledger)
 
-    def _produce(self, outputs) -> str:
+    def _produce(self, outputs, inputs=None) -> str:
         body = TransactionBody(
-            inputs=[TransactionInput(TransactionId(bytes(32)), len(self.chain))],
+            inputs=inputs or [TransactionInput(TransactionId(bytes(32)), len(self.chain))],
             outputs=outputs, fee=0,
         )
         self.chain[_body_hash(body)] = body.to_cbor()
@@ -344,12 +351,7 @@ class World:
                     raise world.chain_failure
                 if tx_hash not in world.chain:
                     raise not_found()
-                count = len(TransactionBody.from_cbor(world.chain[tx_hash]).outputs)
-                return {"hash": tx_hash, "outputs": [
-                    {"output_index": i, "collateral": False,
-                     "consumed_by_tx": "ee" * 32 if (tx_hash, i) in world.spent else None}
-                    for i in range(count)
-                ]}
+                return utxos_answer(world.chain, tx_hash, dict.fromkeys(world.spent, "ee" * 32))
 
             def get_asset_info(self, unit):
                 if world.chain_failure is not None:
@@ -362,6 +364,8 @@ class World:
                 return world.history.get_asset_history(unit)
 
             def get_tx(self, tx_hash):
+                if tx_hash in world.chain:
+                    return {"hash": tx_hash, "slot": world.slots.get(tx_hash, 0)}
                 return world.history.get_tx(tx_hash)
 
         def post(url, json, headers, timeout):
@@ -728,6 +732,18 @@ def test_a_unit_minted_past_its_pinned_supply_is_refused_before_either_admin_sig
     assert err.value.code == "supply_grown"
     assert world.signed_by_admin == []
     assert world.cosign_calls == 0
+
+
+def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(world):
+    world.slots[world.user_body] = NOW - 3600
+    with pytest.raises(HTTPException) as err:
+        world.build_route(1_000)
+    assert err.value.status_code == 422
+    assert err.value.detail["code"] == "cooling_off"
+    assert world.user_body in err.value.detail["message"]
+    assert world.signed_by_admin == [] and world.cosign_calls == 0
+    world.slots[world.user_body] = NOW - 72 * 3600
+    world.build_route(1_000)  # held as long as the window, and the tip was released
 
 
 def test_the_build_route_answers_a_grown_supply_with_its_code(world):

@@ -5,7 +5,7 @@ refuses the five made from them and approves the 261 others exactly as
 before. The committed list also refuses the three a drained decimalist
 account made in May. Every one of the 19 surrenders the attacker made with
 passes taken from W1 was approved by the policy as it stood, and is refused
-now."""
+now; the 17 legitimate claims made beside them are still approved."""
 
 from __future__ import annotations
 
@@ -18,10 +18,11 @@ from tests.cosign_cases import (
     COMMITTED_DENYLIST,
     FORFEITED_HASHES,
     MAINNET,
+    RECENT_SURRENDER_HASHES,
     SURRENDER_HASHES,
     Scenario,
-    forfeited_scenario,
     golden_scenario,
+    recent_scenario,
 )
 from tools.credential_denylist import DenyList
 
@@ -90,18 +91,24 @@ def test_a_surrender_from_w1_or_w2_is_refused_naming_the_wallet(tx_hash):
     assert "W1" in refused.value.detail or "W2" in refused.value.detail
 
 
-def test_the_fixture_holds_the_19_forfeited_claims():
+def test_the_recent_fixture_holds_the_19_forfeited_claims_and_17_others():
     assert len(FORFEITED_HASHES) == len(set(FORFEITED_HASHES)) == 19
+    assert len(RECENT_SURRENDER_HASHES) == 17
 
 
 @pytest.mark.parametrize("tx_hash", FORFEITED_HASHES)
 def test_a_forfeited_claim_was_approved_before_the_incident(tx_hash):
-    assert _outcome(forfeited_scenario(tx_hash), BEFORE) == "approved"
+    assert _outcome(recent_scenario(tx_hash), BEFORE) == "approved"
+
+
+@pytest.mark.parametrize("tx_hash", RECENT_SURRENDER_HASHES)
+def test_the_legitimate_claims_beside_them_are_still_approved(tx_hash):
+    assert _outcome(recent_scenario(tx_hash), NOW) == "approved"
 
 
 @pytest.mark.parametrize("tx_hash", FORFEITED_HASHES)
 def test_a_forfeited_claim_is_refused_for_the_attackers_claim_address(tx_hash):
-    s = forfeited_scenario(tx_hash)
+    s = recent_scenario(tx_hash)
     with pytest.raises(CosignRejected) as refused:
         evaluate_surrender(s.tx, s.language_views, s.parents, s.now_slot, NOW)
     assert refused.value.code == "denied_credential"

@@ -88,6 +88,24 @@ def test_every_mainnet_surrender_is_approved_at_its_real_payout(tx_hash):
 
 
 @pytest.mark.parametrize("tx_hash", SURRENDERS)
+def test_an_approval_names_the_inputs_holding_what_it_quarantines(tx_hash):
+    """What the chain check follows back for the cooling-off, and when."""
+    scenario = golden_scenario(tx_hash)
+    approval = _evaluate(scenario)
+    body = decode(split_tx(scenario.tx)[0])
+    produced = {blake(parent): decode(parent)[1] for parent in scenario.parents}
+    holders = set()
+    for ref in _elements(body[0]):
+        out = parse_output(produced[ref[0]][ref[1]])
+        held = {(policy + name).hex() for policy, names in out.assets.items() for name, q in names.items() if q}
+        if out.address != MAINNET.pool_address and held & set(approval.units):
+            holders.add(tuple(ref))
+    assert holders
+    assert approval.unit_inputs == tuple(sorted(holders))
+    assert approval.checked_at == scenario.now_slot
+
+
+@pytest.mark.parametrize("tx_hash", SURRENDERS)
 def test_every_mainnet_surrender_carries_its_claimants_signature(tx_hash):
     scenario = golden_scenario(tx_hash)
     require_claimant_signature(scenario.tx, _evaluate(scenario))

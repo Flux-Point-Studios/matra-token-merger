@@ -23,12 +23,15 @@ import pytest
 import services.cosign_policy as policy
 import tools.credential_denylist as denylist
 from tests.cosign_cases import (
+    BASE_FUNGIBLE,
+    BASE_T1,
     CASES,
     DECODE_ACCEPTED,
     DECODE_REFUSED,
     OUTPUTS_ACCEPTED,
     SPLIT_REFUSED,
     WITNESS_CASES,
+    golden_scenario,
 )
 
 SOURCE_PATH = Path(policy.__file__)
@@ -124,6 +127,14 @@ OPERATOR_MUTANTS = {
         "for out in produced:\n        _refuse_denied(out.address, cfg)",
         "for out in produced:\n        pass",
     ),
+    "unit_holders_not_named": (
+        "unit_inputs.update(ref for ref, out in spent.items() if _quantity(out.assets, policy, name))", "pass",
+    ),
+    "every_claimant_input_named_a_unit_holder": (
+        "unit_inputs.update(ref for ref, out in spent.items() if _quantity(out.assets, policy, name))",
+        "unit_inputs.update(spent)",
+    ),
+    "checked_at_the_ttl": ("checked_at=now_slot", "checked_at=ttl"),
 }
 
 # Changes to tools.credential_denylist, run through the policy's corpus.
@@ -184,6 +195,16 @@ def _differences(module: types.ModuleType, lists: types.ModuleType = denylist) -
         got = _outcome(lambda: module.parse_output(raw))
         if got != "accepted":
             diffs.append(f"parse_output {name}: accepted -> {got}")
+    for base in (BASE_T1, BASE_FUNGIBLE):
+        s = golden_scenario(base)
+        args = (s.tx, s.language_views, s.parents, s.now_slot, s.cfg)
+        expected = policy.evaluate_surrender(*args)
+        approvals: list = []
+        got = _outcome(lambda: approvals.append(module.evaluate_surrender(*args)))
+        if got != "accepted":
+            diffs.append(f"approval of {base[:16]}: {got}")
+        elif (approvals[0].unit_inputs, approvals[0].checked_at) != (expected.unit_inputs, expected.checked_at):
+            diffs.append(f"approval of {base[:16]}: names {approvals[0].unit_inputs} at {approvals[0].checked_at}")
     return diffs
 
 
