@@ -11,9 +11,10 @@ import pytest
 from cbor2 import CBORTag
 from nacl.signing import SigningKey
 
-from services.cosign_policy import VOID_INLINE_DATUM, _witness_fields, decode, split_tx
+from services.cosign_policy import VOID_INLINE_DATUM, _witness_fields, decode, signature_verifies, split_tx
 from tools.pool_migration import (
     MigrationRejected,
+    _key_witness,
     assemble,
     build_migration_tx,
     check_migration_tx,
@@ -125,9 +126,9 @@ class Keys:
         return blake2b_224(bytes(self.signing[i].verify_key)).hex()
 
     def witness(self, i: int, txid: bytes) -> bytes:
-        """What cardano-cli's `transaction witness` writes: a key witness."""
+        """What cardano-cli 11's `transaction witness` writes: [vkey, signature]."""
         key = self.signing[i]
-        return cbor2.dumps([0, [bytes(key.verify_key), key.sign(txid).signature]])
+        return cbor2.dumps([bytes(key.verify_key), key.sign(txid).signature])
 
 
 def signing_docs(move="all"):
@@ -725,6 +726,13 @@ class TestSnapshotRefuses:
 
 
 class TestAssemble:
+    def test_reads_what_cardano_cli_11_writes(self):
+        envelope = json.loads((FIXTURES / "cardano-cli-11.0.0.0.witness.json").read_text())
+        txid = bytes.fromhex((FIXTURES / "cardano-cli-11.0.0.0.witness.txid").read_text().strip())
+        vkey, signature = _key_witness(bytes.fromhex(envelope["cborHex"]))
+        assert envelope["type"] == "TxWitness ConwayEra"
+        assert len(vkey) == 32 and signature_verifies(vkey, txid, signature)
+
     def test_signed_transaction_keeps_every_signed_byte(self):
         keys, snap, plan = signing_world()
         unsigned = build_migration_tx(snap, plan)
@@ -777,8 +785,8 @@ class TestAssemble:
             assemble(unsigned, witnesses, snap, plan)
 
     @pytest.mark.parametrize("witness", [
-        cbor2.dumps([1, [b"\x00" * 32, b"\x00" * 64, b"", b""]]),   # bootstrap witness
-        cbor2.dumps([0, [b"\x00" * 31, b"\x00" * 64]]),             # short key
+        cbor2.dumps([b"\x00" * 32, b"\x00" * 64, b"", b""]),   # bootstrap witness
+        cbor2.dumps([b"\x00" * 31, b"\x00" * 64]),             # short key
         b"\xff",
     ])
     def test_a_malformed_witness(self, witness):
@@ -793,7 +801,7 @@ class TestAssemble:
         unsigned = build_migration_tx(snap, plan)
         txid = blake2b_256(split_tx(unsigned)[0])
         key = keys.signing[3]
-        short = cbor2.dumps([0, [bytes(key.verify_key), key.sign(txid).signature[:63]]])
+        short = cbor2.dumps([bytes(key.verify_key), key.sign(txid).signature[:63]])
         with rejected("witnesses"):
             assemble(unsigned, [keys.witness(i, txid) for i in range(3)] + [short], snap, plan)
 
@@ -802,7 +810,7 @@ class TestAssemble:
         unsigned = build_migration_tx(snap, plan)
         txid = blake2b_256(split_tx(unsigned)[0])
         key = keys.signing[3]
-        reframed = cbor2.dumps([1, [bytes(key.verify_key), key.sign(txid).signature]])
+        reframed = cbor2.dumps([0, [bytes(key.verify_key), key.sign(txid).signature]])
         with rejected("witnesses"):
             assemble(unsigned, [keys.witness(i, txid) for i in range(3)] + [reframed], snap, plan)
 

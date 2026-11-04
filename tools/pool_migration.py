@@ -652,16 +652,13 @@ def _signed_witness_set(fields: Mapping[int, bytes], vkeys: CBORTag) -> bytes:
     return out
 
 
-def _key_witness(witness_cbor: bytes) -> list[bytes]:
-    """[vkey, signature] from cardano-cli's `transaction witness` output."""
+def _key_witness(witness_cbor: bytes) -> Any:
+    """The [vkey, signature] pair cardano-cli 11's `transaction witness` writes;
+    _check_witnesses checks its shape."""
     try:
-        witness = decode(witness_cbor)
+        return decode(witness_cbor)
     except CosignRejected as exc:
         raise MigrationRejected("witnesses", f"undecodable witness: {exc}") from exc
-    if not (isinstance(witness, list) and len(witness) == 2 and witness[0] == 0
-            and isinstance(witness[1], list) and len(witness[1]) == 2):
-        raise MigrationRejected("witnesses", "not a key witness")
-    return witness[1]
 
 
 def assemble(unsigned: bytes, witness_cbors: list[bytes], snap: Snapshot, plan: Plan) -> bytes:
@@ -670,9 +667,10 @@ def assemble(unsigned: bytes, witness_cbors: list[bytes], snap: Snapshot, plan: 
     fields = _witness_fields(witness_raw)
     if 0 in fields:
         raise MigrationRejected("witnesses", "the transaction is already signed")
-    vkeys = sorted((_key_witness(w) for w in witness_cbors), key=lambda pair: pair[0])
+    vkeys = [_key_witness(w) for w in witness_cbors]
     _check_witnesses(vkeys, blake2b_256(body_raw), _bind(snap, plan).witness_keys)
-    signed = b"\x84" + body_raw + _signed_witness_set(fields, CBORTag(258, vkeys)) + tail
+    ordered = CBORTag(258, sorted(vkeys, key=lambda pair: pair[0]))
+    signed = b"\x84" + body_raw + _signed_witness_set(fields, ordered) + tail
     check_migration_tx(signed, snap, plan)
     return signed
 
