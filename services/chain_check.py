@@ -28,8 +28,12 @@ Blockfrost project queried from the signer's own host:
     units of one kind cannot be told apart, so what arrived counts in full
     wherever it went afterwards, once per transaction, and a burn does not
     offset it. A walk through more than MAX_PROVENANCE_TXS transactions
-    inside the window refuses the surrender. Change of a surrender this
-    signer recorded is followed back through that surrender's own inputs, as
+    inside the window refuses the surrender, and so does one that would ask
+    the chain view more than MAX_PROVENANCE_LOOKUPS times. The walk asks
+    about each transaction once and reads the listings the input check
+    already read, so no ancestry a claimant builds costs the signer's
+    provider more than that per check. Change of a surrender this signer
+    recorded is followed back through that surrender's own inputs, as
     the signer recorded them, unless the chain places the surrender before
     the window: a surrender checks only the units it quarantines, so its
     change may carry others that arrived inside the window. Stolen units are
@@ -50,7 +54,7 @@ leaves an entry out, cannot be told from a complete one.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping, NamedTuple
 
 import requests
 from pycardano import Address
@@ -61,6 +65,8 @@ from tools.api_clients import BlockfrostUnavailable
 
 COOLING_OFF_SLOTS = 72 * 3600
 MAX_PROVENANCE_TXS = 32
+# No surrender up to the stop took the walk more than 19.
+MAX_PROVENANCE_LOOKUPS = 256
 
 Recorded = Callable[[bytes], tuple[tuple[bytes, int], ...] | None]
 
@@ -143,12 +149,27 @@ def _made_outputs(answer: Any, tx_hash: str) -> list:
         raise ChainUnavailable(f"{tx_hash}: unexpected outputs from the chain view: {exc!r}") from exc
 
 
-def _held_by(answer: Any, index: int, tx_hash: str) -> dict[str, int]:
-    """What output ``index`` holds, by its transaction's listing."""
+class _Listing(NamedTuple):
+    """A transaction as a /txs/{hash}/utxos answer lists it, read once."""
+
+    held: dict[int, dict[str, int]]
+    """What each output it makes holds, by the output's index."""
+    made: list[dict[str, int]]
+    """What its outputs hold, one entry each."""
+    inputs: list[tuple[Any, dict[str, int]]]
+    """Each input it consumes, with what that input holds."""
+
+
+def _listing(answer: Any, tx_hash: str) -> _Listing:
+    held: dict[int, dict[str, int]] = {}
+    made = []
     for out in _made_outputs(answer, tx_hash):
-        if out.get("output_index") == index:
-            return _amounts(out, tx_hash)
-    raise ChainUnavailable(f"{tx_hash}#{index}: the chain view lists no such output")
+        amounts = _amounts(out, tx_hash)
+        made.append(amounts)
+        if type(out.get("output_index")) is int:
+            held.setdefault(out["output_index"], amounts)
+    inputs = [(entry, _amounts(entry, tx_hash)) for entry in _spent_inputs(answer, tx_hash)]
+    return _Listing(held, made, inputs)
 
 
 def _spent_inputs(answer: Any, tx_hash: str) -> list:
@@ -185,18 +206,38 @@ def _payment_key(entry: Any, tx_hash: str) -> bytes | None:
     return None if payment is None else payment.payload
 
 
-def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded) -> None:
+def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded,
+                              listings: Mapping[bytes, Any] | None = None) -> None:
     """Raise :class:`CosignRejected` unless, of each unit ``approval``
     surrenders, its inputs held what it surrenders at the claimant's payment
     key COOLING_OFF_SLOTS or more before it was checked. Units of one kind
     cannot be told apart, so every unit that reached the claimant from
     another key, or was minted, inside the window counts against what the
-    inputs hold, once, wherever it went afterwards."""
+    inputs hold, once, wherever it went afterwards. ``listings``: the
+    /txs/{hash}/utxos answers this check already has, by transaction id;
+    the chain view is asked about any other transaction once, and no more
+    than MAX_PROVENANCE_LOOKUPS times in all."""
     cutoff = approval.checked_at - COOLING_OFF_SLOTS
     owner = approval.claimant[1:29]
     arrived = dict.fromkeys(approval.units, 0)
     latest: dict[str, tuple[int, str]] = {}
     pending, seen, inside, counted = list(approval.unit_inputs), set(), set(), set()
+    listings = listings or {}
+    places: dict[bytes, tuple[tuple[tuple[bytes, int], ...] | None, int | None]] = {}
+    read: dict[bytes, _Listing] = {}
+    asked = 0
+
+    def ask(lookup: Callable[[], Any]) -> Any:
+        nonlocal asked
+        if asked == MAX_PROVENANCE_LOOKUPS:
+            raise CosignRejected(
+                "cooling_off", f"following the surrendered units back {COOLING_OFF_SLOTS} slots takes more"
+                f" than {MAX_PROVENANCE_LOOKUPS} lookups; surrender fewer at a time, or once they have not"
+                f" moved for {COOLING_OFF_SLOTS} slots",
+            )
+        asked += 1
+        return lookup()
+
     while pending:
         ref = pending.pop()
         if ref in seen:
@@ -204,7 +245,9 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded
         seen.add(ref)
         tx_id, index = ref
         tx_hash = tx_id.hex()
-        spends, slot = recorded(tx_id), placed_at(tx_hash, chain)
+        if tx_id not in places:
+            places[tx_id] = recorded(tx_id), ask(lambda: placed_at(tx_hash, chain))
+        spends, slot = places[tx_id]
         if slot is None and spends is None:
             raise ChainUnavailable(f"{tx_hash}: the chain view gives no slot for it")
         if slot is not None and slot <= cutoff:
@@ -221,16 +264,21 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded
                 "cooling_off", f"the surrendered units moved through more than {MAX_PROVENANCE_TXS}"
                 f" transactions in the {COOLING_OFF_SLOTS} slots before the surrender",
             )
-        answer = _ask(chain.get_tx_utxos, tx_hash)
-        held = _held_by(answer, index, tx_hash)
-        inputs = [(entry, _amounts(entry, tx_hash)) for entry in _spent_inputs(answer, tx_hash)]
-        made = [_amounts(out, tx_hash) for out in _made_outputs(answer, tx_hash)]
+        if tx_id not in read:
+            answer = listings.get(tx_id)
+            if answer is None:
+                answer = ask(lambda: _ask(chain.get_tx_utxos, tx_hash))
+            read[tx_id] = _listing(answer, tx_hash)
+        listing = read[tx_id]
+        if index not in listing.held:
+            raise ChainUnavailable(f"{tx_hash}#{index}: the chain view lists no such output")
+        held = listing.held[index]
         for unit in sorted(arrived.keys() & held.keys()):
             if (tx_id, unit) in counted:
                 continue
             counted.add((tx_id, unit))
             own, entered = [], 0
-            for entry, amounts in inputs:
+            for entry, amounts in listing.inputs:
                 if unit in amounts:
                     if _payment_key(entry, tx_hash) == owner:
                         own.append(entry)
@@ -238,7 +286,8 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded
                         entered += amounts[unit]
             # What the outputs hold beyond what the inputs brought was minted;
             # a burn does not offset what arrived.
-            minted = sum(out.get(unit, 0) for out in made) - sum(amounts.get(unit, 0) for _, amounts in inputs)
+            minted = (sum(out.get(unit, 0) for out in listing.made)
+                      - sum(amounts.get(unit, 0) for _, amounts in listing.inputs))
             entered += max(0, minted)
             if entered:
                 arrived[unit] += entered
@@ -288,10 +337,11 @@ def confirm_on_chain(approval: Approval, cfg: CosignConfig, chain: Any, recorded
                 "supply_grown", f"{unit}: {current} on chain, {pinned} at the pin",
             )
 
+    listings: dict[bytes, Any] = {}
     for tx_id in sorted({tx_id for tx_id, _ in approval.inputs}):
         if recorded(tx_id) is not None:
             continue
-        answer = _ask(chain.get_tx_utxos, tx_id.hex())
+        answer = listings[tx_id] = _ask(chain.get_tx_utxos, tx_id.hex())
         if answer is None:
             raise CosignRejected("input_unknown", f"{tx_id.hex()} is neither on chain nor recorded")
         unspent = _unspent_outputs(answer)
@@ -310,4 +360,4 @@ def confirm_on_chain(approval: Approval, cfg: CosignConfig, chain: Any, recorded
                 f"{unit}: {action} in {tx_hash} at slot {slot}, after the pin at slot {cfg.supply_slot}",
             )
 
-    refuse_inside_cooling_off(approval, chain, recorded)
+    refuse_inside_cooling_off(approval, chain, recorded, listings)

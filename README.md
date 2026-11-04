@@ -275,7 +275,10 @@ The threat model is **dual-admin compromise**:
   units sent to a holder hold back only themselves. A unit moved between the
   claimant's own addresses, or returned as change of an earlier surrender (on
   chain or still in the mempool), is followed back to where it came from. The
-  surrender API spends the units the claimant has held longest first.
+  surrender API spends the units the claimant has held longest first. A check
+  asks its provider about any transaction once, and refuses rather than ask
+  more than 256 times, so an ancestry built to be expensive costs a signer no
+  more than that.
 - No merge asset redeems more than the pool was funded for: T2_ADAM_PASS has
   150 editions on chain but was priced for 95. No per-surrender cap may be
   below what one unit pays (one T1_ADAM_PASS); the reopen caps are 4M cMATRA

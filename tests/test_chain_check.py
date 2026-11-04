@@ -19,7 +19,10 @@ through transactions inside that window while they move between the
 claimant's own addresses; whatever of the unit arrived from anyone else, or
 was minted, inside the window counts against what the inputs hold. Change of
 a surrender this signer recorded is followed back through that surrender's
-own inputs, whether or not the chain has seen it.
+own inputs, whether or not the chain has seen it. The walk asks the chain
+view about each transaction once, reads the listings the input check read,
+and refuses past 256 lookups, so no ancestry a claimant builds costs a
+signer's provider more.
 
 Each scenario is a probe; tests/test_chain_check_mutation.py runs every probe
 against mutants of services.chain_check."""
@@ -27,6 +30,7 @@ against mutants of services.chain_check."""
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -872,6 +876,70 @@ def a_walk_through_as_many_self_transfers_as_the_limit(confirm):
     world.confirm(confirm, held)
 
 
+# -- what the walk asks the chain view ---------------------------------------------
+
+LOOKUPS = 256
+
+
+class AnswersOnce(FakeChain):
+    """A chain view that will not be asked about one transaction twice."""
+
+    def _once(self, call: str, tx_hash: str) -> None:
+        asked = self.__dict__.setdefault("asked", set())
+        if (call, tx_hash) in asked:
+            raise requests.ConnectionError(f"asked {call} {tx_hash} again")
+        asked.add((call, tx_hash))
+
+    def get_tx(self, tx_hash):
+        self._once("get_tx", tx_hash)
+        return super().get_tx(tx_hash)
+
+    def get_tx_utxos(self, tx_hash):
+        self._once("get_tx_utxos", tx_hash)
+        return super().get_tx_utxos(tx_hash)
+
+
+@probe("confirmed")
+def a_merge_of_many_outputs_of_one_transaction_made_long_before(confirm):
+    """Each of the 200 outputs merged leads back to the same transaction."""
+    world = Provenance()
+    world.chain.__class__ = AnswersOnce
+    old = world.tx([_holding(CLAIMANT, (AGENT_ID, 1)) for _ in range(200)], inputs=[world.seller((AGENT_ID, 200))])
+    merged = world.tx([_holding(CLAIMANT, (AGENT_ID, 200))], inputs=[(old, n) for n in range(200)], slot=NOW - 600)
+    world.confirm(confirm, (merged, 0), units={AGENT.unit: 200})
+
+
+@probe("cooling_off", detail="0 of the 100 surrendered")
+def a_merge_of_many_outputs_of_one_transaction_inside_the_window(confirm):
+    """The merge's own listing is the one the input check read."""
+    world = Provenance()
+    world.chain.__class__ = AnswersOnce
+    bought = world.tx([_holding(CLAIMANT, (AGENT_ID, 1)) for _ in range(100)],
+                      inputs=[world.seller((AGENT_ID, 100))], slot=NOW - 900)
+    merged = world.tx([_holding(CLAIMANT, (AGENT_ID, 100))], inputs=[(bought, n) for n in range(100)],
+                      slot=NOW - 600)
+    world.confirm(confirm, (merged, 0), units={AGENT.unit: 100})
+
+
+def _merged_from_transactions_made_long_before(count: int) -> Callable:
+    """A merge inside the window of units the claimant got long before in
+    ``count`` transactions: the walk asks where the merge and each of them
+    are, ``count`` + 1 lookups, and reads the merge's listing from the input
+    check."""
+    def run(confirm):
+        world = Provenance()
+        sources = [world.tx([_holding(CLAIMANT, (AGENT_ID, 1), coin=2_000_000 + n)]) for n in range(count)]
+        merged = world.tx([_holding(CLAIMANT, (AGENT_ID, count))], inputs=[(s, 0) for s in sources], slot=NOW - 600)
+        world.confirm(confirm, (merged, 0), units={AGENT.unit: count})
+    return run
+
+
+PROBES.append(Probe("a_walk_of_as_many_lookups_as_its_budget", "confirmed",
+                    _merged_from_transactions_made_long_before(LOOKUPS - 1)))
+PROBES.append(Probe("a_walk_of_one_lookup_more_than_its_budget", "cooling_off",
+                    _merged_from_transactions_made_long_before(LOOKUPS), f"more than {LOOKUPS} lookups"))
+
+
 @probe("unavailable")
 def a_producing_transaction_the_chain_view_cannot_place(confirm):
     world = Provenance()
@@ -975,6 +1043,90 @@ def test_probe(p):
     got, message = outcome(p, confirm_on_chain)
     assert got == p.expected, message
     assert p.detail in message
+
+
+class Counting(FakeChain):
+    """A chain view that counts the transaction lookups made of it."""
+
+    def _count(self, call: str) -> None:
+        calls = self.__dict__.setdefault("calls", {"get_tx": 0, "get_tx_utxos": 0})
+        calls[call] += 1
+
+    def get_tx(self, tx_hash):
+        self._count("get_tx")
+        return super().get_tx(tx_hash)
+
+    def get_tx_utxos(self, tx_hash):
+        self._count("get_tx_utxos")
+        return super().get_tx_utxos(tx_hash)
+
+
+def _counted(build: Callable[[Provenance], tuple[bytes, int]], quantity: int) -> tuple[str, dict[str, int]]:
+    """(the outcome, the lookups made) of a surrender of ``quantity`` AGENT
+    from the output ``build`` makes in a world of its own."""
+    world = Provenance()
+    world.chain.__class__ = Counting
+    spent = build(world)
+    world.chain.calls = {"get_tx": 0, "get_tx_utxos": 0}
+    try:
+        world.confirm(confirm_on_chain, spent, units={AGENT.unit: quantity})
+        return "confirmed", world.chain.calls
+    except CosignRejected as refused:
+        return refused.code, world.chain.calls
+
+
+_DISTINCT = itertools.count()
+
+
+def _merge_of_dust(world: Provenance, sources: int, outputs: int, slot: int = 0) -> list[tuple[bytes, int]]:
+    """``outputs`` one-unit AGENT outputs at the claimant from each of
+    ``sources`` transactions, all of them different, made at ``slot``."""
+    refs = []
+    for _ in range(sources):
+        coin = 2_000_000 + next(_DISTINCT)
+        made = world.tx([_holding(CLAIMANT, (AGENT_ID, 1), coin=coin) for _ in range(outputs)], slot=slot)
+        refs += [(made, i) for i in range(outputs)]
+    return refs
+
+
+def test_a_merge_of_200_outputs_of_one_old_transaction_asks_about_it_once():
+    def build(world):
+        return world.tx([_holding(CLAIMANT, (AGENT_ID, 200))], inputs=_merge_of_dust(world, 1, 200), slot=NOW - 600), 0
+
+    assert _counted(build, 200) == ("confirmed", {"get_tx": 2, "get_tx_utxos": 1})
+
+
+def test_a_merge_of_100_outputs_of_one_transaction_inside_the_window_reads_its_listing_once():
+    def build(world):
+        fresh = _merge_of_dust(world, 1, 100, slot=NOW - 900)
+        return world.tx([_holding(CLAIMANT, (AGENT_ID, 100))], inputs=fresh, slot=NOW - 600), 0
+
+    assert _counted(build, 100) == ("cooling_off", {"get_tx": 2, "get_tx_utxos": 2})
+
+
+def test_32_chained_merges_of_199_outputs_each_ask_about_each_transaction_once():
+    def build(world):
+        spent = None
+        for level in range(32):
+            refs = _merge_of_dust(world, 1, 199) + ([spent] if spent else [])
+            spent = world.tx([_holding(CLAIMANT, (AGENT_ID, 199 * (level + 1)))], inputs=refs,
+                             slot=NOW - 3000 + level), 0
+        return spent
+
+    assert _counted(build, 199 * 32) == ("confirmed", {"get_tx": 64, "get_tx_utxos": 32})
+
+
+def test_no_ancestry_costs_the_walk_more_than_its_budget():
+    """Two merges inside the window of 199 transactions made long before
+    each would take 400 lookups; the walk stops at its budget and refuses."""
+    def build(world):
+        first = world.tx([_holding(CLAIMANT, (AGENT_ID, 199))], inputs=_merge_of_dust(world, 199, 1), slot=NOW - 900)
+        return world.tx([_holding(CLAIMANT, (AGENT_ID, 398))], inputs=[*_merge_of_dust(world, 199, 1), (first, 0)],
+                        slot=NOW - 600), 0
+
+    outcome, calls = _counted(build, 398)
+    assert outcome == "cooling_off"
+    assert calls["get_tx"] + calls["get_tx_utxos"] == LOOKUPS + 1  # the input check's listing, and the budget
 
 
 def test_a_history_inflated_after_the_pin_costs_no_lookup_past_its_first_change():

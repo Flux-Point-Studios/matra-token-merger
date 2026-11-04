@@ -131,6 +131,19 @@ OPERATOR_MUTANTS = {
         "[_input_ref(entry, tx_hash) for entry in own]",
     ),
     "a_bool_input_index_read_as_an_index": ("type(index) is int", "isinstance(index, int)"),
+    "one_lookup_more_than_the_budget_made": (
+        "if asked == MAX_PROVENANCE_LOOKUPS:", "if asked == MAX_PROVENANCE_LOOKUPS + 1:",
+    ),
+    "the_budget_reached_one_lookup_early": (
+        "if asked == MAX_PROVENANCE_LOOKUPS:", "if asked == MAX_PROVENANCE_LOOKUPS - 1:",
+    ),
+    "lookups_not_counted": ("        asked += 1\n", ""),
+    "a_transaction_placed_each_time_it_is_reached": ("        if tx_id not in places:\n", "        if True:\n"),
+    "a_listing_asked_for_each_output_followed": ("        if tx_id not in read:\n", "        if True:\n"),
+    "the_input_checks_listings_asked_for_again": (
+        "refuse_inside_cooling_off(approval, chain, recorded, listings)",
+        "refuse_inside_cooling_off(approval, chain, recorded)",
+    ),
 }
 
 
