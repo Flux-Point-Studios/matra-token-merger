@@ -58,7 +58,7 @@ from services.cosign_policy import (
     split_tx,
 )
 from tools.api_clients import BlockfrostClient
-from tools.cardano_utils import SLOT_OFFSET_S, posix_ms_to_slot
+from tools.cardano_utils import SLOT_OFFSET_S, plutus_v3_script_hash, posix_ms_to_slot
 from tools.config import NETWORK
 
 MAX_FEE_LOVELACE = 1_000_000
@@ -91,11 +91,6 @@ def blake2b_256(data: bytes) -> bytes:
 
 def blake2b_224(data: bytes) -> bytes:
     return hashlib.blake2b(data, digest_size=28).digest()
-
-
-def plutus_v3_script_hash(script: bytes) -> bytes:
-    """The hash of a PlutusV3 script given as its serialised (compiledCode) bytes."""
-    return blake2b_224(b"\x03" + script)
 
 
 # ---------------------------------------------------------------------------

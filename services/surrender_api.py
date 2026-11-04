@@ -99,7 +99,7 @@ from pycardano.plutus import CostModels, RedeemerKey, RedeemerMap, RedeemerTag
 from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenList, default_encoder
 
 from tools.api_clients import BlockfrostClient
-from tools.cardano_utils import estimate_min_ada
+from tools.cardano_utils import estimate_min_ada, plutus_v3_script_hash
 from tools.config import FLUX_DECIMALS, ALL_MERGE_ASSETS
 from tools.credential_denylist import (
     DEFAULT_DENYLIST_PATH,
@@ -602,6 +602,11 @@ async def startup():
     if Path(BLUEPRINT_PATH).exists():
         state.script_cbor_hex = load_script_from_blueprint(BLUEPRINT_PATH)
         logger.info("Loaded script from blueprint (%d bytes)", len(state.script_cbor_hex) // 2)
+        if SCRIPT_ADDRESS and plutus_v3_script_hash(bytes.fromhex(state.script_cbor_hex)) != (
+                Address.from_primitive(SCRIPT_ADDRESS).payment_part.payload):
+            raise RuntimeError(
+                f"the script in {BLUEPRINT_PATH} does not hash to SURRENDER_SCRIPT_ADDRESS's payment credential"
+            )
     else:
         logger.warning("Blueprint not found: %s — build-surrender will fail", BLUEPRINT_PATH)
 

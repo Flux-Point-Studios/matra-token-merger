@@ -46,7 +46,7 @@ class Hosts:
     """Each signer configured the way its host is, with throwaway keys and
     fresh ledgers."""
 
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self, tmp_path: Path, blueprint: Path) -> None:
         admin_1, admin_2 = PaymentSigningKey.generate(), PaymentSigningKey.generate()
         admin_1.save(str(tmp_path / "admin_1.skey"))
         admin_2.save(str(tmp_path / "admin_2.skey"))
@@ -66,6 +66,7 @@ class Hosts:
             SURRENDER_API: {
                 **common,
                 "ADMIN_SKEY_PATH": str(tmp_path / "admin_1.skey"),
+                "BLUEPRINT_PATH": str(blueprint),
                 "COSIGNER_URL": "http://cosigner.test",
                 "COSIGNER_PKH": admin_2.to_verification_key().hash().payload.hex(),
                 "SURRENDER_LEDGER_PATH": str(tmp_path / "surrender.sqlite3"),
@@ -87,8 +88,8 @@ class Hosts:
 
 
 @pytest.fixture
-def hosts(tmp_path):
-    return Hosts(tmp_path)
+def hosts(tmp_path, live_pool_blueprint):
+    return Hosts(tmp_path, live_pool_blueprint)
 
 
 def test_both_signers_load_the_same_remaining_for_every_unit(hosts):
