@@ -117,14 +117,15 @@ This makes the dual-signer design real: Server A can reach signer-b only through
    - That binary is the one the old key hosts run.
 2. Make the key as its service user with block K2, after C0 (section 4) has set `CLI`.
    - On Server A, first set `U=cmatra-a1 K=admin_1`; on signer-b, `U=cmatra-a2 K=admin_2`.
-   - K2 refuses to run if the key file already exists, because `cardano-cli latest address key-gen` silently overwrites one.
+   - K2 refuses to run if the key file already exists, because `cardano-cli latest address key-gen` silently overwrites a key its user can write.
+   - The refusal exits by itself: a shell that tests a subshell's status, such as `if ( … )` or `( … ) || …`, turns `set -e` off inside it.
    - The PKH it prints is the only output, and with the vkey the only thing that leaves the host.
 
    ```bash
    # K2: the new key, as its service user (set U and K first)
    ( set -euo pipefail
      cd /
-     sudo -u "$U" test ! -e "/var/lib/$U/keys/$K.skey"
+     sudo -u "$U" test ! -e "/var/lib/$U/keys/$K.skey" || { echo "K2: $K.skey exists; a key is made once" >&2; exit 1; }
      sudo -u "$U" "$CLI" latest address key-gen --signing-key-file "/var/lib/$U/keys/$K.skey" --verification-key-file "/var/lib/$U/keys/$K.vkey"
      sudo chmod 0400 "/var/lib/$U/keys/$K.skey"
      echo "K2: $K PKH $(sudo -u "$U" "$CLI" latest address key-hash --payment-verification-key-file "/var/lib/$U/keys/$K.vkey")" )
