@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -49,10 +50,12 @@ from services.redemption_ledger import RedemptionLedger, create_ledger
 from services.pager import Pager
 from tests.cosign_cases import (
     COMMITTED_DENYLIST,
+    DELETED_WEBHOOK,
     PIN,
     TEST_WEBHOOK,
     FakeChain,
     _elements,
+    discord_answering,
     key_address,
     ledger_refusing_writes,
     not_found,
@@ -804,6 +807,81 @@ def test_an_unwritable_outbox_stops_the_surrender_before_admin_1_signs(world):
     assert err.value.status_code == 503
     assert err.value.detail["code"] == "pager_unavailable"
     assert world.signed_by_admin == [] and world.submitted == []
+
+
+PAUSED = {"code": "pager_backlog", "message": "Surrenders are temporarily paused. Please retry shortly."}
+
+
+def _page_owed_past_the_grace(world, pager: Pager) -> None:
+    """The page of an earlier surrender, owed since a second past the grace."""
+    world.monkeypatch.setattr(api.time, "time", lambda: NOW + SLOT_OFFSET_S[NETWORK] - 601)
+    pager.page("signing surrender EARLIER")
+    world.monkeypatch.setattr(api.time, "time", lambda: NOW + SLOT_OFFSET_S[NETWORK])
+
+
+def test_a_page_undelivered_past_the_grace_pauses_the_primary_until_discord_saves_it(world):
+    """admin 1's page of an earlier surrender has waited past the grace
+    behind a deleted webhook: a surrender already built is not signed, no
+    new one is built, and the claimant is told to retry."""
+    built = world.build_route(1_000)
+    discord_answering(world.monkeypatch, DELETED_WEBHOOK)
+    _page_owed_past_the_grace(world, api.state.pager)
+    with pytest.raises(HTTPException) as unsigned:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    with pytest.raises(HTTPException) as unbuilt:
+        world.build_route(1_000)
+    for refused in (unsigned, unbuilt):
+        assert refused.value.status_code == 503
+        assert refused.value.detail == PAUSED
+    assert world.signed_by_admin == [] and world.cosign_calls == 0 and world.submitted == []
+    assert world.primary_rows() == 0
+    discord_answering(world.monkeypatch, (200, {"id": "1"}, None))
+    assert api.state.pager.deliver() is None
+    resumed = world.build_route(1_000)  # the pool tip was released
+    world.submit_route(resumed.tx_hash, world.wallet_witnesses(resumed.tx_hash))
+    (tx,) = world.submitted
+    _assert_signed_by(tx, resumed.tx_hash, world.user_sk, world.admin_sk, world.cosigner_sk)
+
+
+def test_the_cosigners_pause_reaches_the_claimant_as_its_code(world):
+    built = world.build_route(1_000)
+    discord_answering(world.monkeypatch, DELETED_WEBHOOK)
+    _page_owed_past_the_grace(world, cosigner.state.pager)
+    with pytest.raises(HTTPException) as refused:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert refused.value.status_code == 503
+    assert refused.value.detail == PAUSED
+    assert world.cosign_calls == 1 and world.cosigned_rows() == 0
+    assert world.signed_by_admin == [] and world.primary_rows() == 0 and world.submitted == []
+    world.build_route(1_000)  # the pool tip was released
+
+
+def test_an_unreadable_outbox_stops_the_build_and_the_signature(world):
+    built = world.build_route(1_000)
+    with sqlite3.connect(world.outbox) as conn:
+        conn.execute("DROP TABLE pages")
+    with pytest.raises(HTTPException) as unsigned:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    with pytest.raises(HTTPException) as unbuilt:
+        world.build_route(1_000)
+    for refused in (unsigned, unbuilt):
+        assert refused.value.status_code == 503
+        assert refused.value.detail["code"] == "pager_unavailable"
+    assert world.signed_by_admin == [] and world.cosign_calls == 0 and world.submitted == []
+
+
+def test_health_answers_503_while_paging_fails(validating, monkeypatch):
+    healthy = api.health()
+    assert healthy.status_code == 200
+    assert json.loads(healthy.body)["status"] == "ok"
+    discord_answering(monkeypatch, DELETED_WEBHOOK)
+    api.state.pager.page("signing surrender abc")
+    api.state.pager.deliver()
+    refused = api.health()
+    assert refused.status_code == 503
+    assert {key: json.loads(refused.body)[key] for key in ("status", "pages_owed", "webhook_refused")} == {
+        "status": "paging_failed", "pages_owed": 1, "webhook_refused": 404,
+    }
 
 
 def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(world):

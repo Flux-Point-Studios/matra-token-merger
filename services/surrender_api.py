@@ -12,7 +12,11 @@ check) is refused with 403 at every route that takes one, before any chain
 query, key use or pool-tip lock; the service does not start without the list.
 Every surrender admin 1 is about to sign, and every refusal under a deny rule,
 pages the on-call channel through services.pager (PAGER_DISCORD_WEBHOOK_URL,
-PAGER_OUTBOX_PATH); the service does not start without its pager either.
+PAGER_OUTBOX_PATH, optionally PAGER_GRACE_S); the service does not start
+without its pager either. While one of its pages has gone undelivered past
+the grace it builds and signs nothing, and a co-signer paused for its own
+pages is answered the same way: 503 pager_backlog. /health answers 503 while
+paging fails.
 
 Signing flow:
   1. Frontend sends user's address + assets to surrender
@@ -55,6 +59,7 @@ import httpx
 from cbor2 import CBORTag
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # Ensure project root is on path
@@ -127,7 +132,7 @@ from services.cosign_policy import evaluate_surrender as check_surrender
 from services.chain_check import MAX_PROVENANCE_LOOKUPS, ChainUnavailable, confirm_on_chain, placed_at
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
-from services.pager import Pager
+from services.pager import Pager, PagesUndelivered
 from services.pool_tip import (
     PoolSettlingError,
     PoolTipError,
@@ -250,6 +255,10 @@ BUILT_BODIES_KEPT = 256
 
 # The 503 detail when a chain view cannot confirm a surrender.
 _CHAIN_UNAVAILABLE = {"code": "chain_unavailable", "message": "Please retry shortly."}
+# The 503 details while a signer's pages cannot be shown delivered.
+_PAGER_BACKLOG = {"code": PagesUndelivered.code,
+                  "message": "Surrenders are temporarily paused. Please retry shortly."}
+_PAGER_UNAVAILABLE = {"code": "pager_unavailable", "message": "Surrenders are paused."}
 
 # Shared secret — the Next.js proxy must send this in X-API-Secret header.
 # Reject all requests without it.  Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -554,7 +563,6 @@ async def verify_api_secret(request: Request, call_next):
 
     if not API_SECRET:
         logger.error("SURRENDER_API_SECRET not set — refusing all mutating requests")
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=503,
             content={"detail": "Service not configured"},
@@ -562,7 +570,6 @@ async def verify_api_secret(request: Request, call_next):
 
     provided = request.headers.get("x-api-secret", "").encode()
     if not hmac.compare_digest(provided, API_SECRET.encode()):
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=403,
             content={"detail": "Forbidden"},
@@ -776,6 +783,19 @@ def _refuse_denied_address(address: Address) -> None:
                                   "message": "This address cannot use the merger."})
 
 
+def _refuse_while_pages_undelivered() -> None:
+    """503 while a page has gone undelivered past the pager's grace, or its
+    outbox cannot be read."""
+    try:
+        state.pager.require_delivered()
+    except PagesUndelivered as exc:
+        logger.error("Refused to build or sign a surrender: %s", exc)
+        raise HTTPException(503, _PAGER_BACKLOG)
+    except sqlite3.Error as exc:
+        logger.error("Refused to build or sign a surrender: pager outbox unreadable: %s", exc)
+        raise HTTPException(503, _PAGER_UNAVAILABLE)
+
+
 def _build_asset_lookup() -> dict[str, Any]:
     """Build name→asset info lookup from config."""
     return {a.name: a for a in ALL_MERGE_ASSETS}
@@ -926,6 +946,7 @@ async def build_surrender(req: BuildSurrenderRequest):
     # consume the single-flight lock.
     if ALLOWED_USER_ADDRESSES and req.user_address not in ALLOWED_USER_ADDRESSES:
         raise HTTPException(403, "Surrender window not yet open")
+    _refuse_while_pages_undelivered()
 
     # Validate state
     if not state.rate_table:
@@ -1057,7 +1078,8 @@ def _get_cosigner_witness(
     Returns its [key, signature] witness, refused with 503 unless the key
     hashes to COSIGNER_PKH and the signature is that key's signature of the
     transaction body: any other answer could not land, or could stand in for
-    admin 1's own witness.
+    admin 1's own witness. A co-signer paused for its own undelivered pages
+    is answered as this service's own pause.
     """
     try:
         resp = httpx.post(
@@ -1076,7 +1098,11 @@ def _get_cosigner_witness(
         vkey, signature = bytes.fromhex(data["vkey_hex"]), bytes.fromhex(data["signature_hex"])
     except httpx.HTTPStatusError as e:
         logger.error("Co-signer returned %d: %s", e.response.status_code, e.response.text[:200])
-        raise HTTPException(503, "Co-signer service error")
+        try:
+            code = e.response.json()["detail"]["code"]
+        except (ValueError, KeyError, TypeError):
+            code = None
+        raise HTTPException(503, _PAGER_BACKLOG if code == PagesUndelivered.code else "Co-signer service error")
     except Exception as e:
         logger.error("Co-signer call failed: %s", e)
         raise HTTPException(503, "Co-signer service unavailable")
@@ -1187,7 +1213,7 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
         state.pager.surrender(approval)
     except sqlite3.Error as exc:
         logger.error("Refused to sign %s: pager outbox unavailable: %s", tx_hash_hex[:16], exc)
-        raise HTTPException(503, {"code": "pager_unavailable", "message": "Surrenders are paused."})
+        raise HTTPException(503, _PAGER_UNAVAILABLE)
     return witness
 
 
@@ -1197,7 +1223,9 @@ def _signed_by_admins(tx_hash_hex: str, tx: bytes) -> bytes:
     admin 1 signs only once this service has checked the claimant's
     signature and the co-signer's, and recorded the surrender in its own
     ledger. Admin 1's pair goes first: the merge keeps the first of repeated
-    keys, so no pair the co-signer step returns displaces it."""
+    keys, so no pair the co-signer step returns displaces it. Neither admin
+    is asked while a page has gone undelivered past the grace."""
+    _refuse_while_pages_undelivered()
     cosigner = [_cosign(tx_hash_hex, tx)] if COSIGNER_URL else []
     body_hash = hashlib.blake2b(split_tx(tx)[0], digest_size=32).digest()
     own = [VerificationKey.from_signing_key(state.admin_sk).payload, state.admin_sk.sign(body_hash)]
@@ -2419,15 +2447,19 @@ def pool_status():
 
 
 @app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "rate_table_loaded": state.rate_table is not None,
-        "script_loaded": state.script_cbor_hex is not None,
-        "admin_key_loaded": state.admin_sk is not None,
-        "configured": bool(SCRIPT_ADDRESS and CMATRA_POLICY_HEX and QUARANTINE_ADDRESS),
-        "pages_owed": state.pager.owed() if state.pager else None,
-    }
+def health() -> JSONResponse:
+    """503 while paging fails: signing is paused, or Discord refuses the webhook."""
+    paging = state.pager.health()
+    return JSONResponse(
+        {
+            **paging,
+            "rate_table_loaded": state.rate_table is not None,
+            "script_loaded": state.script_cbor_hex is not None,
+            "admin_key_loaded": state.admin_sk is not None,
+            "configured": bool(SCRIPT_ADDRESS and CMATRA_POLICY_HEX and QUARANTINE_ADDRESS),
+        },
+        status_code=200 if paging["status"] == "ok" else 503,
+    )
 
 
 # ---------------------------------------------------------------------------

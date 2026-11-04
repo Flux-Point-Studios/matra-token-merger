@@ -292,6 +292,15 @@ The threat model is **dual-admin compromise**:
   pages ten refusals an hour, counting the rest into one page when the hour
   ends: no flood of refusals buries the channel, fills the outbox or delays
   a surrender's page.
+- Paging fails closed. Once a page has gone undelivered for longer than
+  PAGER_GRACE_S seconds after it fell due (600 unless set, from 60 to 3600),
+  neither signer builds or signs: the claimant is answered 503
+  `pager_backlog` (surrenders temporarily paused), and both resume on their
+  own once Discord has saved the page. A Discord that is slow or failing
+  inside the grace never pauses signing. A deleted webhook, or one whose
+  token or channel Discord refuses (404, 401, 403), is logged as critical
+  and named in `/health` at once. `/health` answers 503 while paging fails,
+  so any check of it notices paging that has stopped working.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it
   cannot mint or drain. The front-end never holds either admin key.
 - A compromised user wallet loses what it holds, and its merger entitlement

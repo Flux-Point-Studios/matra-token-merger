@@ -8,9 +8,11 @@ services.cosign_policy has approved it as a surrender that its claimant has
 signed, services.chain_check has confirmed it against this host's own view
 of the chain, services.redemption_ledger has recorded it within the 24-hour
 cap and each surrendered unit's pinned limit, and services.pager owes the
-on-call channel a page of it; a refusal under a deny rule pages too. The
-check does not depend on anything the surrender API asserts: input values
-come from producing bodies hashed against the inputs' transaction ids.
+on-call channel a page of it; a refusal under a deny rule pages too. While a
+page has gone undelivered past the pager's grace it signs nothing, answering
+503 pager_backlog, and /health answers 503 while paging fails. The check
+does not depend on anything the surrender API asserts: input values come
+from producing bodies hashed against the inputs' transaction ids.
 
 POST /cosign takes the full transaction carrying the claimant's witness, the
 bodies of the transactions that produced its inputs (each is checked against
@@ -27,6 +29,8 @@ Environment (all required unless noted):
   MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
   PAGER_DISCORD_WEBHOOK_URL   the on-call channel's Discord webhook
   PAGER_OUTBOX_PATH           SQLite file of the pages owed to it
+  PAGER_GRACE_S               optional: seconds a page may go undelivered
+                              before signing pauses (60-3600, default 600)
   BLOCKFROST_PROJECT_ID       this host's Blockfrost project on NETWORK
   plus the policy variables read by services.cosign_policy.load_config
   (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
@@ -61,7 +65,7 @@ from services.cosign_policy import (
     require_claimant_signature,
     slot_at,
 )
-from services.pager import Pager
+from services.pager import Pager, PagesUndelivered
 from services.redemption_ledger import RedemptionLedger
 from tools.api_clients import BlockfrostClient
 from tools.credential_denylist import log_denylist
@@ -172,7 +176,16 @@ async def verify_secret(request: Request, call_next):
 def cosign(req: CosignRequest) -> CosignResponse:
     """Verify the full transaction and its claimant's signature, confirm it
     against the chain, record it within the cap and the pinned unit limits,
-    then sign its body hash."""
+    then sign its body hash. Nothing is checked or recorded while a page
+    has gone undelivered past the grace."""
+    try:
+        state.pager.require_delivered()
+    except PagesUndelivered as exc:
+        logger.error("Refused to co-sign: %s", exc)
+        raise HTTPException(503, {"code": exc.code, "detail": str(exc)})
+    except sqlite3.Error as exc:
+        logger.error("Refused to co-sign: pager outbox unreadable: %s", exc)
+        raise HTTPException(503, {"code": "pager_unavailable", "detail": "the pager outbox cannot be read"})
     now = time.time()
     tx = bytes.fromhex(req.tx_cbor_hex)
     try:
@@ -223,10 +236,14 @@ def cosign(req: CosignRequest) -> CosignResponse:
 
 
 @app.get("/health")
-def health() -> dict:
-    return {
-        "status": "ok",
-        "key_loaded": state.sk is not None,
-        "pkh": state.pkh_hex[:16] + "..." if state.pkh_hex else None,
-        "pages_owed": state.pager.owed() if state.pager else None,
-    }
+def health() -> JSONResponse:
+    """503 while paging fails: signing is paused, or Discord refuses the webhook."""
+    paging = state.pager.health()
+    return JSONResponse(
+        {
+            **paging,
+            "key_loaded": state.sk is not None,
+            "pkh": state.pkh_hex[:16] + "..." if state.pkh_hex else None,
+        },
+        status_code=200 if paging["status"] == "ok" else 503,
+    )

@@ -2,6 +2,8 @@
 and delivers it to the Discord webhook only once Discord saves it,
 surrenders' pages first. Refusals page within a budget: once an hour for a
 rule and subject, ten an hour for a rule, the rest counted into one page.
+Signing pauses while a page has gone undelivered past the grace, and resumes
+once Discord saves it.
 
 Discord is replaced by a recorder; tests/conftest.py replaces it for every
 other test too, so no test reaches the network."""
@@ -18,6 +20,7 @@ import requests
 
 import services.pager as pager
 from services.pager import Pager
+from tests.cosign_cases import DELETED_WEBHOOK
 
 WEBHOOK = "https://discord.com/api/webhooks/123456789012345678/test-token_abc"
 
@@ -291,6 +294,196 @@ def test_the_sender_wakes_for_a_page_owed_while_it_waits(tmp_path, monkeypatch):
     p._wake.clear()
     p.page("signing surrender abc")
     assert p._wake.is_set()
+
+
+# Signing fails closed. Each takes (tmp_path, monkeypatch) only, so
+# tests/test_pager_mutation.py can run it against mutants of the pager.
+FAIL_CLOSED = []
+
+
+def fail_closed(test):
+    FAIL_CLOSED.append(test)
+    return test
+
+
+HEALTHY = {"status": "ok", "pages_owed": 0, "oldest_page_owed_s": None, "signing_paused": False,
+           "webhook_refused": None}
+
+
+def _signing_paused(p: Pager) -> bool:
+    try:
+        p.require_delivered()
+    except pager.PagesUndelivered as paused:
+        assert paused.code == "pager_backlog"
+        return True
+    return False
+
+
+def _from_env(where, grace: str | None) -> Pager:
+    env = {"PAGER_DISCORD_WEBHOOK_URL": WEBHOOK, "PAGER_OUTBOX_PATH": str(where / "outbox.sqlite3")}
+    if grace is not None:
+        env["PAGER_GRACE_S"] = grace
+    return Pager.from_env(env, "co-signer")
+
+
+@fail_closed
+def test_a_page_undelivered_past_the_grace_pauses_signing_until_discord_saves_it(tmp_path, monkeypatch):
+    """The webhook was deleted: Discord answers 404 until it is replaced.
+    The grace runs from the first page owed, not the latest."""
+    _recording(monkeypatch, *[DELETED_WEBHOOK] * 3)
+    clock = _clock(monkeypatch)
+    p = _pager(tmp_path)
+    p.page("signing surrender abc")
+    p.deliver()
+    clock[0] += 300
+    p.page("signing surrender def")
+    p.deliver()
+    clock[0] += 300
+    assert not _signing_paused(p)
+    clock[0] += 1
+    assert _signing_paused(p)
+    p.deliver()
+    assert _signing_paused(p)
+    assert p.deliver() is None
+    assert not _signing_paused(p)
+
+
+@fail_closed
+def test_a_slow_discord_never_pauses_signing_inside_the_grace(tmp_path, monkeypatch):
+    """Discord drops a post, fails one, rate-limits one and resets one: it
+    takes the whole grace to save the first page, and every surrender signed
+    meanwhile is paged once it does."""
+    discord = _recording(monkeypatch, requests.Timeout("slow"), (502, None, None),
+                         (429, {"retry_after": 435}, None), requests.ConnectionError("reset"))
+    clock = _clock(monkeypatch)
+    start = clock[0]
+    p = _pager(tmp_path)
+    p.page("signing surrender 0")
+    for n in range(1, 5):
+        clock[0] += p.deliver()
+        assert not _signing_paused(p)
+        p.page(f"signing surrender {n}")
+    assert clock[0] - start == 15 + 30 + 435 + 120
+    assert p.deliver() is None
+    assert _contents(discord)[-5:] == [f"[co-signer] signing surrender {n}" for n in range(5)]
+
+
+@fail_closed
+def test_the_grace_runs_from_when_a_page_falls_due(tmp_path, monkeypatch):
+    """The count of the refusals only logged falls due when the hour ends."""
+    _recording(monkeypatch)
+    clock = _clock(monkeypatch)
+    p = _pager(tmp_path)
+    _flood(p, "denied_credential", pager.REFUSAL_PAGES_PER_HOUR + 1)
+    assert p.deliver() == 3600
+    assert p.health() == HEALTHY
+    _recording(monkeypatch, DELETED_WEBHOOK)
+    clock[0] += 3600 + 600
+    p.deliver()
+    assert not _signing_paused(p)
+    clock[0] += 1
+    assert _signing_paused(p)
+
+
+@fail_closed
+def test_health_names_a_refused_webhook_at_once_and_the_pause_past_the_grace(tmp_path, monkeypatch):
+    _recording(monkeypatch, DELETED_WEBHOOK)
+    clock = _clock(monkeypatch)
+    p = _pager(tmp_path)
+    assert p.health() == HEALTHY
+    p.page("signing surrender abc")
+    clock[0] += 5
+    assert p.health() == {**HEALTHY, "pages_owed": 1, "oldest_page_owed_s": 5}
+    p.deliver()
+    assert p.health() == {**HEALTHY, "status": "paging_failed", "pages_owed": 1, "oldest_page_owed_s": 5,
+                          "webhook_refused": 404}
+    clock[0] += 600
+    assert p.health() == {"status": "paging_failed", "pages_owed": 1, "oldest_page_owed_s": 605,
+                          "signing_paused": True, "webhook_refused": 404}
+    assert p.deliver() is None
+    assert p.health() == HEALTHY
+
+
+@fail_closed
+def test_health_names_a_pause_whatever_discord_answered(tmp_path, monkeypatch):
+    _recording(monkeypatch, (503, None, None))
+    clock = _clock(monkeypatch)
+    p = _pager(tmp_path)
+    p.page("signing surrender abc")
+    p.deliver()
+    assert p.health() == {**HEALTHY, "pages_owed": 1, "oldest_page_owed_s": 0}
+    clock[0] += 601
+    assert p.health() == {"status": "paging_failed", "pages_owed": 1, "oldest_page_owed_s": 601,
+                          "signing_paused": True, "webhook_refused": None}
+
+
+@fail_closed
+def test_a_refused_webhook_stays_named_until_discord_saves_a_page(tmp_path, monkeypatch):
+    _recording(monkeypatch, (401, {"code": 50027}, None), (502, None, None), requests.Timeout("slow"),
+               (403, {"code": 50001}, None), (500, None, None))
+    p = _pager(tmp_path)
+    p.page("signing surrender abc")
+    named = []
+    while p.deliver() is not None:
+        named.append(p.health()["webhook_refused"])
+    assert named == [401, 401, 401, 403, 403]
+    assert p.health()["webhook_refused"] is None
+
+
+@fail_closed
+def test_the_grace_is_ten_minutes_unless_set_from_a_minute_to_an_hour(tmp_path, monkeypatch):
+    _recording(monkeypatch, *[DELETED_WEBHOOK] * 10)
+    clock = _clock(monkeypatch)
+    for n, (setting, grace) in enumerate([(None, 600), ("", 600), ("60", 60), ("3600", 3600), (" 0900 ", 900)]):
+        (tmp_path / str(n)).mkdir()
+        p = _from_env(tmp_path / str(n), setting)
+        p.page("signing surrender abc")
+        p.deliver()
+        clock[0] += grace
+        assert not _signing_paused(p), setting
+        clock[0] += 1
+        assert _signing_paused(p), setting
+
+
+@fail_closed
+def test_a_grace_outside_a_minute_to_an_hour_refuses_startup(tmp_path, monkeypatch):
+    for setting in ["59", "3601", "0", "-600", "+600", "600.5", "6e2", "ten", "0x258", "６００"]:
+        with pytest.raises(ValueError, match="PAGER_GRACE_S must be a whole number of seconds from 60 to 3600"):
+            _from_env(tmp_path, setting)
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_a_refused_webhook_is_logged_as_critical(tmp_path, monkeypatch, caplog, status):
+    _recording(monkeypatch, (status, {"code": 0}, None))
+    p = _pager(tmp_path)
+    p.page("x")
+    with caplog.at_level(logging.INFO, logger="pager"):
+        p.deliver()
+    [critical] = [record for record in caplog.records if record.levelno == logging.CRITICAL]
+    assert f"({status})" in critical.getMessage()
+    assert "PAGER_DISCORD_WEBHOOK_URL" in critical.getMessage()
+
+
+@pytest.mark.parametrize("answer", [
+    (500, None, None), (429, {"retry_after": 1}, None), (400, {"code": 50006}, None), (200, {}, None),
+    requests.ConnectionError("down"), requests.Timeout("slow"),
+])
+def test_an_answer_that_may_still_pass_names_no_refused_webhook(tmp_path, monkeypatch, caplog, answer):
+    _recording(monkeypatch, answer)
+    p = _pager(tmp_path)
+    p.page("x")
+    with caplog.at_level(logging.INFO, logger="pager"):
+        p.deliver()
+    assert p.health()["webhook_refused"] is None
+    assert not [record for record in caplog.records if record.levelno == logging.CRITICAL]
+
+
+def test_an_unreadable_outbox_is_not_taken_for_one_delivered(tmp_path):
+    p = _pager(tmp_path)
+    with sqlite3.connect(tmp_path / "outbox.sqlite3") as conn:
+        conn.execute("DROP TABLE pages")
+    with pytest.raises(sqlite3.Error):
+        p.require_delivered()
 
 
 @pytest.mark.parametrize("url", [

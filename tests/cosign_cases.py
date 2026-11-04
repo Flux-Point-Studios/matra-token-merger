@@ -32,6 +32,8 @@ import nacl.signing
 import requests
 from pycardano import Address
 
+import services.pager
+
 from services.cosign_policy import (
     CosignConfig,
     Output,
@@ -106,6 +108,21 @@ MAINNET_BEFORE_SURRENDERS = replace(MAINNET, redemption_limits={
 # The Discord webhook every test pager is configured with; tests/conftest.py
 # keeps any page from reaching it.
 TEST_WEBHOOK = "https://discord.com/api/webhooks/1/cmatra-test"
+
+
+# Discord's answer to a post through a webhook that was deleted.
+DELETED_WEBHOOK = (404, {"message": "Unknown Webhook", "code": 10015}, None)
+
+
+def discord_answering(monkeypatch, answer) -> None:
+    """Discord answers every post with ``answer`` (status, JSON body,
+    Retry-After header), or raises it."""
+    def post(url, payload, headers):
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(services.pager, "_post", post)
 
 
 def owed_pages(outbox: str | Path) -> list[str]:

@@ -126,6 +126,14 @@ def test_neither_signer_starts_without_its_pager(hosts, service):
     assert "PAGER_DISCORD_WEBHOOK_URL must be set" in result.stderr
 
 
+@pytest.mark.parametrize("grace", ["59", "3601", "ten"])
+@pytest.mark.parametrize("service", [COSIGNER, SURRENDER_API], ids=["cosigner", "surrender_api"])
+def test_neither_signer_starts_with_a_pager_grace_outside_a_minute_to_an_hour(hosts, service, grace):
+    result = hosts.start(service, PAGER_GRACE_S=grace)
+    assert result.returncode != 0
+    assert "PAGER_GRACE_S must be a whole number of seconds from 60 to 3600" in result.stderr
+
+
 @pytest.mark.parametrize("service", [COSIGNER, SURRENDER_API], ids=["cosigner", "surrender_api"])
 def test_each_signer_logs_the_denylist_it_loaded(hosts, service):
     result = hosts.start(service)

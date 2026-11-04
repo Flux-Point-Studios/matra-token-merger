@@ -7,9 +7,18 @@ goes on, and a sender thread delivers the owed pages to the Discord webhook in
 PAGER_DISCORD_WEBHOOK_URL, surrenders' first and each kind oldest first,
 posting with ?wait=true: a page counts as delivered only once Discord answers
 with the id of the message it saved. Anything else leaves it owed, retried
-with backoff (or after Discord's Retry-After), across restarts; /health
-reports how many are owed. The webhook must be a discord.com webhook URL, so
-no other host is ever contacted, and it is never logged.
+with backoff (or after Discord's Retry-After), across restarts. The webhook
+must be a discord.com webhook URL, so no other host is ever contacted, and it
+is never logged.
+
+Signing fails closed. Once a page has gone undelivered for longer than
+PAGER_GRACE_S seconds after it fell due (600 unless set, from 60 to 3600),
+require_delivered() raises PagesUndelivered and neither signer signs, until
+Discord has saved it; nothing has to be restarted. A slow or failing Discord
+inside the grace never pauses signing. A 401, 403 or 404 says Discord refuses
+the webhook itself (deleted, its token wrong, its channel closed to it): the
+page stays owed and retried, the answer is logged as critical, and health()
+names it until Discord saves a page again.
 
 A refusal costs its caller nothing, so refusals page within a budget. A
 subject refused again under the same rule within the hour is only logged, and
@@ -43,12 +52,16 @@ REPEAT_S = 3600
 REFUSAL_PAGES_PER_HOUR = 10
 REMEMBERED_SUBJECTS = 10_000
 FIRST_RETRY_S, LAST_RETRY_S, MAX_RETRY_AFTER_S = 15, 300, 900
+GRACE_S, MIN_GRACE_S, MAX_GRACE_S = 600, 60, 3600
 # Refusals under a deny rule, which page; any other refusal is only logged.
 PAGED_REFUSALS = frozenset({"denied_credential", "pointer_address", "cooling_off"})
 # Delivery order: every owed surrender page goes before any refusal's.
 SURRENDER, REFUSAL = 0, 1
+# Discord's answers to a webhook it will not post through, whatever the page.
+WEBHOOK_REFUSED = frozenset({401, 403, 404})
 
 _WEBHOOK_PATH = re.compile(r"/api/webhooks/[0-9]+/[A-Za-z0-9._-]+")
+_GRACE = re.compile(r"[0-9]{1,4}")
 _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS pages (id INTEGER PRIMARY KEY AUTOINCREMENT,"
     " created_at REAL NOT NULL, text TEXT NOT NULL, message_id TEXT,"
@@ -93,6 +106,16 @@ def _utc(at: float) -> str:
     return time.strftime("%Y-%m-%d %H:%MZ", time.gmtime(at))
 
 
+class PagesUndelivered(Exception):
+    """A page has gone undelivered for longer than the grace: neither signer
+    signs until Discord has saved it."""
+
+    code = "pager_backlog"
+
+    def __init__(self, waited: float, grace_s: int) -> None:
+        super().__init__(f"a page has waited {waited:.0f} s for Discord, past the {grace_s} s grace")
+
+
 @dataclass
 class _Hour:
     """One rule's refusals in the hour from ``start``."""
@@ -105,13 +128,17 @@ class _Hour:
 
 
 class Pager:
-    def __init__(self, webhook_url: str, outbox_path: str, source: str) -> None:
+    def __init__(self, webhook_url: str, outbox_path: str, source: str, grace_s: int = GRACE_S) -> None:
         """Page as ``source`` to ``webhook_url``, through the outbox at
-        ``outbox_path`` (created owner-only if missing). Raises ValueError for
-        a webhook URL that is not Discord's."""
+        ``outbox_path`` (created owner-only if missing), pausing signing once
+        a page has waited ``grace_s`` seconds. Raises ValueError for a webhook
+        URL that is not Discord's."""
         self._url = _webhook(webhook_url) + "?wait=true"
         self._outbox = outbox_path
         self._source = source
+        self._grace_s = grace_s
+        self._webhook_refused: int | None = None
+        """Discord's answer while it refuses the webhook itself."""
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stopping = threading.Event()
@@ -131,7 +158,12 @@ class Pager:
         outbox = env.get("PAGER_OUTBOX_PATH", "").strip()
         if not outbox:
             raise ValueError("PAGER_OUTBOX_PATH must be set")
-        return cls(url, outbox, source)
+        grace = env.get("PAGER_GRACE_S", "").strip() or str(GRACE_S)
+        if not _GRACE.fullmatch(grace) or not MIN_GRACE_S <= int(grace) <= MAX_GRACE_S:
+            raise ValueError(
+                f"PAGER_GRACE_S must be a whole number of seconds from {MIN_GRACE_S} to {MAX_GRACE_S}"
+            )
+        return cls(url, outbox, source, int(grace))
 
     def _owe(self, text: str, priority: int, due_at: float) -> int:
         """Write a page of ``text`` to the outbox, to send from ``due_at``,
@@ -206,6 +238,39 @@ class Pager:
                 "SELECT COUNT(*) FROM pages WHERE message_id IS NULL AND due_at <= ?", (time.time(),),
             ).fetchone()[0]
 
+    def _waited(self) -> tuple[float | None, bool]:
+        """How long the page that fell due first has gone undelivered (None
+        while none is owed), and whether that is longer than the grace."""
+        now = time.time()
+        with closing(sqlite3.connect(self._outbox)) as conn:
+            first_due = conn.execute(
+                "SELECT MIN(due_at) FROM pages WHERE message_id IS NULL AND due_at <= ?", (now,),
+            ).fetchone()[0]
+        if first_due is None:
+            return None, False
+        return now - first_due, now - first_due > self._grace_s
+
+    def require_delivered(self) -> None:
+        """Raise PagesUndelivered while a page has gone undelivered for
+        longer than the grace, whatever Discord answered. An outbox that
+        cannot be read raises sqlite3.Error."""
+        waited, paused = self._waited()
+        if paused:
+            raise PagesUndelivered(waited, self._grace_s)
+
+    def health(self) -> dict[str, Any]:
+        """The paging part of a signer's /health: its status is
+        "paging_failed" while signing is paused or Discord refuses the
+        webhook."""
+        waited, paused = self._waited()
+        return {
+            "status": "paging_failed" if paused or self._webhook_refused is not None else "ok",
+            "pages_owed": self.owed(),
+            "oldest_page_owed_s": None if waited is None else round(waited),
+            "signing_paused": paused,
+            "webhook_refused": self._webhook_refused,
+        }
+
     def deliver(self) -> float | None:
         """Send the pages due, surrenders' first and each kind oldest first,
         until Discord does not save one. Returns the seconds to wait before
@@ -240,8 +305,16 @@ class Pager:
             return None, None
         message_id = body.get("id") if status == 200 and isinstance(body, dict) else None
         if isinstance(message_id, str) and message_id.isdigit():
+            self._webhook_refused = None
             return message_id, None
-        logger.error("Page not delivered: Discord answered %s", status)
+        if status in WEBHOOK_REFUSED:
+            self._webhook_refused = status
+            logger.critical(
+                "Page not delivered: Discord refuses the webhook (%s); no page is delivered until"
+                " PAGER_DISCORD_WEBHOOK_URL names one it accepts", status,
+            )
+        else:
+            logger.error("Page not delivered: Discord answered %s", status)
         return None, _retry_after(header, body)
 
     def start(self) -> None:
