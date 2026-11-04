@@ -311,11 +311,12 @@ Chain reads go through the local Insight proxy, which injects the key.
 
    ```bash
    # W1: new admin_1 witnesses $FILE.unsigned.tx as cmatra-a1 (Server A; FILE=c1a, then c1b)
-   cat "$FILE.unsigned.tx" | sudo -u cmatra-a1 "$CLI" latest transaction witness --tx-body-file /dev/stdin \
-     --signing-key-file /var/lib/cmatra-a1/keys/admin_1.skey --mainnet --out-file /dev/stdout | cat > "$FILE.new1.witness"
+   sudo -u cmatra-a1 sh -c 'cat | "$1" latest transaction witness --tx-body-file /dev/stdin \
+     --signing-key-file /var/lib/cmatra-a1/keys/admin_1.skey --mainnet --out-file /dev/stdout | cat' sh "$CLI" \
+     < "$FILE.unsigned.tx" > "$FILE.new1.witness"
    ```
 
-   W1 uses pipes because cmatra-a1 cannot open files in deci's home, and cardano-cli opens `/dev/stdin` and `/dev/stdout` by path. That reopens a regular file with the key user's permissions; a pipe needs none. The witness is the same as one written to a file.
+   cmatra-a1 cannot open files in deci's home, and cardano-cli opens `/dev/stdin` and `/dev/stdout` by path. That reopens whatever they are with cmatra-a1's permissions. A file in deci's home is refused, and so is a pipe deci's shell or sudo made, since a pipe belongs to its maker with mode 0600. So W1's two `cat`s, running as cmatra-a1, carry the bytes through pipes cmatra-a1 made itself; they read and write the descriptors deci's shell opened, which needs no reopen. The witness is the same as one written to a file, and CI runs W1 as cmatra-a1 from a directory that user cannot enter.
 7. **Assemble.** `"$PY" -m tools.pool_migration assemble --snapshot c1a.snapshot.json --plan c1a.plan.json --tx c1a.unsigned.tx --witness c1a.old1.witness --witness c1a.old2.witness --witness c1a.new1.witness --witness c1a.new2.witness --out c1a.signed.tx`.
    - It refuses a missing, foreign, repeated or bad signature, and it re-checks the result.
    - It keeps the body, redeemer and script bytes verbatim, so the txid stays the same. Confirm with `"$CLI" latest transaction txid --tx-file c1a.signed.tx`.
