@@ -32,6 +32,7 @@ POOL_REF = "d3a1e632424794bed36d7062b4c09c5fe547fa7a1addbd2d45f9b84df773c733#1"
 POOL_CMATRA = 301_731_979_205_950
 POOL_LOVELACE = 1_500_000
 OLD_SCRIPT_HEX = (FIXTURES / "pool_e1a181b2.script.hex").read_text().strip()
+LIVE_SCRIPT = bytes.fromhex(OLD_SCRIPT_HEX)
 PARAMS = json.loads((FIXTURES / "protocol_parameters_epoch665.json").read_text())
 CMATRA_UNIT = "7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66634d41545241"
 OLD_ADMINS = ["f1eee828ae800a5bad6f3913603e20531162cdf44c5e0ffa49b6a936",
@@ -39,11 +40,21 @@ OLD_ADMINS = ["f1eee828ae800a5bad6f3913603e20531162cdf44c5e0ffa49b6a936",
 OLD_DEADLINE_MS = 1_795_910_400_000
 OLD_DEADLINE_SLOT = 204_344_109
 NEW_DEADLINE_MS = 1_798_502_400_000
-# claim_validator applied to two throwaway keys and NEW_DEADLINE_MS
 NEW_ADMINS = ["737003392591a2c07d68c0e86b42fc31fc02f7780ca292e92bf9e122",
               "8364ef054c467b32ac627c73acac7acce616c3f02eb5915332751ac7"]
+OTHER_ADMINS = ["bcfa44669f99b0d61f5c19ed9d9d6476db94e1cd009e49637895607a",
+                "28db8ac484c5ae547fa58358a0cb77a6aebb353468e4110c773d322d"]
+# onchain/claim_validator/apply_params.sh under aiken v1.1.21, which gives
+# e1a181b2 for OLD_ADMINS and OLD_DEADLINE_MS
 NEW_SCRIPT_HASH = "21b85d9b9b2aa12acb4fac95c1b36d76557a8ae4b2e4f7fe26a23bf1"
 NEW_POOL_ADDRESS = "addr1wysmshvmnv42z2ktf7kftsdnd4m92752ujewfal7y63rhug0mc9d7"
+SWAPPED_HASH = "abbb243e710e8f1f83d9e9fb800cdedacd11c05f97140285b0a70829"
+SWAPPED_ADDRESS = "addr1wx4mkfp7wy8g78urm85lhqqvmmdv6ywqt7t3gq59kznss2g4usdjl"
+DAY_LATER_HASH = "f26ee4c7d62bdd8d61013d0ebe20c389b7a946d51a67e9b165697c4e"
+DAY_LATER_ADDRESS = "addr1w8exaex86c4amrtpqy7sa03qcwym022x65dx06d3v45hcnswz9mpg"
+OTHER_ADMINS_HASH = "d521774fef7418624b5833d55d893459f1578ce915a5d77f8c1cfff0"
+OTHER_ADMINS_ADDRESS = "addr1w82jza60aa6pscjttqea2hvfx3vlz4uvay26t4ml3sw0luqwpe93x"
+DAY_MS = 86_400_000
 TIP_SLOT = 202_188_020
 FEE_LOVELACE = 10_000_000
 
@@ -131,21 +142,35 @@ class Keys:
         return cbor2.dumps([bytes(key.verify_key), key.sign(txid).signature])
 
 
-def signing_docs(move="all"):
-    """Old admins 0-1 and new admins 2-3; new admin 2's address pays the fee.
-    The old script stands in for an applied one: the check needs only its
-    hash and the admin key hashes in its bytes."""
-    keys = Keys(4)
-    old_script = cbor2.dumps(b"\x01\x02" + bytes.fromhex(keys.pkh(0)) + bytes.fromhex(keys.pkh(1)))
-    old_hash = blake2b_224(b"\x03" + old_script)
+def applied(admins: list[str], deadline_ms: int) -> bytes:
+    """The live pool script with its three parameter constants swapped for
+    these, written apart from the tool's own derivation so each checks the
+    other; TestDestination pins the tool's to aiken."""
+    script = LIVE_SCRIPT
+    for old, new in zip(OLD_ADMINS, admins, strict=True):
+        script = script.replace(bytes.fromhex("581c" + old), bytes.fromhex("581c" + new))
+    return script.replace(b"\x1b" + OLD_DEADLINE_MS.to_bytes(8, "big"), b"\x1b" + deadline_ms.to_bytes(8, "big"))
+
+
+def pool_docs(old_script: bytes, fee_pkh: str = NEW_ADMINS[0], **overrides) -> tuple[dict, dict]:
+    """A pool of POOL_CMATRA locked by ``old_script``, and a plan to move it."""
     pool_tx = parent_tx([
-        {0: b"\x71" + old_hash,
+        {0: b"\x71" + blake2b_224(b"\x03" + old_script),
          1: [POOL_LOVELACE, {bytes.fromhex(CMATRA_UNIT[:56]): {bytes.fromhex(CMATRA_UNIT[56:]): POOL_CMATRA}}],
          2: [1, CBORTag(24, bytes.fromhex("d87980"))]},
     ], seed=b"\x22")
-    snap_doc = snapshot_doc(pool_tx=pool_tx, pool_ref=ref_of(pool_tx, 0), fee_tx=fee_parent(keys.pkh(2)))
-    plan = plan_doc(snap_doc, old_script_hex=old_script.hex(), old_admins=[keys.pkh(0), keys.pkh(1)],
-                    new_admins=[keys.pkh(2), keys.pkh(3)], move=move)
+    snap_doc = snapshot_doc(pool_tx=pool_tx, pool_ref=ref_of(pool_tx, 0), fee_tx=fee_parent(fee_pkh))
+    return snap_doc, plan_doc(snap_doc, old_script_hex=old_script.hex(), **overrides)
+
+
+def signing_docs(move="all"):
+    """A pool of the claim validator applied to old admins 0-1, moving to it
+    applied to new admins 2-3; new admin 2's address pays the fee."""
+    keys = Keys(4)
+    old, new = [keys.pkh(0), keys.pkh(1)], [keys.pkh(2), keys.pkh(3)]
+    new_hash = blake2b_224(b"\x03" + applied(new, NEW_DEADLINE_MS)).hex()
+    snap_doc, plan = pool_docs(applied(old, OLD_DEADLINE_MS), fee_pkh=keys.pkh(2), old_admins=old, new_admins=new,
+                               new_script_hash=new_hash, move=move)
     return keys, snap_doc, plan
 
 
@@ -206,7 +231,7 @@ class TestBuild:
         snap_doc = snapshot_doc(fee_tx=fee_parent(NEW_ADMINS[0], seed=seed))
         snap, plan = load_snapshot(snap_doc), load_plan(plan_doc(snap_doc))
         tx = build_migration_tx(snap, plan)
-        body, witnesses = decode(tx)[:2]
+        body = decode(tx)[0]
         inputs = [tuple(i) for i in body[0].value]
         assert inputs == sorted(inputs)
         (tag, index), = decode(_witness_fields(split_tx(tx)[1])[5]).keys()
@@ -223,6 +248,94 @@ class TestBuild:
         snap, plan = world()
         signers = decode(build_migration_tx(snap, plan))[0][14].value
         assert sorted(s.hex() for s in signers) == sorted(OLD_ADMINS + NEW_ADMINS)
+
+    def test_the_report_names_what_each_signer_compares(self):
+        snap, plan = world()
+        report = check_migration_tx(build_migration_tx(snap, plan), snap, plan)
+        assert report["old_admins"] == OLD_ADMINS
+        assert report["new_admins"] == NEW_ADMINS
+        assert report["new_deadline_ms"] == NEW_DEADLINE_MS
+        assert report["new_deadline_utc"] == "2026-12-29T00:00:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# The destination: the old script applied to the new admins and deadline
+# ---------------------------------------------------------------------------
+
+
+OTHER_SCRIPT_HASH = blake2b_224(b"\x03" + bytes.fromhex("450101002499")).hex()
+
+
+class TestDestination:
+    @pytest.mark.parametrize("admins, deadline, script_hash, address", [
+        (NEW_ADMINS, NEW_DEADLINE_MS, NEW_SCRIPT_HASH, NEW_POOL_ADDRESS),
+        (NEW_ADMINS[::-1], NEW_DEADLINE_MS, SWAPPED_HASH, SWAPPED_ADDRESS),
+        (NEW_ADMINS, NEW_DEADLINE_MS + DAY_MS, DAY_LATER_HASH, DAY_LATER_ADDRESS),
+        (OTHER_ADMINS, NEW_DEADLINE_MS, OTHER_ADMINS_HASH, OTHER_ADMINS_ADDRESS),
+    ], ids=["new_admins", "swapped", "day_later", "other_admins"])
+    def test_is_what_apply_params_gives_for_the_new_admins_and_deadline(self, admins, deadline, script_hash,
+                                                                         address):
+        snap, plan = world(new_admins=admins, new_deadline_ms=deadline, new_script_hash=script_hash)
+        tx = build_migration_tx(snap, plan)
+        report = check_migration_tx(tx, snap, plan)
+        assert (report["new_script_hash"], report["new_pool_address"]) == (script_hash, address)
+        assert outputs_of(tx)[0][0] == b"\x71" + bytes.fromhex(script_hash)
+
+    @pytest.mark.parametrize("admins, deadline, script_hash", [
+        (NEW_ADMINS, NEW_DEADLINE_MS, OTHER_SCRIPT_HASH),        # another script altogether
+        (NEW_ADMINS, NEW_DEADLINE_MS, OTHER_ADMINS_HASH),        # the validator for other admins
+        (NEW_ADMINS, NEW_DEADLINE_MS, SWAPPED_HASH),             # the new admins in the other order
+        (NEW_ADMINS, NEW_DEADLINE_MS, DAY_LATER_HASH),           # another deadline
+        (OTHER_ADMINS, NEW_DEADLINE_MS, NEW_SCRIPT_HASH),        # signers the destination does not name
+        (NEW_ADMINS, NEW_DEADLINE_MS + DAY_MS, NEW_SCRIPT_HASH),  # a deadline it does not carry
+    ], ids=["other_script", "other_admins", "swapped", "day_later", "signers_not_named", "deadline_not_carried"])
+    def test_refuses_a_script_hash_that_is_not_the_old_script_reapplied(self, admins, deadline, script_hash):
+        snap, plan = world(new_admins=admins, new_deadline_ms=deadline, new_script_hash=script_hash)
+        with rejected("new_script"):
+            build_migration_tx(snap, plan)
+
+    def test_check_refuses_a_transaction_paying_such_a_destination(self):
+        snap, plan = world()
+        tampered = load_plan(plan_doc(snapshot_doc(), new_script_hash=OTHER_ADMINS_HASH))
+
+        def mutate(body, _):
+            body[1][0][0] = b"\x71" + bytes.fromhex(OTHER_ADMINS_HASH)
+        with rejected("new_script"):
+            check_migration_tx(mutated(snap, plan, mutate), snap, tampered)
+
+    @pytest.mark.parametrize("old_deadline", [OLD_DEADLINE_MS - DAY_MS, OLD_DEADLINE_MS + 1])
+    def test_refuses_an_old_deadline_the_old_script_does_not_carry(self, old_deadline):
+        snap, plan = world(old_deadline_ms=old_deadline)
+        with rejected("old_deadline"):
+            build_migration_tx(snap, plan)
+
+    @pytest.mark.parametrize("repeated, code", [
+        (bytes.fromhex("581c" + OLD_ADMINS[0]), "old_admins"),
+        (bytes.fromhex("581c" + OLD_ADMINS[1]), "old_admins"),
+        (b"\x1b" + OLD_DEADLINE_MS.to_bytes(8, "big"), "old_deadline"),
+    ], ids=["admin_1", "admin_2", "deadline"])
+    def test_refuses_an_old_parameter_that_occurs_twice_in_the_old_script(self, repeated, code):
+        snap_doc, plan = pool_docs(LIVE_SCRIPT + repeated)
+        with rejected(code):
+            build_migration_tx(load_snapshot(snap_doc), load_plan(plan))
+
+    @pytest.mark.parametrize("constant, other_header, code", [
+        (bytes.fromhex("581c" + OLD_ADMINS[0]), b"\x58\x1d", "old_admins"),
+        (b"\x1b" + OLD_DEADLINE_MS.to_bytes(8, "big"), b"\x1a", "old_deadline"),
+    ], ids=["admin", "deadline"])
+    def test_an_old_value_under_another_data_header_is_not_a_parameter(self, constant, other_header, code):
+        snap_doc, plan = pool_docs(LIVE_SCRIPT.replace(constant, other_header + constant[len(other_header):]))
+        with rejected(code):
+            build_migration_tx(load_snapshot(snap_doc), load_plan(plan))
+
+    @pytest.mark.parametrize("field, value", [
+        ("new_deadline_ms", 10**13),
+        ("new_deadline_ms", 2**64),
+        ("old_deadline_ms", 10**12 - 1),
+    ])
+    def test_refuses_a_deadline_that_apply_params_would(self, field, value):
+        with rejected(field.removesuffix("_ms")):
+            load_plan(plan_doc(snapshot_doc(), **{field: value}))
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +653,13 @@ class TestCheckRefuses:
         with rejected("cbor"):
             check_migration_tx(patched, snap, plan)
 
+    @pytest.mark.parametrize("tx", [b"\xff", b"\x84\x01", b"\x83\x01\x02\x03"],
+                             ids=["not_cbor", "truncated", "three_elements"])
+    def test_bytes_that_are_not_a_transaction(self, tx):
+        snap, plan = world()
+        with rejected("cbor"):
+            check_migration_tx(tx, snap, plan)
+
     def test_a_new_pool_output_below_its_minimum_ada(self):
         snap, plan = world(move=1_000_000)
 
@@ -699,6 +819,12 @@ class TestSnapshotRefuses:
         with rejected("snapshot"):
             load_snapshot(doc)
 
+    def test_a_producing_transaction_that_does_not_decode(self):
+        doc = snapshot_doc()
+        doc["inputs"]["pool"]["producing_tx"] = "84ff"
+        with rejected("snapshot"):
+            load_snapshot(doc)
+
     def test_a_spent_input(self):
         doc = snapshot_doc()
         doc["inputs"]["pool"]["consumed_by"] = "cd" * 32
@@ -787,7 +913,6 @@ class TestAssemble:
     @pytest.mark.parametrize("witness", [
         cbor2.dumps([b"\x00" * 32, b"\x00" * 64, b"", b""]),   # bootstrap witness
         cbor2.dumps([b"\x00" * 31, b"\x00" * 64]),             # short key
-        b"\xff",
     ])
     def test_a_malformed_witness(self, witness):
         keys, snap, plan = signing_world()
@@ -795,6 +920,13 @@ class TestAssemble:
         txid = blake2b_256(split_tx(unsigned)[0])
         with rejected("witnesses"):
             assemble(unsigned, [keys.witness(i, txid) for i in range(4)] + [witness], snap, plan)
+
+    def test_an_undecodable_witness(self):
+        keys, snap, plan = signing_world()
+        unsigned = build_migration_tx(snap, plan)
+        txid = blake2b_256(split_tx(unsigned)[0])
+        with pytest.raises(MigrationRejected, match=r"^witnesses: undecodable witness"):
+            assemble(unsigned, [keys.witness(i, txid) for i in range(4)] + [b"\xff"], snap, plan)
 
     def test_an_admin_witness_with_a_short_signature(self):
         keys, snap, plan = signing_world()

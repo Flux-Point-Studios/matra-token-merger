@@ -75,7 +75,7 @@
     {
       "id": "cmatra-pool-migration",
       "name": "cMATRA pool migration",
-      "desc": "Moves the surrender pool to the claim validator re-applied with a fresh admin pair, whole or as a test slice: a snapshot that resolves both inputs from producing transactions checked against their ids, a deterministic offline builder, the check every admin runs before witnessing (cMATRA conserved, exact destination script, Void inline datum on every pool output, both old and both new admins as required signers, fee under 1 ADA, validity before the old deadline, script_data_hash from the live cost model) and a witness splice that keeps every signed byte. Nothing in it submits.",
+      "desc": "Moves the surrender pool to the claim validator re-applied with a fresh admin pair, whole or as a test slice: a snapshot that resolves both inputs from producing transactions checked against their ids, a deterministic offline builder, the check every admin runs before witnessing (cMATRA conserved, a destination derived from the live script with its admin and deadline constants swapped for the new ones and required to match the plan's hash, Void inline datum on every pool output, both old and both new admins as required signers, fee under 1 ADA, validity before the old deadline, script_data_hash from the live cost model) and a witness splice that keeps every signed byte. Nothing in it submits.",
       "kind": "toolkit",
       "paths": [
         "tools/pool_migration.py"

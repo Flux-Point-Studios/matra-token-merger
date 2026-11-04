@@ -9,10 +9,12 @@ paying the pool's cMATRA to the new pool address under the Void inline datum,
 or, for a test slice, part of it, with the rest returned to the old pool under
 the same datum.
 
-The transaction's required signers are the old admin pair AND the new pair.
-The old validator needs only the old pair, but the ledger then refuses the
-move unless both new keys signed it too, so the cMATRA never lands in a pool
-whose keys were not shown to work.
+The destination is derived, not taken on trust: the old script with its three
+parameter constants swapped for the new admins and deadline, which must hash to
+the plan's new_script_hash. The transaction's required signers are the old
+admin pair AND that new pair. The old validator needs only the old pair, but
+the ledger then refuses the move unless both new keys signed it too, so the
+cMATRA never lands in a pool whose keys were not shown to work.
 
   snapshot   read the two inputs (from their producing transactions, checked
              against their ids) and the protocol parameters into one file
@@ -33,11 +35,12 @@ import hashlib
 import json
 import math
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import cbor2
 from cbor2 import CBORTag
@@ -277,6 +280,10 @@ def load_plan(doc: Mapping[str, Any]) -> Plan:
     if len(new_script_hash) != 28 or new_script_hash == plutus_v3_script_hash(old_script):
         raise MigrationRejected("new_script", "the new script hash must be another 28-byte script hash")
     old_deadline_ms, new_deadline_ms = int(doc["old_deadline_ms"]), int(doc["new_deadline_ms"])
+    for code, deadline in (("old_deadline", old_deadline_ms), ("new_deadline", new_deadline_ms)):
+        # apply_params.sh's rule, which also keeps every deadline constant 9 bytes long
+        if not 10**12 <= deadline < 10**13:
+            raise MigrationRejected(code, f"{deadline} is not 13-digit POSIX milliseconds")
     if new_deadline_ms < old_deadline_ms:
         raise MigrationRejected("new_deadline", "the new pool would close before the old one")
     move = doc["move"]
@@ -327,17 +334,42 @@ class _Bound:
     witness_keys: frozenset[bytes]
 
 
+def _parameter_constants(admins: tuple[bytes, bytes], deadline_ms: int) -> tuple[bytes, bytes, bytes]:
+    """The claim validator's parameters as apply_params.sh passes them: Plutus
+    Data CBOR, a 28-byte bytestring per admin and an 8-byte unsigned deadline."""
+    return b"\x58\x1c" + admins[0], b"\x58\x1c" + admins[1], b"\x1b" + deadline_ms.to_bytes(8, "big")
+
+
+def reapplied_script(script: bytes, old_admins: tuple[bytes, bytes], old_deadline_ms: int,
+                     new_admins: tuple[bytes, bytes], new_deadline_ms: int) -> bytes:
+    """``script``, the claim validator applied to the old parameters, applied
+    to the new ones instead. aiken applies each parameter as a Data constant
+    whose CBOR the flat encoding carries byte-aligned and verbatim, so swapping
+    each constant in place for its new value of the same length gives the bytes
+    apply_params.sh gives. Each old constant must occur exactly once."""
+    out = bytearray(script)
+    codes = ("old_admins", "old_admins", "old_deadline")
+    for code, old, new in zip(codes, _parameter_constants(old_admins, old_deadline_ms),
+                              _parameter_constants(new_admins, new_deadline_ms), strict=True):
+        count = script.count(old)
+        if count != 1:
+            raise MigrationRejected(code, f"{old.hex()} occurs {count} times in the old script, not once")
+        at = script.index(old)
+        out[at:at + len(old)] = new
+    return bytes(out)
+
+
 def _bind(snap: Snapshot, plan: Plan) -> _Bound:
     if plan.network != snap.network or plan.pool_ref != snap.pool.ref or plan.fee_ref != snap.fee.ref:
         raise MigrationRejected("snapshot", "the plan names other inputs or another network than the snapshot")
     pool = snap.pool.output
     if pool.address[1:] != plutus_v3_script_hash(plan.old_script):
         raise MigrationRejected("old_script", "the old script does not hash to the pool address")
-    for admin in plan.old_admins:
-        # Applied parameters are flat-encoded byte-aligned constants, so each
-        # admin key hash occurs verbatim in the applied script.
-        if admin not in plan.old_script:
-            raise MigrationRejected("old_admins", f"{admin.hex()} is not a parameter of the old script")
+    derived = plutus_v3_script_hash(reapplied_script(plan.old_script, plan.old_admins, plan.old_deadline_ms,
+                                                     plan.new_admins, plan.new_deadline_ms))
+    if derived != plan.new_script_hash:
+        raise MigrationRejected("new_script", f"the old script applied to the new admins and deadline hashes to "
+                                f"{derived.hex()}, not {plan.new_script_hash.hex()}")
     cmatra = pool.assets.get(plan.cmatra_policy, {}).get(plan.cmatra_name, 0)
     if cmatra <= 0 or pool.assets != {plan.cmatra_policy: {plan.cmatra_name: cmatra}}:
         raise MigrationRejected("pool_input", "the pool input must hold cMATRA and nothing else")
@@ -601,6 +633,10 @@ def check_migration_tx(tx: bytes, snap: Snapshot, plan: Plan) -> dict[str, Any]:
         "old_pool_address": _bech32(bound.old_pool, snap.network),
         "new_pool_address": _bech32(bound.new_pool, snap.network),
         "new_script_hash": plan.new_script_hash.hex(),
+        "old_admins": [k.hex() for k in plan.old_admins],
+        "new_admins": [k.hex() for k in plan.new_admins],
+        "new_deadline_ms": plan.new_deadline_ms,
+        "new_deadline_utc": datetime.fromtimestamp(plan.new_deadline_ms // 1000, tz=timezone.utc).isoformat(),
         "pool_cmatra_before": bound.pool_cmatra,
         "moved_cmatra": bound.move,
         "left_at_old_pool": bound.pool_cmatra - bound.move,
