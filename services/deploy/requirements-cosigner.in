@@ -1,11 +1,14 @@
-# What services/cosigner_api.py imports at run time, plus the server that runs
-# it. Compiled with hashes against the versions the test suite runs on:
+# What both signers import at run time (services/cosigner_api.py and
+# services/surrender_api.py), plus the server that runs them; each signer's
+# release venv installs from the hash-pinned lock compiled from this.
+# Compiled with hashes against the versions the test suite runs on:
 #   pip freeze > constraints.txt   (in the CI/test environment)
 #   pip-compile --generate-hashes --allow-unsafe --strip-extras \
 #       -c constraints.txt -o requirements-cosigner.txt requirements-cosigner.in
 pycardano
 cbor2
 fastapi
+httpx
 requests
 python-dotenv
 uvicorn

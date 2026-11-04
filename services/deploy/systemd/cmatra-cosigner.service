@@ -1,0 +1,50 @@
+# Server B: the co-signer as cmatra-a2, the one user that can read admin_2.
+# services/deploy/install-signer.sh a2 lays out these paths and installs this
+# unit; it never enables or starts it. The host firewall admits 8421/tcp from
+# Server A only.
+#   /opt/cmatra-a2/app       one commit's files and their .venv, root-owned
+#   /etc/cmatra-a2/          0700 root: env.cosigner (0600), which systemd reads
+#                            for the service; the service user cannot
+#   /var/lib/cmatra-a2/      0700 cmatra-a2: keys/admin_2.skey (0400), the files
+#                            the env names, and ledger/, the one path it may write
+[Unit]
+Description=cMATRA co-signer (Server B: admin_2 signer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cmatra-a2
+Group=cmatra-a2
+WorkingDirectory=/opt/cmatra-a2/app
+EnvironmentFile=/etc/cmatra-a2/env.cosigner
+ExecStart=/opt/cmatra-a2/app/.venv/bin/uvicorn services.cosigner_api:app --host 0.0.0.0 --port 8421 --log-level info
+Restart=on-failure
+RestartSec=10s
+SyslogIdentifier=cmatra-cosigner
+UMask=0077
+ReadWritePaths=/var/lib/cmatra-a2/ledger
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+KeyringMode=private
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
