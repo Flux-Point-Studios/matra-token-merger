@@ -53,6 +53,7 @@ from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 from pycardano import Address
 
+from tools.cardano_utils import SLOT_OFFSET_S
 from tools.process_surrender import (
     load_rate_table,
     load_redemption_pin,
@@ -65,13 +66,6 @@ MAX_POOL_LOVELACE_OUTFLOW = 500_000
 # pycardano sets ttl = tip + 10_000 slots; the rest absorbs clock skew between
 # the builder's view of the tip and the signer's clock.
 MAX_VALIDITY_SLOTS = 12_000
-
-# POSIX seconds minus slot number, per network (1-second slots since Shelley).
-SLOT_OFFSET_S = {
-    "mainnet": 1_591_566_291,
-    "preprod": 1_655_683_200,
-    "preview": 1_666_656_000,
-}
 
 _ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RATE_TABLE_PATH = _ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"

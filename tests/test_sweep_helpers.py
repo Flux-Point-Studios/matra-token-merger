@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 import pytest
 
+from tools.cardano_utils import SLOT_OFFSET_S
 from tools.sweep_helpers import (
-    MAINNET_SHELLEY_START_SLOT,
-    MAINNET_SHELLEY_START_TIME,
     ValidityWindow,
     compute_sweep_change,
     derive_sweep_validity_window,
@@ -39,10 +38,12 @@ class FakeFetch:
 
 # Canonical on-chain values pinned at mint (2026-05-18)
 DEADLINE_POSIX_MS = 1_795_910_400_000  # 2026-11-29 00:00:00 UTC
-DEADLINE_SLOT_MAINNET = 203_912_109     # = 4492800 + (1795910400 - 1596491091)
+DEADLINE_SLOT_MAINNET = 204_344_109     # = 1795910400 - SLOT_OFFSET_S["mainnet"]
+# Mainnet's first Shelley slot and when it began.
+MAINNET_SHELLEY_START_SLOT, MAINNET_SHELLEY_START_TIME = 4_492_800, 1_596_059_091
 
 POOL_ADDR = "addr1w8s6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg9mn27a"
-CMATRA_POLICY = "98c61f406f7c8df11ccff49ca1631d8bca9663894537c6c5ee5ed418"
+CMATRA_POLICY = "7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66"
 CMATRA_ASSET = "634d41545241"  # "cMATRA"
 CMATRA_UNIT = f"{CMATRA_POLICY}.{CMATRA_ASSET}"
 KOIOS = "https://api.koios.rest/api/v1"
@@ -55,12 +56,10 @@ KOIOS = "https://api.koios.rest/api/v1"
 
 class TestPosixMsToSlot:
     def test_mainnet_shelley_start_round_trips(self):
-        # POSIX 1596491091 → slot 4492800
         assert posix_ms_to_slot(MAINNET_SHELLEY_START_TIME * 1000, "mainnet") == \
             MAINNET_SHELLEY_START_SLOT
 
     def test_mainnet_deadline_canonical(self):
-        # The pinned mainnet deadline must map to 203_912_109
         assert posix_ms_to_slot(DEADLINE_POSIX_MS, "mainnet") == DEADLINE_SLOT_MAINNET
 
     def test_mainnet_offset_1000s(self):
@@ -78,6 +77,11 @@ class TestPosixMsToSlot:
         # round-trip the deadline
         ms = slot_to_posix_ms(DEADLINE_SLOT_MAINNET, "mainnet")
         assert ms == DEADLINE_POSIX_MS
+
+    def test_every_network_uses_the_signers_offset(self):
+        for network, offset in SLOT_OFFSET_S.items():
+            assert posix_ms_to_slot((offset + 1000) * 1000, network) == 1000
+            assert slot_to_posix_ms(1000, network) == (offset + 1000) * 1000
 
     def test_slot_to_posix_rejects_negative(self):
         with pytest.raises(ValueError):

@@ -32,34 +32,18 @@ import cbor2
 
 from tools.api_clients import _request_with_retry
 from tools.build_surrender_pool import encode_pool_datum
-from tools.cardano_utils import posix_ms_to_slot
+from tools.cardano_utils import SLOT_OFFSET_S, posix_ms_to_slot
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Shelley genesis epoch (used to translate slot -> POSIX for sanity output)
-# ---------------------------------------------------------------------------
-
-MAINNET_SHELLEY_START_SLOT = 4_492_800
-MAINNET_SHELLEY_START_TIME = 1_596_491_091  # POSIX seconds
-PREPROD_SHELLEY_START_TIME = 1_655_683_200
-
-
 def slot_to_posix_ms(slot: int, network: str = "mainnet") -> int:
-    """Inverse of posix_ms_to_slot. Used for sanity-checking validity windows.
-
-    posix_ms_to_slot is imported from tools.cardano_utils to avoid drift.
-    """
+    """Inverse of posix_ms_to_slot. Used for sanity-checking validity windows."""
     if slot < 0:
         raise ValueError(f"slot must be non-negative, got {slot}")
-    if network == "mainnet":
-        posix_sec = (slot - MAINNET_SHELLEY_START_SLOT) + MAINNET_SHELLEY_START_TIME
-    elif network in ("preprod", "preview"):
-        posix_sec = slot + PREPROD_SHELLEY_START_TIME
-    else:
+    if network not in SLOT_OFFSET_S:
         raise ValueError(f"unknown network: {network!r}")
-    return posix_sec * 1000
+    return (slot + SLOT_OFFSET_S[network]) * 1000
 
 
 # ---------------------------------------------------------------------------

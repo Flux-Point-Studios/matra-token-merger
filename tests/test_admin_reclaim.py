@@ -133,11 +133,12 @@ class TestDiscoverUnclaimedUtxos:
 
 class TestPosixMsToSlot:
     def test_mainnet_known_value(self):
-        slot = posix_ms_to_slot(1596491091000, "mainnet")
+        """Mainnet's first Shelley slot began at 2020-07-29T21:44:51Z."""
+        slot = posix_ms_to_slot(1596059091000, "mainnet")
         assert slot == 4492800
 
     def test_mainnet_offset(self):
-        slot = posix_ms_to_slot(1596492091000, "mainnet")
+        slot = posix_ms_to_slot(1596060091000, "mainnet")
         assert slot == 4492800 + 1000
 
     def test_preprod_known_value(self):
