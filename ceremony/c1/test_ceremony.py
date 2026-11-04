@@ -74,6 +74,21 @@ def test_tracked_ceremony_files_name_no_session_scratch_location():
     assert [name for name in tracked if scratch.search((REPO / name).read_text())] == []
 
 
+def test_signer_b_egress_lets_its_pager_reach_discord():
+    # The pager fails closed: a co-signer whose pages cannot leave stops signing PAGER_GRACE_S after its first claim.
+    text = (HERE / "RUNBOOK.md").read_text()
+    egress = next(line for line in text.splitlines() if "Egress from signer-b" in line)
+    assert "discord.com" in egress
+
+
+def test_the_test_claim_waits_for_both_pagers_to_deliver():
+    # Step 13's claim passes inside the grace even when a pager cannot deliver, so only a delivered page proves it can.
+    text = (HERE / "RUNBOOK.md").read_text()
+    step = text[text.index("# After 13c"):text.index("14. Stop the services")]
+    for needed in ('"$API/health"', '"$COSIGNER/health"', "COSIGNER_URL", "pages_owed == 0", "webhook_refused == null"):
+        assert needed in step, needed
+
+
 def test_every_repo_path_the_runbook_names_exists():
     text = (HERE / "RUNBOOK.md").read_text()
     named = set(re.findall(r"`((?:ceremony|tools|services|onchain|scripts|tests)/[\w./-]*\w)`", text))

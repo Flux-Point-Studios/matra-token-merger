@@ -95,7 +95,7 @@ Residual risk: any root on Server A still reads admin_1. That is acceptable only
   - either `BLOCKFROST_PROJECT_ID` of its own Blockfrost project;
   - or `CHAIN_API_KEY_FILE=/var/lib/cmatra-a2/chain-api.key` (0400 cmatra-a2), holding an Insight key no other host uses.
 
-  It never uses Server A's local proxy. The co-signer's unspent, supply and cooling-off checks are only independent if its chain view is. Egress from signer-b is limited to that provider's API host, DNS and NTP.
+  It never uses Server A's local proxy. The co-signer's unspent, supply and cooling-off checks are only independent if its chain view is. Egress from signer-b is limited to that provider's API host, the pager's webhook host `discord.com` on 443, DNS and NTP. The pager fails closed: a co-signer whose pages cannot reach Discord stops signing `PAGER_GRACE_S` after its first claim.
 
 This makes the dual-signer design real: Server A can reach signer-b only through the co-sign API, which signs only what `cosign_policy` approves.
 
@@ -400,6 +400,22 @@ jq . claim.submitted.json
 /submit-surrender takes the whole T-signed transaction and keeps only T's witness. It drops any witness under a required signer's key and adds the admins' own after the co-sign checks. Do not post the output of `transaction witness` instead: that file holds a bare `[vkey, sig]` pair, which /submit-surrender refuses with 400 (sim `N_bare_cli_witness_refused_by_submit`).
 
 The simulation runs C0, P11 and 13a-13c exactly as written here (section 9). Only C0's settings change, and `sudo` becomes a plain call. The URL points at a stand-in for the two routes, which checks the secret header and uses the service's own request models and witness merge. The merged claim, with the admins' witnesses added, passes the signers' `cosign_policy` (APPROVED 925780), the claimant-signature check and aiken. Served the real d3a1e632 surrender instead, 13b stops before T signs.
+
+The claim at 13c passes inside the pager's grace even when a pager cannot deliver, so only a delivered page shows that both signers can keep signing. The block waits up to the 600 s grace for each signer's `/health`; its last line for each must read `delivered every page`, and otherwise the egress or webhook of that signer is wrong: stop and fix it before C1b.
+
+```bash
+# After 13c: both pagers delivered the claim's pages
+( set -euo pipefail
+  COSIGNER=$(sudo "$PY" -c 'import sys; from dotenv import dotenv_values as v; print(v(sys.argv[1])["COSIGNER_URL"].rstrip("/"))' "$API_ENV")
+  for health in "$API/health" "$COSIGNER/health"; do
+    for _ in $(seq 40); do
+      curl -sS "$health" | jq -e '.pages_owed == 0 and .webhook_refused == null' >/dev/null && break
+      sleep 15
+    done
+    curl -sS "$health" | jq -e '.pages_owed == 0 and .webhook_refused == null' >/dev/null
+    echo "13d: $health delivered every page"
+  done )
+```
 
 14. Stop the services, or keep them dark, until C1b has confirmed.
     - `ALLOWED_USER_ADDRESSES` stays T-only until the Phase 3 reopen empties it.
