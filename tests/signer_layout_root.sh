@@ -6,9 +6,12 @@
 # proving the copy. RUNBOOK.md's block K2 makes each key as its service user
 # (and must refuse a second run), and block W1 witnesses a transaction as
 # cmatra-a1 from a directory that user cannot enter. --check must pass, and
-# fail once a mode is loosened. Then each service starts dark under its own
-# user, with its unit's command, working directory and environment file, and
-# /health and the startup log must show the keys and the co-signer.
+# fail once a mode is loosened, the pager outbox leaves the ledger directory
+# (the one path the unit lets a signer write) or the webhook is missing. Then
+# each service starts dark under its own user, with its unit's command,
+# working directory and environment file, and /health, the startup log and
+# --check must show the keys, the co-signer, the committed deny-list and an
+# idle pager whose outbox the signer made beside its ledger.
 set -euo pipefail
 
 [[ $EUID -eq 0 && ${CI:-} == woodpecker ]] || { echo "only for CI's throwaway container" >&2; exit 1; }
@@ -107,6 +110,8 @@ printf 'mainnetsignerlayoutci\n' > /var/lib/cmatra-a2/chain-api.key
 chown cmatra-a2:cmatra-a2 /var/lib/cmatra-a2/chain-api.key
 chmod 0400 /var/lib/cmatra-a2/chain-api.key
 cosigner_secret=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+# No page falls due during a dark start, so nothing is ever sent to it.
+webhook=https://discord.com/api/webhooks/1/signer-layout-ci
 policy="SURRENDER_SCRIPT_ADDRESS=$address
 QUARANTINE_ADDRESS=$quarantine
 CMATRA_POLICY_HEX=7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66
@@ -121,6 +126,8 @@ SURRENDER_API_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(3
 ADMIN_SKEY_PATH=/var/lib/cmatra-a1/keys/admin_1.skey
 BLUEPRINT_PATH=/var/lib/cmatra-a1/claim_validator.plutus.json
 SURRENDER_LEDGER_PATH=$new_a1
+PAGER_DISCORD_WEBHOOK_URL=$webhook
+PAGER_OUTBOX_PATH=/var/lib/cmatra-a1/ledger/pager-outbox.sqlite3
 COSIGNER_URL=http://127.0.0.1:8421
 COSIGNER_API_SECRET=$cosigner_secret
 COSIGNER_PKH=$pkh2
@@ -133,17 +140,35 @@ COSIGNER_API_SECRET=$cosigner_secret
 COSIGNER_SKEY_PATH=/var/lib/cmatra-a2/keys/admin_2.skey
 COSIGNER_PRIMARY_ADMIN_PKH=$pkh1
 COSIGNER_LEDGER_PATH=$new_a2
+PAGER_DISCORD_WEBHOOK_URL=$webhook
+PAGER_OUTBOX_PATH=/var/lib/cmatra-a2/ledger/pager-outbox.sqlite3
 CHAIN_API_KEY_FILE=/var/lib/cmatra-a2/chain-api.key
 EOF
 )
 
-step "--check passes on both, and names a loosened env file"
+step "--check passes on both, and names a loosened env file, a misplaced pager outbox and a missing webhook"
 "$install_signer" a1 --check
 "$install_signer" a2 --check
 chmod 0640 /etc/cmatra-a1/env.surrender-api
 if "$install_signer" a1 --check > /tmp/loose.txt; then fail "--check passed a 0640 env file"; fi
 grep -q "^FAIL /etc/cmatra-a1/env.surrender-api: regular file 640" /tmp/loose.txt || fail "--check did not name the 0640 env file"
 chmod 0600 /etc/cmatra-a1/env.surrender-api
+refused() {   # ROLE SETTING: --check fails, naming the setting, while the env file ends with SETTING
+    local env=/etc/cmatra-a1/env.surrender-api saved
+    if [[ $1 == a2 ]]; then env=/etc/cmatra-a2/env.cosigner; fi
+    saved=$(cat "$env")
+    printf '%s\n' "$2" >> "$env"
+    if "$install_signer" "$1" --check > /tmp/refused.txt; then fail "--check passed $2"; fi
+    grep -q "^FAIL ${2%%=*} " /tmp/refused.txt || fail "--check did not name ${2%%=*} for $2"
+    printf '%s\n' "$saved" > "$env"
+}
+refused a1 PAGER_OUTBOX_PATH=/var/lib/cmatra-a1/pager-outbox.sqlite3
+refused a1 PAGER_OUTBOX_PATH=/var/lib/cmatra-a1/ledger/../keys/pager-outbox.sqlite3
+refused a1 "PAGER_OUTBOX_PATH=$new_a1"
+refused a2 PAGER_OUTBOX_PATH=/var/lib/cmatra-a2/ledger/
+refused a2 PAGER_DISCORD_WEBHOOK_URL=
+"$install_signer" a1 --check > /dev/null || fail "--check fails once each env file is restored"
+"$install_signer" a2 --check > /dev/null || fail "--check fails once each env file is restored"
 
 step "what each user can and cannot touch"
 runuser -u cmatra-a1 -- test -w /var/lib/cmatra-a1/ledger || fail "cmatra-a1 cannot write its ledger directory"
@@ -194,17 +219,29 @@ health() {   # PORT: /health once the service answers, within 60 s
     return 1
 }
 expect_json() { python3 -c 'import json, sys; got, want = json.loads(sys.argv[1]), json.loads(sys.argv[2]); assert got == want, (got, want)' "$1" "$2"; }
+paging='"status": "ok", "pages_owed": 0, "oldest_page_owed_s": null, "signing_paused": false, "webhook_refused": null'
+denylist=$(sha256sum < "$repo/audit_pack/2026-11-01/denylist.json" | cut -c1-64)
 
 dark_start cmatra-cosigner.service
 answer=$(health 8421) || { cat /tmp/cmatra-cosigner.service.log; fail "the co-signer did not start"; }
-expect_json "$answer" "{\"status\": \"ok\", \"key_loaded\": true, \"pkh\": \"${pkh2:0:16}...\"}"
+expect_json "$answer" "{$paging, \"key_loaded\": true, \"pkh\": \"${pkh2:0:16}...\"}"
 grep -q "Co-signer ready: PKH=$pkh2" /tmp/cmatra-cosigner.service.log || fail "the co-signer did not load admin_2"
 
 dark_start surrender-api.service
 answer=$(health 8420) || { cat /tmp/surrender-api.service.log; fail "surrender-api did not start"; }
-expect_json "$answer" '{"status": "ok", "rate_table_loaded": true, "script_loaded": true, "admin_key_loaded": true, "configured": true}'
+expect_json "$answer" "{$paging, \"rate_table_loaded\": true, \"script_loaded\": true, \"admin_key_loaded\": true, \"configured\": true}"
 grep -q "Admin key loaded: PKH=$pkh1" /tmp/surrender-api.service.log || fail "surrender-api did not load admin_1"
 grep -q "Co-signer PKH: ${pkh2:0:16}" /tmp/surrender-api.service.log || fail "surrender-api did not configure the co-signer"
+
+step "each started with the committed deny-list, and its pager outbox beside its ledger"
+for unit in cmatra-cosigner.service surrender-api.service; do
+    grep -q "deny-list $denylist: " "/tmp/$unit.log" || fail "$unit did not load the committed deny-list"
+done
+for role in a1 a2; do
+    checked=$("$install_signer" "$role" --check) || fail "--check fails on $role after its dark start"
+    outbox="/var/lib/cmatra-$role/ledger/pager-outbox.sqlite3 (regular file 600 cmatra-$role cmatra-$role)"
+    grep -qF "ok $outbox" <<< "$checked" || fail "cmatra-$role's pager outbox is not $outbox"
+done
 
 # shellcheck disable=SC2046  # one job id per word
 kill $(jobs -p) 2>/dev/null || true

@@ -12,15 +12,16 @@
 #   /etc/cmatra-ROLE/                      0700 root: the env file (0600 root), which
 #                                          systemd reads; the service user cannot
 #   /var/lib/cmatra-ROLE/                  0700 cmatra-ROLE: keys/ (the admin key, 0400),
-#                                          ledger/ (the one path the unit lets it write)
+#                                          ledger/ (the ledger and the pager's outbox,
+#                                          the one path the unit lets it write)
 #                                          and the files the env names
 #
 # --ledger-from moves the signer's existing ledger into ledger/ with
 # `python -m services.redemption_ledger copy`: byte for byte, proven by sha256,
 # SQLite's integrity check and every row, after which the old file is 0400.
 # --check exits 1 unless every path, mode and owner above holds, the env file
-# points only into the layout, and the installed unit and release are this
-# checkout's.
+# points only into the layout and names the pager's webhook, and the installed
+# unit and release are this checkout's.
 set -euo pipefail
 
 die() { echo "install-signer: $*" >&2; exit 1; }
@@ -83,6 +84,14 @@ check_layout() {
     if [[ -f $env_file ]]; then
         if [[ $(env_value "$ledger_var") == "$state/ledger/$ledger_name" ]]; then report ok "$ledger_var"
         else report FAIL "$ledger_var is not $state/ledger/$ledger_name"; fi
+        value=$(env_value PAGER_OUTBOX_PATH)
+        name=${value#"$state/ledger/"}
+        if [[ $value == "$state/ledger/$name" && $name =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ && $name != "$ledger_name" ]]; then
+            report ok PAGER_OUTBOX_PATH
+            [[ ! -e $value ]] || expect "$value" "regular file 600 $user $user"
+        else report FAIL "PAGER_OUTBOX_PATH is not a file of its own in $state/ledger, the one directory the unit may write"; fi
+        if [[ -n $(env_value PAGER_DISCORD_WEBHOOK_URL) ]]; then report ok "PAGER_DISCORD_WEBHOOK_URL is set"
+        else report FAIL "PAGER_DISCORD_WEBHOOK_URL is not set; the signer does not start without its pager"; fi
         value=$(env_value "$key_var")
         if [[ $value == "$state/keys/"* ]]; then expect "$value" "regular file 400 $user $user"
         else report FAIL "$key_var is not a file in $state/keys"; fi

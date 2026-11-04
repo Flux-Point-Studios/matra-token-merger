@@ -60,12 +60,13 @@ The separation that matters: compromising one host must never give both new keys
 | Env | `/etc/cmatra-a1/env.surrender-api`, 0600 root in a 0700 root directory. systemd reads it; the service user cannot | `/etc/cmatra-a2/env.cosigner`, the same |
 | Key | `/var/lib/cmatra-a1/keys/admin_1.skey`, 0400 cmatra-a1, in 0700 directories | `/var/lib/cmatra-a2/keys/admin_2.skey`, 0400 cmatra-a2 |
 | Ledger | `/var/lib/cmatra-a1/ledger/surrender-ledger.sqlite3`, 0600 | `/var/lib/cmatra-a2/ledger/cosigned.sqlite3`, 0600 |
+| Pager outbox | `/var/lib/cmatra-a1/ledger/pager-outbox.sqlite3`, 0600, made by the service at its first start | `/var/lib/cmatra-a2/ledger/pager-outbox.sqlite3`, the same |
 | Other files the env names | `/var/lib/cmatra-a1/claim_validator.plutus.json` (the applied blueprint); a chain credential file, if the env uses one | `/var/lib/cmatra-a2/chain-api.key`, signer-b's own chain credential, unless `BLOCKFROST_PROJECT_ID` names its own project |
 
-- Both units run with `ProtectHome=yes` and `ProtectSystem=strict`. `ReadWritePaths` names only the ledger directory, so the service cannot change its code, its key, its blueprint or anything else. `systemd-analyze security` rates each unit 1.5 (OK), against 8.4 (EXPOSED) for the current surrender-api unit.
+- Both units run with `ProtectHome=yes` and `ProtectSystem=strict`. `ReadWritePaths` names only the ledger directory, which also holds the pager's outbox, so the service cannot change its code, its key, its blueprint or anything else. Under the unit, an outbox anywhere else cannot be created, and the signer would not start. `systemd-analyze security` rates each unit 1.5 (OK), against 8.4 (EXPOSED) for the current surrender-api unit.
 - `sudo services/deploy/install-signer.sh ROLE --check` exits non-zero unless all of these hold:
   - every path, mode and owner above;
-  - the env points its key and ledger into the layout, and nothing under a home directory;
+  - the env points its key and ledger into the layout, puts the pager's outbox in the ledger directory as a file of its own, names the pager's webhook, and points nothing under a home directory;
   - the service user cannot read its own env file;
   - the installed unit and release are the checkout's.
 - CI runs the install as root in a throwaway container, then runs blocks K2 and W1 below as the service users and starts both services dark under their users (`tests/signer_layout_root.sh`).
@@ -166,7 +167,7 @@ M1 replaces the old `surrender-api.service`, which ran as deci from `/home/deci/
 
 Then, on Server A:
 
-1. `sudo install -m 0600 -o root -g root /home/deci/surrender-api/env.surrender-api /etc/cmatra-a1/env.surrender-api`, then `sudoedit` it to the section 6 values. The edit points `ADMIN_SKEY_PATH`, `SURRENDER_LEDGER_PATH`, `BLUEPRINT_PATH` and any credential file into `/var/lib/cmatra-a1`. Nothing may stay under `/home`: `ProtectHome=yes` hides it, and `--check` refuses it.
+1. `sudo install -m 0600 -o root -g root /home/deci/surrender-api/env.surrender-api /etc/cmatra-a1/env.surrender-api`, then `sudoedit` it to the section 6 values. The edit points `ADMIN_SKEY_PATH`, `SURRENDER_LEDGER_PATH`, `PAGER_OUTBOX_PATH`, `BLUEPRINT_PATH` and any credential file into `/var/lib/cmatra-a1`. Nothing may stay under `/home`: `ProtectHome=yes` hides it, and `--check` refuses it. The old pager outbox is not moved, so the old service's `/health` must have shown `"pages_owed": 0` before it stopped; otherwise its owed pages never reach Discord.
 2. Place the applied blueprint. Run `onchain/claim_validator/apply_params.sh <P3 admin_1> <P3 admin_2> 1798502400000 new-pool.json`, check that its `script_hash` equals the P4 paper, then `sudo install -m 0400 -o cmatra-a1 -g cmatra-a1 new-pool.json /var/lib/cmatra-a1/claim_validator.plutus.json`.
 3. After K2 has made the key: `sudo services/deploy/install-signer.sh a1 --check`. Attach its output to the ceremony log; this is A1.
 
@@ -177,7 +178,7 @@ sudo services/deploy/install-signer.sh a2 --ledger-from ~/cosigned.from-old-host
 
 **The co-signer's ledger travels from the old admin_2 host.**
 
-1. On that host, stop its co-signer. `chmod 0400` its ledger (the old `COSIGNER_LEDGER_PATH`), and print `sha256sum` and `python -m services.redemption_ledger digest` of it.
+1. On that host, stop its co-signer once its `/health` shows `"pages_owed": 0` (its pager outbox is not moved either). `chmod 0400` its ledger (the old `COSIGNER_LEDGER_PATH`), and print `sha256sum` and `python -m services.redemption_ledger digest` of it.
 2. Move the file to signer-b by USB or scp from deci's clean device. It holds approvals, no key.
 3. On signer-b, M2's copy prints its own sha256 and digest. deci compares them on paper:
    - the sha256 must equal the old host's;
@@ -198,7 +199,7 @@ Then write `/etc/cmatra-a2/env.cosigner` (0600 root; section 6, with signer-b's 
 
 | # | Gate | Check |
 |---|---|---|
-| P1 | PR #44 merged, CI green, and both signers installed at the merge commit | `cat /opt/cmatra-a1/app/RELEASE` on Server A and `/opt/cmatra-a2/app/RELEASE` on signer-b both equal the merge commit; `--check` passes on each |
+| P1 | PR #45 (Phase 1: deny-list, cooling-off, caps, T2 limit, pager) merged, then PR #44, which is built on it; CI green on main at PR #44's merge commit; both signers installed at that commit | `cat /opt/cmatra-a1/app/RELEASE` on Server A and `/opt/cmatra-a2/app/RELEASE` on signer-b both equal PR #44's merge commit, the one whose CI ran the C1 simulation and the policy together; `--check` passes on each |
 | P2 | Host conditions done (A1-A6; H1-H7 if Node-3) | each item's command, with output attached to the ceremony log; for A1 and signer-b, `install-signer.sh … --check` |
 | P3 | Both new keys generated (K2) and backed up | deci reads each PKH off its own key host's console (K2's last line) and writes it on paper as new admin_1 and new admin_2. These two lines are the reference for steps 4 and 6 |
 | P4 | New script hash agreed | Two derivations, on **two different hosts, neither of them the coordinator** (for example deci's clean device and signer-b). Each host types in the P3 paper PKHs itself, not from any file that came from the coordinator. Each runs `apply_params.sh NEW_ADMIN_1 NEW_ADMIN_2 1798502400000 out.json` under aiken v1.1.21 (binary sha256 `07f3f927f1a8c71fc61273fdff850d9b98edb28dde207c8a32585991f2c88e79`) at the merge commit. deci writes both hosts' `script_hash` and `address` on paper; they must agree |
@@ -212,23 +213,27 @@ Then write `/etc/cmatra-a2/env.cosigner` (0600 root; section 6, with signer-b's 
 | P12 | Only if the flux1 page replaces the API at step 13: D13 done | Vercel tokens and every GitHub token that can push to flux1 revoked; Vercel deployments and env audited since 10-28 |
 | P13 | Only if the flux1 page is used: a fresh bundle proof | the Phase 2 proof of the `/matra-merger` production bundle (proxy URL correct, no foreign addresses), taken within the hour before step 13. The browser wallet holds only test assets, never the fresh wallet |
 
-**P9: dark start.** Both services start on the section 6 config: the new pool address, the applied blueprint, the new keys, and `ALLOWED_USER_ADDRESSES` set to T alone. surrender-api seeds the pool lazily, on the first build. So with no UTxO at the new address yet, a start proves four things before C1a moves anything:
+**P9: dark start.** Both services start on the section 6 config: the new pool address, the applied blueprint, the new keys, and `ALLOWED_USER_ADDRESSES` set to T alone. surrender-api seeds the pool lazily, on the first build. So with no UTxO at the new address yet, a start proves five things before C1a moves anything:
 
 - the blueprint matches the address;
 - each key loads under its user;
-- both ledgers open read-write;
+- both ledgers, and the pager outboxes beside them, open read-write;
+- each signer loaded the release's deny-list and pages nothing yet;
 - the signers reach each other.
 
 Nothing can be built meanwhile: the new address holds nothing, and only T is admitted.
 
 1. signer-b: `sudo systemctl start cmatra-cosigner`.
    - `journalctl -u cmatra-cosigner -b` shows `Co-signer ready: PKH=` followed by the P3 paper's new admin_2.
-   - `curl -s http://127.0.0.1:8421/health` shows `"key_loaded": true` and the first 16 hex digits of that PKH.
+   - It shows `deny-list ` followed by the `sha256sum` of `/opt/cmatra-a2/app/audit_pack/2026-11-01/denylist.json`.
+   - `curl -s http://127.0.0.1:8421/health` answers `{"status":"ok","pages_owed":0,"oldest_page_owed_s":null,"signing_paused":false,"webhook_refused":null,"key_loaded":true,"pkh":…}`, with the first 16 hex digits of that PKH.
 2. Server A: `curl -s http://<signer-b>:8421/health` answers, so the firewall admits Server A.
 3. Server A: `sudo systemctl start surrender-api`.
    - `journalctl -u surrender-api -b` shows `Loaded script from blueprint` and no `does not hash` error.
    - It shows `Admin key loaded: PKH=` followed by the P3 paper's new admin_1, and `Co-signer PKH:` followed by the first 16 hex digits of new admin_2.
-   - `curl -s http://127.0.0.1:8420/health` answers `{"status":"ok","rate_table_loaded":true,"script_loaded":true,"admin_key_loaded":true,"configured":true}`.
+   - It shows the same `deny-list ` line as the co-signer, from `/opt/cmatra-a1/app/audit_pack/2026-11-01/denylist.json`.
+   - `curl -s http://127.0.0.1:8420/health` answers `{"status":"ok","pages_owed":0,"oldest_page_owed_s":null,"signing_paused":false,"webhook_refused":null,"rate_table_loaded":true,"script_loaded":true,"admin_key_loaded":true,"configured":true}`.
+   - `sudo services/deploy/install-signer.sh a1 --check` now also lists the outbox the service made, 0600 cmatra-a1; the same on signer-b for a2.
 4. `sudo systemctl stop surrender-api` on Server A and `sudo systemctl stop cmatra-cosigner` on signer-b.
 
 Any other answer is fixed now, while the whole pool still sits at the old address under the old pair, and not between C1a and C1b.
@@ -437,12 +442,12 @@ Then add the new pool's line to `deployed_pools.txt` if P5 has not already done 
 
 | Component | Where | Change |
 |---|---|---|
-| surrender-api env | `/etc/cmatra-a1/env.surrender-api` on Server A (M1; never print it) | `SURRENDER_SCRIPT_ADDRESS` → new address; `BLUEPRINT_PATH` → `/var/lib/cmatra-a1/claim_validator.plutus.json` (the startup check enforces the match); `ADMIN_SKEY_PATH` → `/var/lib/cmatra-a1/keys/admin_1.skey`; `SURRENDER_LEDGER_PATH` → `/var/lib/cmatra-a1/ledger/surrender-ledger.sqlite3`, the M1 copy (the ledger carries over and is never re-initialised); `COSIGNER_PKH` → new admin_2; `COSIGNER_URL` → signer-b; `ALLOWED_USER_ADDRESSES` → T only until the reopen; `SURRENDER_DEADLINE_POSIX_MS` stays 1795910400000 until 11-29, then 1798502400000 for the late window. No setting may point under `/home` |
-| Co-signer env | `/etc/cmatra-a2/env.cosigner` on signer-b (M2) | `SURRENDER_SCRIPT_ADDRESS`; `COSIGNER_SKEY_PATH` → `/var/lib/cmatra-a2/keys/admin_2.skey`; `COSIGNER_LEDGER_PATH` → `/var/lib/cmatra-a2/ledger/cosigned.sqlite3`; `COSIGNER_PRIMARY_ADMIN_PKH` → new admin_1; `SURRENDER_DEADLINE_POSIX_MS` as above; signer-b's own chain credential (section 2) |
+| surrender-api env | `/etc/cmatra-a1/env.surrender-api` on Server A (M1; never print it) | `SURRENDER_SCRIPT_ADDRESS` → new address; `BLUEPRINT_PATH` → `/var/lib/cmatra-a1/claim_validator.plutus.json` (the startup check enforces the match); `ADMIN_SKEY_PATH` → `/var/lib/cmatra-a1/keys/admin_1.skey`; `SURRENDER_LEDGER_PATH` → `/var/lib/cmatra-a1/ledger/surrender-ledger.sqlite3`, the M1 copy (the ledger carries over and is never re-initialised); `PAGER_OUTBOX_PATH` → `/var/lib/cmatra-a1/ledger/pager-outbox.sqlite3`; `PAGER_DISCORD_WEBHOOK_URL` stays the on-call channel's webhook (never print it); `PAGER_GRACE_S` unset (600 s); `COSIGNER_PKH` → new admin_2; `COSIGNER_URL` → signer-b; `ALLOWED_USER_ADDRESSES` → T only until the reopen; `SURRENDER_DEADLINE_POSIX_MS` stays 1795910400000 until 11-29, then 1798502400000 for the late window. No setting may point under `/home` |
+| Co-signer env | `/etc/cmatra-a2/env.cosigner` on signer-b (M2) | `SURRENDER_SCRIPT_ADDRESS`; `COSIGNER_SKEY_PATH` → `/var/lib/cmatra-a2/keys/admin_2.skey`; `COSIGNER_LEDGER_PATH` → `/var/lib/cmatra-a2/ledger/cosigned.sqlite3`; `PAGER_OUTBOX_PATH` → `/var/lib/cmatra-a2/ledger/pager-outbox.sqlite3`; `PAGER_DISCORD_WEBHOOK_URL` and `PAGER_GRACE_S` as on Server A; `COSIGNER_PRIMARY_ADMIN_PKH` → new admin_1; `SURRENDER_DEADLINE_POSIX_MS` as above; signer-b's own chain credential (section 2) |
 | Co-signer ledger | `COSIGNER_LEDGER_PATH` | Moved by M2 with its sha256 and `approvals_digest` compared on paper against the old host and Server A. Never `redemption_ledger init`: a fresh ledger resets every limit |
 | systemd and firewall | Server A and signer-b | the units in `services/deploy/systemd/`, installed by `install-signer.sh`; 8421/tcp from Server A only |
-| `scripts/sweep_params.env` | repo | New script hash and address, `ADMIN_PKH_1/2`, `ADMIN_2_HOST`, policy 7ff33a55 (it still names 98c61f40), deadline 1798502400000 / slot 206936109, destination the D4 multisig. Phase 1 fixes the old policy and slot lines; after C1 the whole block points at the new pool |
-| `tools/admin_reclaim.py` | repo | Needed after 12-29 for the new pool. PR #44 fixes its redeemer and slot clock, but **it still writes a body-only `TxBodyConway` envelope, which cardano-cli 11.0.0.0 refuses** ("Expected one of: … Tx ConwayEra"). Its assembled tx would also carry no script or redeemer. Fix it, or move the sweep onto `pool_migration`, before 12-29 |
+| `scripts/sweep_params.env` | repo | Phase 1 (PR #45) already pins policy 7ff33a55, the 11-29 deadline slot 204344109 and an empty `SWEEP_DEST_ADDR`. After C1 the whole block points at the new pool: new script hash and address, `ADMIN_PKH_1/2`, `ADMIN_2_HOST`, deadline 1798502400000 / slot 206936109, destination the D4 multisig |
+| `tools/admin_reclaim.py` | repo | Needed after 12-29 for the new pool. PR #44 fixes its redeemer and PR #45 its slot clock, but **it still writes a body-only `TxBodyConway` envelope, which cardano-cli 11.0.0.0 refuses** ("Expected one of: … Tx ConwayEra"). Its assembled tx would also carry no script or redeemer. Fix it, or move the sweep onto `pool_migration`, before 12-29 |
 | `deployed_pools.txt` | repo | Add `NEW1 NEW2 1798502400000 <new hash>` |
 | custody-watch | its config on the ops host | `surrender_pool.address` → new; `coverage.deadline_utc` stays `2026-11-29T00:00:00Z` until 11-29, then `2026-12-29T00:00:00Z`; add the old pool address as a `contract` address (cMATRA arriving there is a mistake); add the new admin addresses as `custody`. Flip right after C1b confirms; until then coverage pages that the old pool cannot pay, which is expected |
 | Deny-list v1 (Phase 1) | repo | Add the old admin PKHs f1eee828 and 77fdb621 and their enterprise addresses. `cosign_policy` refuses a claimant that is a *current* admin only |
@@ -535,13 +540,13 @@ The live cMATRA registry entry (read 11-04, read-only) has every property attest
 
 - It installs both signers with `install-signer.sh`, moving a ledger in as M1 and M2 do, and proves the copy.
 - It runs K2 twice per signer (the second run must refuse) and W1 as cmatra-a1 from a directory that user cannot enter.
-- It requires `--check` to pass, and to fail once a mode is loosened.
-- It starts each service dark under its own user with its unit's command and environment, and reads `/health`.
+- It requires `--check` to pass, and to fail once a mode is loosened, the pager outbox leaves the ledger directory (or is the ledger itself, or the directory) or the webhook is missing.
+- It starts each service dark under its own user with its unit's command and environment, and reads `/health` with an idle pager, the committed deny-list's line in each log, and each outbox the service made, 0600 under its own user.
 
-**Findings the simulation, its tests and the reviews turned up**, all fixed in PR #44 except `admin_reclaim`'s envelope type:
+**Findings the simulation, its tests and the reviews turned up**, all fixed in PR #44 or the PR #45 it is built on, except `admin_reclaim`'s envelope type:
 - cardano-cli 11 writes a witness as the bare `[vkey, sig]` pair.
 - The collateral return also needs its minimum ADA.
-- The mainnet slot clock was 5 days early.
+- The mainnet slot clock was 5 days early (fixed once, in PR #45: `tools/cardano_utils.py` holds the one offset table every slot conversion reads).
 - `admin_reclaim` used the wrong redeemer.
 - `admin_reclaim`'s envelope type (open, section 6).
 - Review round 1: the destination came from the plan verbatim. Required signers proved only that the new keys can sign, not that the pool would be locked by them. The destination is now derived from the old script, and the plan's old deadline is bound to it too. The runbook also gained the P3/P4 paper comparison at steps 4 and 6.
@@ -550,6 +555,7 @@ The live cMATRA registry entry (read 11-04, read-only) has every property attest
   - The ceremony files lived only in a session scratch directory; they are now this directory, tested in CI.
   - A1 was unreachable: the service's code, venv, env and ledger sat in a home directory its new user could not enter, and the first start under that user would have come between C1a and C1b. Each signer now has its own user and layout (section 2), M1 and M2 move the ledgers with a proof, and P9 starts both dark before C1a.
   - `cardano-cli latest address key-gen` overwrites an existing key without a word; K2 refuses to run over one.
+  - PR #44 and PR #45 conflicted in 7 files, carried the slot-clock fix twice, and failed 6 tests together; nothing required the policy run at step 13 to be the one tested. PR #44 is now built on PR #45 with one slot clock, its tests and CI run both together, the signer layout carries the pager, and P1 names PR #44's merge commit.
 
 **Files**
 - `RUNBOOK.md`: this file.
