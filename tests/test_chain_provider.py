@@ -275,6 +275,8 @@ def test_real_uvicorn_startup(tmp_path, network, legacy, local):
            "RATE_TABLE_PATH": str(root / "audit_pack/2026-04-19/rate_table_cmatra.json"),
            "REDEMPTION_PIN_PATH": str(root / "audit_pack/2026-09-27/redemption_pin.json"),
            "DENYLIST_PATH": str(root / "audit_pack/2026-11-01/denylist.json"),
+           "PAGER_DISCORD_WEBHOOK_URL": "https://discord.com/api/webhooks/1/cmatra-test",
+           "PAGER_OUTBOX_PATH": str(tmp_path / "pager.sqlite3"),
            "ADMIN_SKEY_PATH": str(tmp_path / "absent"), "COSIGNER_URL": ""}
     if legacy:
         env["BLOCKFROST_BASE_URL"] = legacy

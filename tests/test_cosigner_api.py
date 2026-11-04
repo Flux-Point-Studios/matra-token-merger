@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 
 import nacl.signing
@@ -31,6 +32,7 @@ from tests.cosign_cases import (
     CONTINUATION,
     MAINNET,
     MAINNET_BEFORE_SURRENDERS,
+    TEST_WEBHOOK,
     Draft,
     FakeChain,
     Scenario,
@@ -40,6 +42,7 @@ from tests.cosign_cases import (
     blake,
     golden_scenario,
     ledger_refusing_writes,
+    owed_pages,
     throwaway_key,
     without_claimant_witness,
 )
@@ -76,6 +79,8 @@ def service(tmp_path, monkeypatch):
         "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
         "MAX_CMATRA_PER_DAY": str(10**18),
         "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
+        "PAGER_DISCORD_WEBHOOK_URL": TEST_WEBHOOK,
+        "PAGER_OUTBOX_PATH": str(tmp_path / "pager.sqlite3"),
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -84,6 +89,7 @@ def service(tmp_path, monkeypatch):
     class Service:
         vkey = bytes(sk.to_verification_key().payload)
         ledger = tmp_path / "cosigned.sqlite3"
+        outbox = tmp_path / "pager.sqlite3"
         chain = FakeChain.as_at_the_golden_builds()
 
         clock = [0]
@@ -554,3 +560,64 @@ def test_the_denylist_loaded_at_startup_refuses_a_w1_surrender(service):
     assert resp.json()["detail"]["code"] == "denied_credential"
     assert "W1" in resp.json()["detail"]["detail"]
     assert service.rows() == 0
+
+
+# -- paging ------------------------------------------------------------------
+
+
+def test_a_surrender_is_paged_before_its_signature_leaves(service, monkeypatch):
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    pages_at_signing = []
+    real = cosigner.state.sk
+
+    class Spy:
+        def sign(self, data):
+            pages_at_signing.append(owed_pages(service.outbox))
+            return real.sign(data)
+
+    monkeypatch.setattr(cosigner.state, "sk", Spy())
+    try:
+        assert client.post("/cosign", json=_request(s), headers=HEADERS).status_code == 200
+    finally:
+        client.__exit__(None, None, None)
+    [pages] = pages_at_signing
+    assert len(pages) == 1 and pages[0].startswith(f"signing surrender {BASE_T1}: ")
+
+
+def test_a_refusal_under_a_deny_rule_is_paged_and_no_other_is(service):
+    w1 = golden_scenario("6d062a5a2548ffd855718495e78836ce24c2988b1733c926353b51b98bfe0580")
+    mint = next(c for c in CASES if c.name == "extra_mint").build()
+    with service.client(w1.now_slot) as client:
+        cosigner.state.cfg = replace(MAINNET_BEFORE_SURRENDERS, denylist=cosigner.state.cfg.denylist)
+        cosigner.state.chain = service.chain
+        assert client.post("/cosign", json=_request(w1), headers=HEADERS).status_code == 422
+        service.at(mint.now_slot)
+        assert client.post("/cosign", json=_request(mint), headers=HEADERS).status_code == 422
+    assert [page.split(":")[0] for page in owed_pages(service.outbox)] == ["refused denied_credential"]
+
+
+def test_an_unwritable_outbox_refuses_to_sign(service):
+    s = golden_scenario(BASE_T1)
+    client = service.start(service.client(s.now_slot))
+    try:
+        with closing(sqlite3.connect(service.outbox)) as conn, conn:
+            conn.execute("CREATE TRIGGER refuse BEFORE INSERT ON pages BEGIN SELECT RAISE(ABORT, 'full'); END")
+        resp = client.post("/cosign", json=_request(s), headers=HEADERS)
+    finally:
+        client.__exit__(None, None, None)
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["code"] == "pager_unavailable"
+    assert "signature_hex" not in resp.text
+
+
+def test_health_reports_the_pages_owed(service):
+    with service.client(0) as client:
+        assert client.get("/health").json()["pages_owed"] == 0
+
+
+@pytest.mark.parametrize("missing", ["PAGER_DISCORD_WEBHOOK_URL", "PAGER_OUTBOX_PATH"])
+def test_refuses_to_start_without_its_pager(service, monkeypatch, missing):
+    monkeypatch.delenv(missing)
+    with pytest.raises(ValueError, match=missing):
+        cosigner.startup()

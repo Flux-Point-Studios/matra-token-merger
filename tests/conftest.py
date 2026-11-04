@@ -398,3 +398,18 @@ def mock_twap_report_with_nfts() -> dict[str, Any]:
             },
         },
     }
+
+
+@pytest.fixture(autouse=True)
+def pages_sent(monkeypatch):
+    """No test reaches Discord: whatever a pager delivers is saved here."""
+    import services.pager
+
+    sent: list[str] = []
+
+    def post(url: str, payload: dict, headers: dict):
+        sent.append(payload["content"])
+        return 200, {"id": str(len(sent))}, None
+
+    monkeypatch.setattr(services.pager, "_post", post)
+    return sent

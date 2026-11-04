@@ -36,7 +36,8 @@ os.environ.setdefault("SURRENDER_API_SECRET", "test-secret")
 
 import services.surrender_api as api  # noqa: E402
 from services.pool_tip import PoolTipManager, VOID_DATUM_HEX  # noqa: E402
-from tests.cosign_cases import COMMITTED_DENYLIST  # noqa: E402
+from services.pager import Pager  # noqa: E402
+from tests.cosign_cases import COMMITTED_DENYLIST, TEST_WEBHOOK  # noqa: E402
 
 SCRIPT_ADDR = "addr_test1wrs6rqdjlzm5he27v9s202p8vjumza8qfsmufm2f6dy68hg7n8k3c"
 # 58-char placeholder — satisfies BuildSurrenderRequest min_length(40).
@@ -58,7 +59,7 @@ def _submit_req(tx_hash: str):
 
 
 @pytest.fixture
-def wired(monkeypatch):
+def wired(monkeypatch, tmp_path):
     """Wire module state with a seeded confirmed UTxO and all chain/crypto
     calls mocked. _build_tx_blocking is replaced so build_surrender's
     asyncio.to_thread runs a trivial in-process function."""
@@ -87,6 +88,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(api.Address, "from_primitive",
                         staticmethod(lambda s: _FakeAddr()))
     monkeypatch.setattr(api.state, "denylist", COMMITTED_DENYLIST)
+    monkeypatch.setattr(api.state, "pager", Pager(TEST_WEBHOOK, str(tmp_path / "pager.sqlite3"), "surrender-api"))
 
     api.state.rate_table = {"tokens": {"AGENT": {"rate_base_per_unit": 1}}}
     api.state.script_cbor_hex = "00"

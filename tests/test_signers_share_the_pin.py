@@ -20,6 +20,7 @@ from pycardano import PaymentSigningKey
 
 from services.redemption_ledger import create_ledger
 from tests.test_cosign_policy import ENV as POLICY_ENV
+from tests.cosign_cases import TEST_WEBHOOK
 from tools.config import AGENT, T2_ADAM_PASS
 from tools.process_surrender import load_redemption_pin
 
@@ -51,7 +52,8 @@ class Hosts:
         admin_2.save(str(tmp_path / "admin_2.skey"))
         for ledger in ("surrender.sqlite3", "cosigned.sqlite3"):
             create_ledger(str(tmp_path / ledger))
-        common = {"MAX_CMATRA_PER_DAY": str(25_000_000 * 10**6), "COSIGNER_API_SECRET": "t" * 43}
+        common = {"MAX_CMATRA_PER_DAY": str(25_000_000 * 10**6), "COSIGNER_API_SECRET": "t" * 43,
+                  "PAGER_DISCORD_WEBHOOK_URL": TEST_WEBHOOK}
         self.env = {
             COSIGNER: {
                 **common,
@@ -59,6 +61,7 @@ class Hosts:
                 "COSIGNER_PRIMARY_ADMIN_PKH": admin_1.to_verification_key().hash().payload.hex(),
                 "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
                 "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
+                "PAGER_OUTBOX_PATH": str(tmp_path / "cosigner-pager.sqlite3"),
             },
             SURRENDER_API: {
                 **common,
@@ -66,6 +69,7 @@ class Hosts:
                 "COSIGNER_URL": "http://cosigner.test",
                 "COSIGNER_PKH": admin_2.to_verification_key().hash().payload.hex(),
                 "SURRENDER_LEDGER_PATH": str(tmp_path / "surrender.sqlite3"),
+                "PAGER_OUTBOX_PATH": str(tmp_path / "surrender-pager.sqlite3"),
             },
         }
 
@@ -113,6 +117,13 @@ def test_neither_signer_starts_without_its_denylist(hosts, tmp_path, service):
     result = hosts.start(service, DENYLIST_PATH=str(tmp_path / "absent.json"))
     assert result.returncode != 0
     assert "absent.json" in result.stderr
+
+
+@pytest.mark.parametrize("service", [COSIGNER, SURRENDER_API], ids=["cosigner", "surrender_api"])
+def test_neither_signer_starts_without_its_pager(hosts, service):
+    result = hosts.start(service, PAGER_DISCORD_WEBHOOK_URL="")
+    assert result.returncode != 0
+    assert "PAGER_DISCORD_WEBHOOK_URL must be set" in result.stderr
 
 
 @pytest.mark.parametrize("service", [COSIGNER, SURRENDER_API], ids=["cosigner", "surrender_api"])

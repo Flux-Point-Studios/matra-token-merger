@@ -10,6 +10,9 @@ Wraps tools/process_surrender.py to provide HTTP endpoints for:
 An address that names a credential on the deny-list (or that the list cannot
 check) is refused with 403 at every route that takes one, before any chain
 query, key use or pool-tip lock; the service does not start without the list.
+Every surrender admin 1 is about to sign, and every refusal under a deny rule,
+pages the on-call channel through services.pager (PAGER_DISCORD_WEBHOOK_URL,
+PAGER_OUTBOX_PATH); the service does not start without its pager either.
 
 Signing flow:
   1. Frontend sends user's address + assets to surrender
@@ -123,6 +126,7 @@ from tools.credential_denylist import (
 from services.chain_check import ChainUnavailable, confirm_on_chain
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
+from services.pager import Pager
 from services.pool_tip import (
     PoolSettlingError,
     PoolTipError,
@@ -389,6 +393,7 @@ class AppState:
     cosign_config: CosignConfig | None = None
     # The credentials no route serves, the same list the policy refuses.
     denylist: DenyList | None = None
+    pager: Pager | None = None
     ledger: RedemptionLedger | None = None
     built_bodies: dict[str, bytes] = {}
     # tx hash -> (producing bodies, language views) for the co-signer.
@@ -581,6 +586,8 @@ async def startup():
     logger.info("Loaded %d redeemable NFT unit(s)", len(state.redeemable_nfts))
     state.denylist = load_denylist(DENYLIST_PATH)
     log_denylist(logger, state.denylist)
+    state.pager = Pager.from_env(os.environ, "surrender-api, admin_1")
+    state.pager.start()
 
     # Script
     if Path(BLUEPRINT_PATH).exists():
@@ -670,7 +677,9 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Cancel the background watchdog cleanly."""
+    """Cancel the background watchdog cleanly, and stop the pager's sender."""
+    if state.pager is not None:
+        state.pager.stop()
     if state.watchdog_task is not None:
         state.watchdog_task.cancel()
         try:
@@ -744,19 +753,22 @@ async def _pool_tip_watchdog() -> None:
 
 def _refuse_denied_address(address: Address) -> None:
     """403 for an address that names a credential on the deny-list, or whose
-    credentials the list cannot check; 503 while no list is loaded."""
-    if state.denylist is None:
-        raise HTTPException(503, "Deny-list not loaded")
+    credentials the list cannot check, paged once an hour per address; 503
+    while no list or no pager is loaded."""
+    if state.denylist is None or state.pager is None:
+        raise HTTPException(503, "Deny-list or pager not loaded")
     try:
         label = state.denylist.denied(address.to_primitive())
     except PointerAddress:
-        logger.warning("Refused pointer address %s", str(address)[:24])
+        logger.warning("Refused pointer address %s", address)
+        state.pager.refusal("pointer_address", f"{address} names its stake credential by pointer", str(address))
         raise HTTPException(403, {"code": "pointer_address",
                                   "message": "Use a base or enterprise address to surrender."})
     except ValueError:
         raise HTTPException(400, "Invalid Cardano address encoding")
     if label is not None:
         logger.warning("Refused %s: denied credential (%s)", address, label)
+        state.pager.refusal("denied_credential", f"{address}: {label}", str(address))
         raise HTTPException(403, {"code": "denied_credential",
                                   "message": "This address cannot use the merger."})
 
@@ -991,6 +1003,7 @@ async def build_surrender(req: BuildSurrenderRequest):
     except CosignRejected as e:
         state.tip_mgr.release_build(build_token)
         logger.warning("Refused to build a surrender for %s: %s", req.user_address[:24], e)
+        state.pager.refusal(e.code, f"{req.user_address}: {e.detail}", req.user_address)
         raise HTTPException(422, {"code": e.code, "message": e.detail})
     except ChainUnavailable as e:
         state.tip_mgr.release_build(build_token)
@@ -1159,6 +1172,7 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
         state.ledger.record(approval, now, state.cosign_config.redemption_limits)
     except CosignRejected as exc:
         logger.warning("Refused to co-sign %s: %s", tx_hash_hex[:16], exc)
+        state.pager.refusal(exc.code, f"{tx_hash_hex}: {exc.detail}", exc.detail)
         raise HTTPException(400, {"code": exc.code, "message": exc.detail})
     except ChainUnavailable as exc:
         logger.error("Refused to co-sign %s: chain view unavailable: %s", tx_hash_hex[:16], exc)
@@ -1166,6 +1180,11 @@ def _cosign(tx_hash_hex: str, tx: bytes) -> list[bytes]:
     except sqlite3.Error as exc:
         logger.error("Refused to co-sign %s: ledger unavailable: %s", tx_hash_hex[:16], exc)
         raise HTTPException(503, {"code": "ledger_unavailable", "message": "Surrenders are paused."})
+    try:
+        state.pager.surrender(approval)
+    except sqlite3.Error as exc:
+        logger.error("Refused to sign %s: pager outbox unavailable: %s", tx_hash_hex[:16], exc)
+        raise HTTPException(503, {"code": "pager_unavailable", "message": "Surrenders are paused."})
     return witness
 
 
@@ -2267,6 +2286,7 @@ def evaluate_surrender(req: BuildSurrenderRequest):
         logger.exception("Evaluate: build failed for %s", req.user_address[:24])
         raise HTTPException(500, "Transaction build failed during evaluation")
     except CosignRejected as e:
+        state.pager.refusal(e.code, f"{req.user_address}: {e.detail}", req.user_address)
         raise HTTPException(422, {"code": e.code, "message": e.detail})
     except ChainUnavailable as e:
         logger.error("Evaluate: chain view unavailable for %s: %s", req.user_address[:24], e)
@@ -2364,6 +2384,7 @@ def health():
         "script_loaded": state.script_cbor_hex is not None,
         "admin_key_loaded": state.admin_sk is not None,
         "configured": bool(SCRIPT_ADDRESS and CMATRA_POLICY_HEX and QUARANTINE_ADDRESS),
+        "pages_owed": state.pager.owed() if state.pager else None,
     }
 
 

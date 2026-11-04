@@ -6,8 +6,9 @@ Runs on a separate host from the surrender API and holds the second admin
 key. It signs a transaction only after it has read the whole transaction,
 services.cosign_policy has approved it as a surrender that its claimant has
 signed, services.chain_check has confirmed it against this host's own view
-of the chain, and services.redemption_ledger has recorded it within the
-24-hour cap and each surrendered unit's pinned limit. The check does not
+of the chain, services.redemption_ledger has recorded it within the 24-hour
+cap and each surrendered unit's pinned limit, and services.pager owes the
+on-call channel a page of it. A refusal under a deny rule pages too. The check does not
 depend on anything the surrender API asserts: input values come from
 producing bodies hashed against the inputs' transaction ids.
 
@@ -24,6 +25,8 @@ Environment (all required unless noted):
   COSIGNER_LEDGER_PATH        SQLite file recording every signed surrender, created
                               once with python -m services.redemption_ledger init
   MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
+  PAGER_DISCORD_WEBHOOK_URL   the on-call channel's Discord webhook
+  PAGER_OUTBOX_PATH           SQLite file of the pages owed to it
   BLOCKFROST_PROJECT_ID       this host's Blockfrost project on NETWORK
   plus the policy variables read by services.cosign_policy.load_config
   (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
@@ -58,6 +61,7 @@ from services.cosign_policy import (
     require_claimant_signature,
     slot_at,
 )
+from services.pager import Pager
 from services.redemption_ledger import RedemptionLedger
 from tools.api_clients import BlockfrostClient
 from tools.credential_denylist import log_denylist
@@ -77,6 +81,7 @@ class CosignerState:
     cfg: CosignConfig | None = None
     ledger: RedemptionLedger | None = None
     chain: BlockfrostClient | None = None
+    pager: Pager | None = None
 
 
 state = CosignerState()
@@ -125,6 +130,7 @@ def startup() -> None:
     if not api_key:
         raise ValueError("CHAIN_API_KEY_FILE or BLOCKFROST_PROJECT_ID must be set")
     chain = BlockfrostClient(api_key, chain_api_base_url(cfg.network))
+    pager = Pager.from_env(os.environ, "co-signer, admin_2")
 
     state.sk = sk
     state.vkey_hex = vk.payload.hex()
@@ -133,12 +139,20 @@ def startup() -> None:
     state.cfg = cfg
     state.ledger = ledger
     state.chain = chain
+    state.pager = pager
+    pager.start()
     logger.info(
         "Co-signer ready: PKH=%s network=%s per-tx cap=%d per-day cap=%d pinned units=%d",
         state.pkh_hex, cfg.network, cfg.max_payout_per_tx, ledger.max_per_day,
         len(cfg.redemption_limits),
     )
     log_denylist(logger, cfg.denylist)
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    if state.pager is not None:
+        state.pager.stop()
 
 
 @app.middleware("http")
@@ -172,6 +186,7 @@ def cosign(req: CosignRequest) -> CosignResponse:
         state.ledger.record(approval, now, state.cfg.redemption_limits)
     except CosignRejected as exc:
         logger.warning("Refused to co-sign: %s", exc)
+        state.pager.refusal(exc.code, exc.detail, exc.detail)
         raise HTTPException(422, {"code": exc.code, "detail": exc.detail})
     except ChainUnavailable as exc:
         logger.error("Refused to co-sign: chain view unavailable: %s", exc)
@@ -184,6 +199,13 @@ def cosign(req: CosignRequest) -> CosignResponse:
             503, {"code": "ledger_unavailable", "detail": "the signing ledger cannot be written"},
         )
 
+    try:
+        state.pager.surrender(approval)
+    except sqlite3.Error as exc:
+        logger.error("Refused to co-sign: pager outbox unavailable: %s", exc)
+        raise HTTPException(
+            503, {"code": "pager_unavailable", "detail": "the page of this surrender cannot be written"},
+        )
     signature = state.sk.sign(approval.tx_hash)
     logger.info(
         "Co-signed %s: payout %d to %s", approval.tx_hash.hex(), approval.payout,
@@ -204,4 +226,5 @@ def health() -> dict:
         "status": "ok",
         "key_loaded": state.sk is not None,
         "pkh": state.pkh_hex[:16] + "..." if state.pkh_hex else None,
+        "pages_owed": state.pager.owed() if state.pager else None,
     }

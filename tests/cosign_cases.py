@@ -103,6 +103,17 @@ MAINNET_BEFORE_SURRENDERS = replace(MAINNET, redemption_limits={
     for name, row in entry["units"].items()
 })
 
+# The Discord webhook every test pager is configured with; tests/conftest.py
+# keeps any page from reaching it.
+TEST_WEBHOOK = "https://discord.com/api/webhooks/1/cmatra-test"
+
+
+def owed_pages(outbox: str | Path) -> list[str]:
+    """The pages in a pager's outbox, oldest first."""
+    with closing(sqlite3.connect(outbox)) as conn:
+        return [text for (text,) in conn.execute("SELECT text FROM pages ORDER BY id")]
+
+
 # Output layout surrender_api produces (and every golden surrender has).
 PAYOUT, CONTINUATION, QUARANTINE_OUT, CHANGE = 0, 1, 2, 3
 # A surrender of 505,699 AGENT + one T1 ADAM pass, and one of AGENT + SHARDS

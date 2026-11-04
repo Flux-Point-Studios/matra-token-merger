@@ -46,13 +46,16 @@ from services.chain_check import ChainUnavailable
 from services.cosign_policy import SLOT_OFFSET_S, CosignRejected, decode, load_config, split_tx
 from services.pool_tip import PoolTipManager
 from services.redemption_ledger import RedemptionLedger, create_ledger
+from services.pager import Pager
 from tests.cosign_cases import (
     COMMITTED_DENYLIST,
     PIN,
+    TEST_WEBHOOK,
     FakeChain,
     key_address,
     ledger_refusing_writes,
     not_found,
+    owed_pages,
     throwaway_key,
     utxos_answer,
 )
@@ -89,10 +92,12 @@ def _item(asset_key: str, quantity: int, nft_units: list[str] | None = None):
 
 
 @pytest.fixture
-def validating(monkeypatch):
+def validating(monkeypatch, tmp_path):
     """Everything wired up to the build; the build itself records its
-    arguments and stops."""
+    arguments and stops. Pages go to the outbox at tmp_path/pager.sqlite3."""
     seen: dict = {}
+    monkeypatch.setattr(api.state, "pager", Pager(
+        TEST_WEBHOOK, str(tmp_path / "pager.sqlite3"), "surrender-api, admin_1"))
 
     def build(user_address, total_cmatra, legacy_assets, pool_utxo, pending=False, user_inputs=None):
         seen.update(total=total_cmatra, legacy=legacy_assets)
@@ -160,12 +165,24 @@ def test_a_pointer_address_is_refused_before_anything_is_built(validating, monke
 
 
 @pytest.mark.parametrize("route", ROUTES)
-def test_without_a_denylist_nothing_is_built(validating, monkeypatch, route):
-    monkeypatch.setattr(api.state, "denylist", None)
+@pytest.mark.parametrize("unloaded", ["denylist", "pager"])
+def test_without_a_denylist_or_a_pager_nothing_is_built(validating, monkeypatch, route, unloaded):
+    monkeypatch.setattr(api.state, unloaded, None)
     with pytest.raises(HTTPException) as err:
         ROUTES[route](MAINNET_USER)
     assert err.value.status_code == 503
     assert validating == {}
+
+
+def test_a_denied_address_pages_once_an_hour(validating, tmp_path):
+    for _ in range(3):
+        with pytest.raises(HTTPException):
+            _build([_item("AGENT", 1000)], DENIED_USERS["W1"])
+    with pytest.raises(HTTPException):
+        _build([_item("AGENT", 1000)], DENIED_USERS["claims"])
+    pages = owed_pages(tmp_path / "pager.sqlite3")
+    assert [page.split(":")[0] for page in pages] == ["refused denied_credential"] * 2
+    assert DENIED_USERS["W1"] in pages[0] and DENIED_USERS["claims"] in pages[1]
 
 
 @pytest.mark.parametrize("assets,reason", [
@@ -292,6 +309,8 @@ class World:
             "COSIGNER_LEDGER_PATH": str(tmp_path / "cosigned.sqlite3"),
             "COSIGNER_SKEY_PATH": str(tmp_path / "throwaway.skey"),
             "BLOCKFROST_PROJECT_ID": "preprod-test-project",
+            "PAGER_DISCORD_WEBHOOK_URL": TEST_WEBHOOK,
+            "PAGER_OUTBOX_PATH": str(tmp_path / "cosigner-pager.sqlite3"),
         }
         self.cosigner_sk.save(env["COSIGNER_SKEY_PATH"])
         self.ledger = env["COSIGNER_LEDGER_PATH"]
@@ -303,8 +322,10 @@ class World:
         self.client = TestClient(cosigner.app)
         self.client.__enter__()
         self.signed_by_admin: list[bytes] = []
-        # The primary ledger's approvals at each admin_1 signature.
+        # The primary ledger's approvals, and its pages, at each admin_1 signature.
         self.primary_rows_when_signed: list[int] = []
+        self.outbox = tmp_path / "primary-pager.sqlite3"
+        self.pages_when_signed: list[list[str]] = []
         self.cosign_calls = 0
         self._wire_surrender_api(env)
         create_ledger(str(tmp_path / "primary.sqlite3"))
@@ -329,6 +350,7 @@ class World:
             def sign(self, data):
                 world.signed_by_admin.append(data)
                 world.primary_rows_when_signed.append(world.primary_rows())
+                world.pages_when_signed.append(owed_pages(world.outbox))
                 return world.admin_sk.sign(data)
 
             def __getattr__(self, name):
@@ -394,6 +416,7 @@ class World:
         m.setattr(api.state, "admin_addr", Address(admin_pkh, network=Network.TESTNET))
         m.setattr(api.state, "cosigner_pkh", cosigner_pkh)
         m.setattr(api.state, "bf", _BF())
+        m.setattr(api.state, "pager", Pager(TEST_WEBHOOK, str(self.outbox), "surrender-api, admin_1"))
         # Both signers ask the same (fake) chain; each through its own client.
         m.setattr(cosigner.state, "chain", api.state.bf)
         m.setattr(api.state, "built_bodies", {})
@@ -736,6 +759,24 @@ def test_a_unit_minted_past_its_pinned_supply_is_refused_before_either_admin_sig
     assert world.cosign_calls == 0
 
 
+def test_a_surrender_is_paged_before_admin_1_signs(world):
+    built = world.build_route(1_000)
+    world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    [pages] = world.pages_when_signed
+    assert len(pages) == 1 and pages[0].startswith(f"signing surrender {built.tx_hash}: ")
+
+
+def test_an_unwritable_outbox_stops_the_surrender_before_admin_1_signs(world):
+    built = world.build_route(1_000)
+    with sqlite3.connect(world.outbox) as conn:
+        conn.execute("CREATE TRIGGER refuse BEFORE INSERT ON pages BEGIN SELECT RAISE(ABORT, 'full'); END")
+    with pytest.raises(HTTPException) as err:
+        world.submit_route(built.tx_hash, world.wallet_witnesses(built.tx_hash))
+    assert err.value.status_code == 503
+    assert err.value.detail["code"] == "pager_unavailable"
+    assert world.signed_by_admin == [] and world.submitted == []
+
+
 def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(world):
     world.slots[world.user_body] = NOW - 3600
     with pytest.raises(HTTPException) as err:
@@ -744,6 +785,7 @@ def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(wo
     assert err.value.detail["code"] == "cooling_off"
     assert world.user_body in err.value.detail["message"]
     assert world.signed_by_admin == [] and world.cosign_calls == 0
+    assert [page.split(":")[0] for page in owed_pages(world.outbox)] == ["refused cooling_off"]
     world.slots[world.user_body] = NOW - 72 * 3600
     world.build_route(1_000)  # held as long as the window, and the tip was released
 
