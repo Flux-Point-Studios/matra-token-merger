@@ -1,5 +1,7 @@
 """services.pager writes every page to an outbox before the caller goes on,
-and delivers it to the Discord webhook only once Discord saves it.
+and delivers it to the Discord webhook only once Discord saves it,
+surrenders' pages first. Refusals page within a budget: once an hour for a
+rule and subject, ten an hour for a rule, the rest counted into one page.
 
 Discord is replaced by a recorder; tests/conftest.py replaces it for every
 other test too, so no test reaches the network."""
@@ -40,11 +42,15 @@ class Discord:
         return 200, {"id": str(1000 + len(self.posts))}, None
 
 
-@pytest.fixture
-def discord(monkeypatch):
-    fake = Discord()
+def _recording(monkeypatch, *answers) -> Discord:
+    fake = Discord(*answers)
     monkeypatch.setattr(pager, "_post", fake)
     return fake
+
+
+@pytest.fixture
+def discord(monkeypatch):
+    return _recording(monkeypatch)
 
 
 def _pager(tmp_path, url: str = WEBHOOK) -> Pager:
@@ -133,16 +139,158 @@ def test_the_sender_thread_delivers_without_being_asked(tmp_path, discord):
     assert p.owed() == 0
 
 
-def test_a_repeated_refusal_pages_once_an_hour(tmp_path, discord, monkeypatch):
-    clock = [1000.0]
-    monkeypatch.setattr(pager.time, "time", lambda: clock[0])
+def _clock(monkeypatch) -> list[float]:
+    """The pager's clock, at 2027-01-15 08:00Z until moved."""
+    now = [1_800_000_000.0]
+    monkeypatch.setattr(pager.time, "time", lambda: now[0])
+    return now
+
+
+def _contents(discord: Discord) -> list[str]:
+    return [payload["content"] for _, payload, _ in discord.posts]
+
+
+def _flood(p: Pager, code: str, count: int, first: int = 0) -> None:
+    """Refusals of ``count`` subjects, each its own."""
+    for n in range(first, first + count):
+        p.refusal(code, f"subject {n}", f"subject {n}")
+
+
+# Each takes (tmp_path, monkeypatch) only, so tests/test_pager_mutation.py
+# can run it against mutants of the pager.
+BUDGET_AND_ORDER = []
+
+
+def budget_and_order(test):
+    BUDGET_AND_ORDER.append(test)
+    return test
+
+
+@budget_and_order
+def test_a_repeated_refusal_pages_once_an_hour(tmp_path, monkeypatch):
+    _recording(monkeypatch)
+    clock = _clock(monkeypatch)
     p = _pager(tmp_path)
     for _ in range(3):
-        p.page("refused addr1x", once_per="denied_credential addr1x")
-    p.page("refused addr1y", once_per="denied_credential addr1y")
+        p.refusal("denied_credential", "addr1x: W1", "addr1x")
+    p.refusal("denied_credential", "addr1y: W2", "addr1y")
     clock[0] += 3600
-    p.page("refused addr1x", once_per="denied_credential addr1x")
-    assert [text for text, _ in _owed(tmp_path)] == ["refused addr1x", "refused addr1y", "refused addr1x"]
+    p.refusal("denied_credential", "addr1x: W1", "addr1x")
+    assert [text for text, _ in _owed(tmp_path)] == [
+        "refused denied_credential: addr1x: W1", "refused denied_credential: addr1y: W2",
+        "refused denied_credential: addr1x: W1",
+    ]
+
+
+@budget_and_order
+def test_a_refusal_under_no_deny_rule_is_not_paged(tmp_path, monkeypatch):
+    _recording(monkeypatch)
+    p = _pager(tmp_path)
+    p.refusal("input_spent", "abc#0 is not an unspent output", "abc#0")
+    assert _owed(tmp_path) == []
+
+
+@budget_and_order
+def test_a_surrender_page_goes_before_the_refusal_pages_owed_before_it(tmp_path, monkeypatch):
+    discord = _recording(monkeypatch)
+    p = _pager(tmp_path)
+    for n in range(3):
+        p.refusal("denied_credential", f"addr{n}: W1", f"addr{n}")
+    p.page("signing surrender abc")
+    assert p.deliver() is None
+    assert _contents(discord) == ["[co-signer] signing surrender abc"] + [
+        f"[co-signer] refused denied_credential: addr{n}: W1" for n in range(3)
+    ]
+
+
+@budget_and_order
+def test_a_surrender_page_owed_while_refusals_are_sent_goes_next(tmp_path, monkeypatch):
+    p = _pager(tmp_path)
+
+    class SurrenderMidway(Discord):
+        def __call__(self, url, payload, headers):
+            if len(self.posts) == 0:
+                p.page("signing surrender abc")
+            return super().__call__(url, payload, headers)
+
+    discord = SurrenderMidway()
+    monkeypatch.setattr(pager, "_post", discord)
+    for n in range(3):
+        p.refusal("cooling_off", f"unit {n} reached the claimant", f"unit {n}")
+    assert p.deliver() is None
+    assert [text.split(":")[0] for text in _contents(discord)] == [
+        "[co-signer] refused cooling_off", "[co-signer] signing surrender abc",
+        "[co-signer] refused cooling_off", "[co-signer] refused cooling_off",
+    ]
+
+
+@budget_and_order
+def test_each_rule_pages_ten_refusals_an_hour_and_counts_the_rest_into_one_page(tmp_path, monkeypatch):
+    discord = _recording(monkeypatch)
+    clock = _clock(monkeypatch)
+    p = _pager(tmp_path)
+    _flood(p, "denied_credential", 25)
+    clock[0] += 600
+    _flood(p, "pointer_address", 3)
+    assert p.owed() == 13
+    assert len(_owed(tmp_path)) == 14  # and the count, due when the hour ends
+    assert p.deliver() == 3000
+    assert _contents(discord)[:9] == [f"[co-signer] refused denied_credential: subject {n}" for n in range(9)]
+    assert _contents(discord)[9] == (
+        "[co-signer] refused denied_credential: subject 9 (the last denied_credential page until"
+        " 2027-01-15 09:00Z; any more are counted then)"
+    )
+    assert len(discord.posts) == 13
+    clock[0] += 2999
+    assert p.owed() == 0 and p.deliver() == 1
+    clock[0] += 1
+    assert p.owed() == 1
+    assert p.deliver() is None
+    assert _contents(discord)[13] == (
+        "[co-signer] refused denied_credential: 15 more in the hour from 2027-01-15 08:00Z, only logged"
+    )
+    _flood(p, "denied_credential", 1)
+    assert p.owed() == 1  # a new hour pages again
+
+
+@budget_and_order
+def test_a_flood_of_refusals_leaves_the_outbox_and_the_subjects_remembered_bounded(tmp_path, monkeypatch):
+    _recording(monkeypatch)
+    clock = _clock(monkeypatch)
+    monkeypatch.setattr(pager, "REMEMBERED_SUBJECTS", 50)
+    p = _pager(tmp_path)
+    for code in sorted(pager.PAGED_REFUSALS):
+        _flood(p, code, 200)
+    assert len(_owed(tmp_path)) == 3 * (pager.REFUSAL_PAGES_PER_HOUR + 1)
+    assert len(p._repeats) == 50
+    clock[0] += 3600
+    p.refusal("cooling_off", "late", "late")
+    assert list(p._repeats) == ["cooling_off late"]
+
+
+@budget_and_order
+def test_refusals_past_the_hours_pages_do_not_wake_the_sender(tmp_path, monkeypatch):
+    """Once each hour a refusal starts the count, and the sender wakes to
+    learn when it is due; the refusals after it only add to it, and leave a
+    sender waiting out Discord's Retry-After alone."""
+    _recording(monkeypatch, (429, {"retry_after": 900}, None))
+    _clock(monkeypatch)
+    p = _pager(tmp_path)
+    _flood(p, "denied_credential", pager.REFUSAL_PAGES_PER_HOUR + 1)
+    assert p.deliver() == 900
+    p._wake.clear()
+    _flood(p, "denied_credential", 50, first=1_000)
+    assert not p._wake.is_set()
+    assert len(_owed(tmp_path)) == pager.REFUSAL_PAGES_PER_HOUR + 1
+
+
+@budget_and_order
+def test_the_sender_wakes_for_a_page_owed_while_it_waits(tmp_path, monkeypatch):
+    _recording(monkeypatch)
+    p = _pager(tmp_path)
+    p._wake.clear()
+    p.page("signing surrender abc")
+    assert p._wake.is_set()
 
 
 @pytest.mark.parametrize("url", [

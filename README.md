@@ -286,7 +286,12 @@ The threat model is **dual-admin compromise**:
   per surrender and 15M per day.
 - Each signer pages the on-call channel about every surrender it is about to
   sign and every refusal under a deny rule; a page is written before the
-  signature and counts only once Discord has saved it.
+  signature and counts only once Discord has saved it. Surrender pages go
+  before refusal pages. A refusal costs its caller nothing, so a subject
+  refused again under one rule within the hour is only logged, and each rule
+  pages ten refusals an hour, counting the rest into one page when the hour
+  ends: no flood of refusals buries the channel, fills the outbox or delays
+  a surrender's page.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it
   cannot mint or drain. The front-end never holds either admin key.
 - A compromised user wallet loses what it holds, and its merger entitlement

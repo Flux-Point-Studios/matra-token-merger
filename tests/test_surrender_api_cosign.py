@@ -186,6 +186,34 @@ def test_a_denied_address_pages_once_an_hour(validating, tmp_path):
     assert DENIED_USERS["W1"] in pages[0] and DENIED_USERS["claims"] in pages[1]
 
 
+def test_a_flood_of_refused_addresses_pages_within_the_hours_budget_and_a_surrender_goes_first(
+        validating, tmp_path, monkeypatch):
+    """A base address pairing W1's payment key with a stake key of its own,
+    and a pointer address, are each refused before any build: free to make,
+    one after another."""
+    w1 = Address.from_primitive(DENIED_USERS["W1"]).payment_part
+    users = [Address(w1, VerificationKeyHash(n.to_bytes(28, "big")), Network.MAINNET).encode() for n in range(40)]
+    users += [Address(VerificationKeyHash(b"\x0c" * 28), PointerAddress(n + 1, 2, 3), Network.MAINNET).encode()
+              for n in range(40)]
+    for user in users:
+        with pytest.raises(HTTPException):
+            _build([_item("AGENT", 1000)], user)
+    pages = owed_pages(tmp_path / "pager.sqlite3")
+    assert len(pages) == 2 * 11  # ten pages a rule, and each rule's count of the rest
+    api.state.pager.page("signing surrender abc: 3,191,874.488548 cMATRA")
+    saved: list[str] = []
+
+    def discord(url, payload, headers):  # saves five messages, then rate-limits
+        if len(saved) == 5:
+            return 429, {"retry_after": 900}, "900"
+        saved.append(payload["content"])
+        return 200, {"id": str(len(saved))}, None
+
+    monkeypatch.setattr("services.pager._post", discord)
+    assert api.state.pager.deliver() == 900
+    assert saved[0].endswith("signing surrender abc: 3,191,874.488548 cMATRA")
+
+
 @pytest.mark.parametrize("assets,reason", [
     # The count-inflation reproduction: a hundred passes paid, one junk NFT moved.
     ([_item("T1_ADAM_PASS", 100, ["ee" * 28 + "6a756e6b"])], "names 1 unit"),
