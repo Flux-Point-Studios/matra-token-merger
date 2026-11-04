@@ -785,8 +785,11 @@ def test_units_that_reached_the_claimant_an_hour_ago_wait_out_the_cooling_off(wo
     assert err.value.detail["code"] == "cooling_off"
     assert world.user_body in err.value.detail["message"]
     assert world.signed_by_admin == [] and world.cosign_calls == 0
+    world.monkeypatch.setattr(api.time, "time", lambda: NOW + 60 + SLOT_OFFSET_S[NETWORK])
+    with pytest.raises(HTTPException):
+        world.build_route(1_000)  # refused again a minute later: paged once
     assert [page.split(":")[0] for page in owed_pages(world.outbox)] == ["refused cooling_off"]
-    world.slots[world.user_body] = NOW - 72 * 3600
+    world.slots[world.user_body] = NOW + 60 - 72 * 3600
     world.build_route(1_000)  # held as long as the window, and the tip was released
 
 

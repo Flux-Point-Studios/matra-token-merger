@@ -621,3 +621,21 @@ def test_refuses_to_start_without_its_pager(service, monkeypatch, missing):
     monkeypatch.delenv(missing)
     with pytest.raises(ValueError, match=missing):
         cosigner.startup()
+
+
+def test_a_cooling_off_refusal_repeated_a_minute_later_pages_once(service):
+    """The units' producing transaction landed inside the window, from
+    outputs this chain view has no body for."""
+    s = golden_scenario(BASE_T1)
+    approval = evaluate_surrender(s.tx, s.language_views, s.parents, s.now_slot, MAINNET)
+    for tx_id, _ in approval.unit_inputs:
+        service.chain.slots[tx_id.hex()] = s.now_slot - 60
+    client = service.start(service.client(s.now_slot))
+    try:
+        for minutes in (0, 1):
+            service.at(s.now_slot + 60 * minutes)
+            refused = client.post("/cosign", json=_request(s), headers=HEADERS)
+            assert refused.json()["detail"]["code"] == "cooling_off"
+    finally:
+        client.__exit__(None, None, None)
+    assert [page.split(":")[0] for page in owed_pages(service.outbox)] == ["refused cooling_off"]

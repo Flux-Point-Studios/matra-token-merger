@@ -561,7 +561,7 @@ def _arrival(at_slot: int):
 
 PROBES.append(Probe("units_that_arrived_as_the_cooling_off_began", "confirmed", _arrival(NOW - COOLING_OFF)))
 PROBES.append(Probe("units_that_arrived_one_slot_inside_the_cooling_off", "cooling_off",
-                    _arrival(NOW - COOLING_OFF + 1), f"slot {NOW}"))
+                    _arrival(NOW - COOLING_OFF + 1), f"from slot {NOW + 1}"))
 
 
 @probe("confirmed")

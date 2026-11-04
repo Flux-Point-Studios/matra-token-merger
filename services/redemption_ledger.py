@@ -1,7 +1,7 @@
 """A signer's record of the surrenders it approved, and the limits it holds them to.
 
 Each signer keeps its own ledger and records an approval before its signature
-leaves the process. Two limits are checked against the record:
+leaves the process. Three limits are checked against the record:
 
   * the cMATRA the pool can lose to transactions approved in the last 24 hours
     stays within a cap;
@@ -232,7 +232,9 @@ class RedemptionLedger:
                     f"{unit}: {redeemed} redeemed would pass the {limits.get(unit, 0)} the pin leaves",
                 )
         for policy in sorted({unit[:56] for unit in approval.units}):
-            redeemed = _heaviest(rows, lambda row: sum(q for unit, q in row.units.items() if unit[:56] == policy))
+            redeemed = _heaviest(
+                rows, lambda row: sum(q for unit, q in row.units.items() if unit[:56] == policy),
+            )
             if redeemed > self.funded.get(policy, 0):
                 raise CosignRejected(
                     "funded_supply",

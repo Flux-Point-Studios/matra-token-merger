@@ -8,9 +8,9 @@ services.cosign_policy has approved it as a surrender that its claimant has
 signed, services.chain_check has confirmed it against this host's own view
 of the chain, services.redemption_ledger has recorded it within the 24-hour
 cap and each surrendered unit's pinned limit, and services.pager owes the
-on-call channel a page of it. A refusal under a deny rule pages too. The check does not
-depend on anything the surrender API asserts: input values come from
-producing bodies hashed against the inputs' transaction ids.
+on-call channel a page of it; a refusal under a deny rule pages too. The
+check does not depend on anything the surrender API asserts: input values
+come from producing bodies hashed against the inputs' transaction ids.
 
 POST /cosign takes the full transaction carrying the claimant's witness, the
 bodies of the transactions that produced its inputs (each is checked against
@@ -125,7 +125,9 @@ def startup() -> None:
     vk = PaymentVerificationKey.from_signing_key(sk)
     primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
     cfg = load_config(os.environ, [primary, vk.hash().payload])
-    ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")), cfg.funded_limits)
+    ledger = RedemptionLedger(
+        _need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")), cfg.funded_limits,
+    )
     api_key = chain_api_key(cfg.network)
     if not api_key:
         raise ValueError("CHAIN_API_KEY_FILE or BLOCKFROST_PROJECT_ID must be set")

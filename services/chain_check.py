@@ -127,7 +127,10 @@ def _spent_inputs(answer: Any, tx_hash: str) -> list:
     consuming: neither collateral, which a valid transaction keeps, nor
     reference inputs, which it only reads."""
     try:
-        return [entry for entry in answer["inputs"] if entry["collateral"] is False and entry["reference"] is False]
+        return [
+            entry for entry in answer["inputs"]
+            if entry["collateral"] is False and entry["reference"] is False
+        ]
     except (KeyError, TypeError) as exc:
         raise ChainUnavailable(f"{tx_hash}: unexpected inputs from the chain view: {exc!r}") from exc
 
@@ -174,8 +177,8 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Callable
         inside.add(tx_id)
         if len(inside) > MAX_PROVENANCE_TXS:
             raise CosignRejected(
-                "cooling_off", f"the units moved through more than {MAX_PROVENANCE_TXS} transactions"
-                f" in the {COOLING_OFF_SLOTS} slots before slot {approval.checked_at}",
+                "cooling_off", f"the surrendered units moved through more than {MAX_PROVENANCE_TXS}"
+                f" transactions in the {COOLING_OFF_SLOTS} slots before the surrender",
             )
         answer = _ask(chain.get_tx_utxos, tx_hash)
         held = _held_by(answer, index, tx_hash) & surrendered
@@ -185,7 +188,7 @@ def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Callable
             if not sources or any(_payment_key(entry, tx_hash) != owner for entry in sources):
                 raise CosignRejected(
                     "cooling_off", f"{unit} reached the claimant in {tx_hash} at slot {slot}; it can be"
-                    f" surrendered from slot {slot + COOLING_OFF_SLOTS}, not at slot {approval.checked_at}",
+                    f" surrendered from slot {slot + COOLING_OFF_SLOTS}",
                 )
             pending.extend(_input_ref(entry, tx_hash) for entry in sources)
 

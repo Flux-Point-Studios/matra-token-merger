@@ -96,6 +96,13 @@ from pycardano.serialization import IndefiniteFrozenList as _IndefiniteFrozenLis
 from tools.api_clients import BlockfrostClient
 from tools.cardano_utils import estimate_min_ada
 from tools.config import FLUX_DECIMALS, ALL_MERGE_ASSETS
+from tools.credential_denylist import (
+    DEFAULT_DENYLIST_PATH,
+    DenyList,
+    PointerAddress,
+    load_denylist,
+    log_denylist,
+)
 from tools.process_surrender import (
     compute_redemption,
     find_pool_utxos,
@@ -117,13 +124,6 @@ from services.cosign_policy import (
     split_tx,
 )
 from services.cosign_policy import evaluate_surrender as check_surrender
-from tools.credential_denylist import (
-    DEFAULT_DENYLIST_PATH,
-    DenyList,
-    PointerAddress,
-    load_denylist,
-    log_denylist,
-)
 from services.chain_check import ChainUnavailable, confirm_on_chain
 from services.redemption_ledger import RedemptionLedger
 from services.defrag import plan_defrag
@@ -763,7 +763,8 @@ def _refuse_denied_address(address: Address) -> None:
         label = state.denylist.denied(address.to_primitive())
     except PointerAddress:
         logger.warning("Refused pointer address %s", address)
-        state.pager.refusal("pointer_address", f"{address} names its stake credential by pointer", str(address))
+        state.pager.refusal(
+            "pointer_address", f"{address} names its stake credential by pointer", str(address))
         raise HTTPException(403, {"code": "pointer_address",
                                   "message": "Use a base or enterprise address to surrender."})
     except ValueError:
