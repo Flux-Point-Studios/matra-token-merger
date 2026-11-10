@@ -2012,5 +2012,16 @@
     "label": "SaturnSwap deploy key, payment key"
    }
   ]
+ },
+ "credentials": {
+  "05c33985c26261c907e4d418eaeb3bcd2daf5595ec54d0c9dfd0cb44": "T1 ADAM pass policy key",
+  "18cf7f2270ab7782806f379f3d6f71985ffa208015f817fb229d7d02": "SaturnSwap deploy key, payment key",
+  "1f8e0205d3a77d6576bde7b2fd4babc9d4180b6dd721f8bc895074af": "MMaaS fee-channel operator key, payment key",
+  "2ba50a20768a17f14fa48ed7ba12e3e7d5a87fec15fd6b976067a65e": "SaturnSwap operator-fee key B, payment key",
+  "5975ef036a321619a2cb422cd4e2c8a31ae11c7cf222237749ab0027": "proof-of-inference Hydra bob, payment key",
+  "5c15a474b91ffe472b18f744aba28944331265ceb98ef6b9afe73e45": "proof-of-inference Hydra alice, payment key",
+  "5c3d142a598ed32bfd59c6214fb735ea6ba7eff5082d9f86daef55b3": "MMaaS fee key, payment key",
+  "cea98dfce26e0ffbf5ab892edcb8f8ab8b794d5390f80ec0b9aafed3": "SaturnSwap adam-bot key, payment key",
+  "f108825497f3f169155877a708799931b13e2dd3a326462d336d9cee": "MMaaS fee-channel operator key, payment key"
  }
 }

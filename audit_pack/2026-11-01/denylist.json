@@ -48,6 +48,11 @@
    "label": "burned wallet bodega, stake key"
   },
   {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "05c33985c26261c907e4d418eaeb3bcd2daf5595ec54d0c9dfd0cb44",
+   "label": "T1 ADAM pass policy key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "062c1438b78b31fde148d700ed95f2e8c63c31425dde7a5f485a9462",
    "label": "exposed bot wallet 184, stake key"
@@ -253,6 +258,11 @@
    "label": "exposed bot wallet 58, stake key"
   },
   {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "1f8e0205d3a77d6576bde7b2fd4babc9d4180b6dd721f8bc895074af",
+   "label": "MMaaS fee-channel operator key, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "2000933a78c2aceb7bac9308e4b603c75896c66777e026647841da94",
    "label": "exposed bot wallet 98, payment key"
@@ -366,6 +376,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "2a918d3ffb813142cea135672b9980d39f201a09f897386f4bbe11d6",
    "label": "exposed bot wallet 7, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "2ba50a20768a17f14fa48ed7ba12e3e7d5a87fec15fd6b976067a65e",
+   "label": "SaturnSwap operator-fee key B, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -728,6 +743,11 @@
    "label": "drained wallet outside FPS, stake key"
   },
   {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "5975ef036a321619a2cb422cd4e2c8a31ae11c7cf222237749ab0027",
+   "label": "proof-of-inference Hydra bob, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "597b5c86cf1d115adbb769406415b0fb1c1664fc4cac0f6ac502c96a",
    "label": "exposed bot wallet 70, payment key"
@@ -761,6 +781,16 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "5b2bb524595d284068a5478d966fd320e482c64164aa15eee3dd92b0",
    "label": "exposed bot wallet 162, stake key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "5c15a474b91ffe472b18f744aba28944331265ceb98ef6b9afe73e45",
+   "label": "proof-of-inference Hydra alice, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "5c3d142a598ed32bfd59c6214fb735ea6ba7eff5082d9f86daef55b3",
+   "label": "MMaaS fee key, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -2156,6 +2186,11 @@
    "evidence": "its seed was exposed; swept to custody by d05ea39d7dbd806938e20a5e7047c51e5a1bbeaa6192e9b4a9af9c8888af4280",
    "hash": "f0f5676398bf042834f5a30d88e08de37bea7239ca0932372e7e64a0",
    "label": "burned wallet bodega, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "f108825497f3f169155877a708799931b13e2dd3a326462d336d9cee",
+   "label": "MMaaS fee-channel operator key, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",

@@ -66,7 +66,7 @@ def test_the_committed_list_loads_and_matches_its_schema():
     denylist = load_denylist(COMMITTED)
     jsonschema.validate(json.loads(COMMITTED.read_text()), SCHEMA)
     assert denylist.sha256 == hashlib.sha256(COMMITTED.read_bytes()).hexdigest()
-    assert len(denylist.labels) == 459
+    assert len(denylist.labels) == 466
     assert len(denylist.allowed) == 2
 
 
@@ -82,7 +82,10 @@ def test_the_committed_list_denies_the_attacker_and_the_drained_wallets():
         assert denylist.denied(Address.from_primitive(address).to_primitive()), address
 
 
-EXPOSED_SINCE_V1 = json.loads((ROOT / "tests/fixtures/denylist_exposed_since_v1.json").read_text())["addresses"]
+_EXPOSED = json.loads((ROOT / "tests/fixtures/denylist_exposed_since_v1.json").read_text())
+EXPOSED_SINCE_V1 = _EXPOSED["addresses"]
+EXPOSED_KEYS_WITHOUT_AN_ADDRESS = _EXPOSED["credentials"]
+"""Key hashes from a .vkey inventory, whose addresses are not known."""
 
 
 def test_the_fixture_names_every_key_exposed_since_the_first_list():
@@ -102,6 +105,12 @@ def test_the_committed_list_denies_each_key_exposed_since_the_first_list(address
     assert [credential.hex() for credential in credentials] == [entry["hash"] for entry in expected]
     for credential, entry in zip(credentials, expected):
         assert denylist.labels.get(credential) == entry["label"]
+
+
+@pytest.mark.parametrize("credential", sorted(EXPOSED_KEYS_WITHOUT_AN_ADDRESS))
+def test_the_committed_list_denies_each_exposed_key_known_only_by_its_hash(credential):
+    denylist = load_denylist(COMMITTED)
+    assert denylist.labels.get(bytes.fromhex(credential)) == EXPOSED_KEYS_WITHOUT_AN_ADDRESS[credential]
 
 
 def test_the_committed_list_lets_the_rescue_wallet_through():
