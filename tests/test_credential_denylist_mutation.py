@@ -119,7 +119,7 @@ def test_the_unmutated_module_answers_every_probe_as_its_tests_expect(tmp_path):
     assert out["credentials pointer"] == "PointerAddress"
     for name, (_, denied) in DENIALS.items():
         assert (out[f"denied {name}"] != "None") is denied, name
-    assert out["load committed"].startswith("list 466 2 ")
+    assert out["load committed"].startswith("list 834 2 ")
 
 
 def test_every_check_is_found():

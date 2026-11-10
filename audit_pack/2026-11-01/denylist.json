@@ -23,6 +23,11 @@
    "label": "exposed bot wallet 113, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "012dc149447fb332a70f79e684ae050bc0ff3e9e7a605250e9e4df1c",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "01450ddff66d11633e5fdf03797d72fc766f5eeba41167bd64452665",
    "label": "exposed bot wallet 37, stake key"
@@ -38,9 +43,44 @@
    "label": "exposed bot wallet 46, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "01f6140336fcb2b9a9505d9dbee636f7c4ca9d2a9602ae59b937a7e2",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0262ce9899f3adcbd2af9f20f621116a6168b296de2a04a42ded7e9f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "native script: after slot 113729409, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
    "hash": "031afff5c1006f0ce276e8b8c02bf92c0e1554094f109f508532ddf7",
    "label": "W1 timelock script"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "03252073719d08946ebeb67d72273bc2ea504a1a4ef1977c81de5f83",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "032b085224318783ada719b0afbf151d9d0266af33e4ef4f9762210b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "04077b186586c17063e191581ea1598e21b95cae45fee891465ca746",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "046111e5011a199db1b67c5d66a5a6fd3cc00a6a88ebc265734383f2",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0470a2018ae9a35f17778da84d7e24ad8b7e8eb740a1b691bd18ee68",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; swept to custody by d05ea39d7dbd806938e20a5e7047c51e5a1bbeaa6192e9b4a9af9c8888af4280",
@@ -48,9 +88,29 @@
    "label": "burned wallet bodega, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0488ceaf3ba52146a3da8c73a89697de4a212a93e874aa70994652cc",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "050b4348cc08f20ba63917c5edd1c7d146dd43f882aab6c017066b55",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its signing key was exposed (2026-11-10 inventory)",
    "hash": "05c33985c26261c907e4d418eaeb3bcd2daf5595ec54d0c9dfd0cb44",
    "label": "T1 ADAM pass policy key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "05cabe210c9052ff9b4f712ef2830c69355498954a8ec9308b3b92f0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "061ac883ca75e52b2d6557e428e790680e2e02eb4c85260c7408ccb8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -103,14 +163,64 @@
    "label": "exposed bot wallet 79, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0a06cecb04526ce58e3fdb40a6b7437d360509882a9aedbffd07a205",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "drained to the attacker by e76d0e8a18d617b7fa3db5691022bbf71363657b54bd017ff730a1571649fe89",
    "hash": "0a086c04f3ee8767e1471596295ccc9e377c4d1395f4b0f6bacbabc0",
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0a1980949a67b2aa97572469417426d408178e921fd3cac8f7a92d26",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0a4881b185837282eede68c3a0f4d402ae76966ec8d9ea3869ac9e9e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0a4e5e7cfa299c51a6d553559cd858468c3d321a0ff1950a3e9fc200",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0a548111e677ac0e0d5e890f0436eef078344a9836d2b8741ba5be27",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0aa80dedba23ba6c1d3a96c4fc15b0269205a20186a33dba5192711d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0adb648001eed11e690235dc1007e8fee1fd9814e4fd55d0a63cb89e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0b56049a525db9c780d554a9de07179820efdca1f314790e90d978fe",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0b75502047d00d155c7a86f2ab9bda9cf86ddf363df9cb490baffc83",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "0b9925ec96c71e135529db5aa4d4ac4532f1a57cd83be637749b62d4",
    "label": "exposed bot wallet 83, stake key"
+  },
+  {
+   "evidence": "its registering seed was exposed (claims deny set)",
+   "hash": "0bde001c495a4fb57fef195aaaa4da583c411844a2f3f5860eff8597",
+   "label": "TALOS pool cold key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -128,14 +238,39 @@
    "label": "exposed bot wallet 148, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0da2e7ae040b070bebb1fc2333cd6065b1a77531d3c2cd4b0e38aed0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "0e273572a5163b23b25f73a53b9f63ea5b4f827c433601b18be7074e",
    "label": "exposed bot wallet 153, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0e5deb77c8180905f1c5070cd2548e8f1f5450ce0cc05ba5ce4d9781",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0e7a5c61e88c8d491826da55a2c26c0540d3de82c5242b4e8b7752bf",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "0ea2866d8c66a669cb69f41b563cad4ebc06fc8e9fdcb2b04545f65b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "0fc03fdb7162ccdd23b74cc3245f957911a1ac843036b8e012a8873d",
    "label": "exposed bot wallet 154, stake key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "0fdf5b0b49a849c2d3eff080c758b49d04851b4ed63360c8bb38c4d0",
+   "label": "talos-mm wallet 2, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -148,9 +283,29 @@
    "label": "exposed bot wallet 95, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "10c7493d7f920b49a04763c4cb7cb5b095326764f7a87d4eca29c8c6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "10fe10c7f309097ee83c6f12a1ef4a2c5fb39c4bcf1656d1161d9779",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "10ff5696bcc7f99ad5a76efe87de81b51e49c3906a56823da860f29f",
    "label": "exposed bot wallet 151, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "121ad238c31c2df1c639f7b37a7a2077eccfebcc1b10dcf9c285d182",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "12a1aee13684fb35f8a89b73423452730a35e53eb756208ad81ff276",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -163,9 +318,34 @@
    "label": "exposed bot wallet 123, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "131763fd21579ec2e0247b07804744129b91f198cb839980be7d3e65",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "13c739c141b29aacd6f0545758b4bda49da1eba6132ce6d6a85563c3",
    "label": "exposed bot wallet 189, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "13dab486247ea054516869ca0bf40f846f91d7c8677df92909120807",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "14552da3bd10d006c616650b0c4f1cfe3c38749a035207bffcdce6bc",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "14a835e6d0cb8b3159dbb5560ac0d7f7ceb58e7e50944399cd142b2c",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "14d194a06ba1aa98f1f0920daf090068795b1b58df895e206a52871a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "drained to the attacker by 5716801d60dd7884fabd43a818c1e05a72cecd1e06c61128c0e2fa314863bd69",
@@ -176,6 +356,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "1550c6cbc2e7685b50428030edb1099369c3a98bbee57a61e90af67d",
    "label": "exposed bot wallet 142, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "156d50654b65ab95e6a9b4a6184aa62a40a6715d51d3611b5d0db6a2",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -203,9 +388,29 @@
    "label": "exposed bot wallet 101, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "170331043cea404ed83f2994ffad5adc04a629237ef7e0a50aa322e6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "185027fd50e65c5af14cde938fab12933865b7a37d399621e3ca3619",
    "label": "exposed bot wallet 28, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "1861d09a7bc129b96a86ad1e665827317adf764094621186a1121021",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "18663b8ec15a9135955074b487ae9f7471dfe389c7415b1d1a17f255",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (the seed of Aegis vault account 0) (claims deny set)",
+   "hash": "18a53b14267be337acc6e73b925b5058b5302142a42f785d0c4c941f",
+   "label": "Aegis vault account 2, stake key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -228,6 +433,11 @@
    "label": "exposed bot wallet 71, stake key"
   },
   {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "199b75ccdc996a94ab5daba8fa0268e90b3f4abdf4b6ccffb5baedd6",
+   "label": "exposed bot wallet 180, acct4 stake key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "19d01daaa2a022371fe0a4bc47560e42d40adcdae5a1aaf68545b35b",
    "label": "exposed bot wallet 137, payment key"
@@ -238,9 +448,44 @@
    "label": "W1 timelock script"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "1a0173b874f0343bcad828938f3790cb8d467c07a5cd84b9e931ea66",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "1a76bd279f74d139fc9952cd73f870679f93579fcd756675dbfbdb93",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "1ab46122609e5c442cadf61eca37d71d558a3cc8de9d62e4c9704b0d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "spent by the attacker in 6223dd7e6dec5132c6b5745c303526cd40e09987b94b2bfbd927cbab1e83f257",
    "hash": "1ae8f4cdfbda0eddde310b08f81c92e20007c1fbf8c9e411e6ac6ec3",
    "label": "W2 seed, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "1af84a9e697e1e7b042a0a06f061e88182feb9e9ada950b36a916bd5",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "1be1e139b15f8a15e4fc93daa93d4f24597d4a61294a6eaa81326427",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "1cd6fdc5f6344b4ddd471e6b53c6cbc0bffe37ab0a47a2a74fa207dd",
+   "label": "prorated-sub-service merchant wallet, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "1ce5153bf58c3b0226fa874e0c3b199d2ecf90867d105688c27edf27",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -271,6 +516,11 @@
    "evidence": "drained to the attacker by e76d0e8a18d617b7fa3db5691022bbf71363657b54bd017ff730a1571649fe89",
    "hash": "20021aa3ca1bc72be2042a954ab48752a6047e5ea8ec76be534649a2",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "20299a2c124a635c320166f49e58329f9f0b01019be76dcee14f1875",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "drained to the attacker by b68f1b9d7a10fca3324a48391246a4faf68319ffed1e0463c9ad7e683d2e96e0",
@@ -313,6 +563,11 @@
    "label": "exposed bot wallet 158, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "2409cbc50535fd212913e8cedcb69ae52769244197c3f0662eb29255",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "240f006019d2b897af65ae1486352084f2f1ae678597284cd454e149",
    "label": "exposed bot wallet 9, payment key"
@@ -336,6 +591,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "2578ea16789df649e5864b8681043392a41878bc3bd5740b8c09380b",
    "label": "exposed bot wallet 27, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "265a9ab91d97758d8ef338ba6a4f07453ec216a161f066f0ddd2bbcc",
+   "label": "prorated-sub-service admin wallet, payment key"
   },
   {
    "evidence": "native script: after slot 113978752, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
@@ -368,6 +628,11 @@
    "label": "exposed bot wallet 80, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "28e1976256d8c24aeda08fd4620081e8cf052e6c2fa4922ee04bddb5",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "29a1c7cdc8bbb47cb52794f464116785eff193265e1ac13b1e883c67",
    "label": "exposed bot wallet 98, stake key"
@@ -378,9 +643,24 @@
    "label": "exposed bot wallet 7, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "2a993517ca5b68978122879b3e249c292b3822f5d9e85862fef256cb",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "2ad2ae55630559db4e7c90510e75a2ac029599e0823e9337f5561c29",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its signing key was exposed (2026-11-10 inventory)",
    "hash": "2ba50a20768a17f14fa48ed7ba12e3e7d5a87fec15fd6b976067a65e",
    "label": "SaturnSwap operator-fee key B, payment key"
+  },
+  {
+   "evidence": "its mnemonic was exposed in a hosting environment (claims deny set)",
+   "hash": "2bd661d004f39ff38e55da0a41da435c73077797981086b9538fabec",
+   "label": "license-service sponsor wallet, stake key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -418,6 +698,11 @@
    "label": "exposed bot wallet 67, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "2e6681b029e2d7b3bdaa4dae31f331455ec4246fb4645b4b0c164360",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "2fe348036600bce5356c78254570c31f4fbadbed15fe4095d7449904",
    "label": "exposed bot wallet 125, payment key"
@@ -428,6 +713,11 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "306a06a282487929be711462d80f89b2180601d22040ba9b5259de4f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "30ffc8efb8cafcbcc9acaab6e6b6dcb802e04457158bd754eb4c04e1",
    "label": "exposed bot wallet 111, stake key"
@@ -436,6 +726,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "311d3cadadada1a17c448672b4b008a2cdd3c5b2d19db1142f2010e2",
    "label": "exposed bot wallet 172, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "312c1f4b03fd40a884d1b10b630f2d4d5719211489df76bb0264cf73",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -453,14 +748,34 @@
    "label": "exposed bot wallet 48, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "33364a6bf87ea7116a6d0fcdd05a35ea965c74e855ea95c88b7e87b4",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "33c5f27b7fc4031b6134a1011ec40481cccb4557fb207fbae908c548",
    "label": "exposed bot wallet 77, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "33d022762e9e81a76627589285789c9a85127ca737692cf53ed630d7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "34117ce26549474c0a768d085d93cc624b09ce7f09a6ae3f02f4c79d",
    "label": "exposed bot wallet 64, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "343f54d6adfb256b1e9041a72a8b519670086570d5611df499c797aa",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3486694db6ae155e8443430a563b5d2a27eb8200341c2775c172b22d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -473,9 +788,19 @@
    "label": "exposed bot wallet 145, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3582030db560f18be8d5ac6a3ab3ac93238cb5bea8100da9129bf4d5",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
    "hash": "359154167d1317afbd65d20b35ed60424ec873cf1c4b81c6103034ea",
    "label": "burned wallet ada-bank, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "36024c327068f888479357023cda7dd749451630b5e1b7ddcecfcfca",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -493,14 +818,34 @@
    "label": "exposed bot wallet 43, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "38ae26429a0c9b4e5fcfe866463019a0a7d9dd7a82256eb2fc365cc2",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "3941cbbc9bb67e314da9869b32999fa970ab3b4781e9291abccce7ce",
    "label": "exposed bot wallet 109, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "394847f5c1f23b4e1da92cf802361e8f6f4b0ae006251a179c495137",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "3978c519e45d0793390a9debbb7231359dce127075367fd8637f968f",
    "label": "exposed bot wallet 51, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "3a1178dce4bb1ceccf1f3d31337243cea899cdd73348f425cd31beac",
+   "label": "talos-mm wallet 2, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3a8cd68c4b539fac1b32d0b12235f0c13c5725ddb9200b237a8bd1f1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -518,9 +863,29 @@
    "label": "exposed bot wallet 2, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3b422e26ec6a06abcc3d5703ba0915e4b0d03cd563ef4ed30ae4c3ad",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "3b84ccc3de404b4e0ce28dbf0354a899fa24ab7c5e69eb969b95840a",
    "label": "exposed bot wallet 183, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3c1210106cfb48e5450ba732a907bb54780ef0d75810cfd8bbc89486",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3c8b2a4f639265035c83d0a90247b9d011fe52c8cf858f39c5cadc76",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3cf6b989e850ed469761b29a8c1045259f399a2a8971c89feefccea3",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -528,14 +893,79 @@
    "label": "exposed bot wallet 75, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3dac048f122a065a941a8d053695f7ff6428ce0d68ad700f90facd84",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3ded9d38e86c9546f78041b58699daf2539cdae69494062e15bbe6d2",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3e32622a6662bda72d787708d08d5ec21279d6aa331d987c4f1f32ce",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3e5ce83f6f48443da1f0229bd96eb8a9421e5099d5d592012bd68e34",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3ea06e368f9279cd473c8fdc1d6cf3eba2d36f39d2c473c66d956e7b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "3ee2fa2bbb50b43fcbac0b912c2b91f9623fe6b0a52af10f3f988d9a",
    "label": "exposed bot wallet 65, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3ee8599214b26ce37510928df1860bb6129facada15629826d2ca230",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3f4b1d68a2bb4b887da163f5ee3a6fe11dc49ef817062fe8950674ef",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3fa72984284aaab8b41cd077f6f301159e495d06f0d64282a0069b88",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "3fc2dc310aaaa33f3fd56b2f47867e2d053af3a4fc344354192f92ef",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "401c3c3d504f3b2370083e892b0c9bcb007fba613b5d458d78a3bef0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "40648364226fcbc7b596d5e7ec59a388a463c3c10400067187b9fd60",
    "label": "exposed bot wallet 96, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "40a27a50c6edfa45af75b2bd0f354b70bfab67c48cdedf6862c79bcc",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its registering seed was exposed (claims deny set)",
+   "hash": "40b8b96f62b8cbf5c62f66248164a9bc873b8fab8432f308ed48df6f",
+   "label": "Talos DRep key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4140da3bfb4e2de1142d245c69c8c22c0e76b660a9744db94a452cc8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -563,6 +993,16 @@
    "label": "burned wallet ada-bank, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4329e7b55d4a7ead09a1d879b8186aad5fc200ae92abda0e2121d0d8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "43e2c48f00dfd9b56e724c37e4970fdd4e12f797d774750ab6fc2b36",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "44589fd6e987c771395c6785ad66c94b57e693b87df703ef4251a908",
    "label": "exposed bot wallet 112, stake key"
@@ -571,6 +1011,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "44eb523022bc0daf69b54964b719501ab375bfcfcaef47c99cacaa38",
    "label": "exposed bot wallet 79, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "464eeee89f05aff787d40045af2a40a83fd96c513197d32fbc54ff02",
+   "label": "decimalist root account stake1u8yt8c, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -583,6 +1028,31 @@
    "label": "exposed bot wallet 29, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "47582b16f32967058e9b8c816f1361aa5db3ab507b5fc845d7b74806",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "475d020325b8ef032e1f6188dbc17a516b48dc607e31fa8b9d5686f8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its signing key was served publicly; the policy native script requires it (claims deny set)",
+   "hash": "476957f08e1da9f21272d9c14b3c8ce2c8654724cfb4f691b09fa6f1",
+   "label": "T2 ADAM pass policy signing key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "47a835973c27786f386ccba630d2902d196313eb2621273443639374",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "47b0a6b32bc6b7764ad431690a2889a5889e139bb88d4545ce883ee0",
+   "label": "exposed bot wallet 0, acct2 stake key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "486013b0ea511853806fe2b403f70ef310d732330b88ed9caa3db5b4",
    "label": "exposed bot wallet 136, stake key"
@@ -593,9 +1063,24 @@
    "label": "exposed bot wallet 125, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "48ce54b9e26d2507a42afcdb045d87f8e6f68f989dc9195089a61db0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "4906e100c7262cb5c4340b45cbad7093bc8ff8b9832746a2e33a1641",
    "label": "exposed bot wallet 105, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "497770ec56e2bccc821694d0ff03a3505816909001a2efdaa243a99d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4997965c8236cbd626bcf642be85984454fa4a895f3f229d4ab38742",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -613,6 +1098,11 @@
    "label": "exposed bot wallet 2, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4a48f58a14a4ee1017afa2b3d1ff120027850abce68d9db63e5d8d96",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "4a9b101ee6d43a59b6dc075dd1d536fe2cec7ef21a8957097ab91bdc",
    "label": "exposed bot wallet 32, stake key"
@@ -621,6 +1111,16 @@
    "evidence": "drained to the attacker by 7ac35f9a8e59dc6d46271a09956310c69372e32cddf0e5b0f9aab812415cee3e",
    "hash": "4affbd8b0367bb8e7864388791307ef6ce1560a9bd0f33815a140a5e",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4b363881386e5337d5e5ba8ea125f4ec800f3176a0cc66051a400799",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4b5f2c4c4e7481bef15fb0b590df34e69f3d180ea56d0ec8baf5a3bd",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -643,6 +1143,46 @@
    "label": "exposed bot wallet 123, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4c41748d735b4058051c3522d5ad31304232a68d9ad425d1d464129c",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4c4f7f6c00c1234bdb192f3d75db6068c607dc184cb653c485500e43",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4c62ae2e355c5d3eb1d8ac0dc292fe16cf73a011f3fd2520f10cf138",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4cc0f5768f2c95d45e77f0c5310b183e8b32abba8584c4c0f64c313b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4cd4d1dfd765200aa47b97aa688529387d76bc91aec8c9122625f8ef",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4d018f0e1eb9f46efadd685e3d46712693d485b518e82d9e965108a4",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4d05ba23e8ca047183ca27dece4305cd947f1c22bf666f9a2e24cb62",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4d2fa9264a5fa0e394b3b0674824fd9ccc2c7b5e5068b84e5e6b414a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "4d7d3382fce38d6a0966a48139c33fa90bedce7849f9d88aa4661bd5",
    "label": "exposed bot wallet 26, payment key"
@@ -656,6 +1196,11 @@
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "4f07d12eec7ba93e9d8b35b7034ed1c1ebcc147b1c9bc0562bc1de48",
    "label": "exposed bot wallet 118, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "4f991cdd102721c55393881423aec1094573c875706ee0fa2fa119fe",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -683,6 +1228,26 @@
    "label": "exposed bot wallet 74, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "510e3d1d56981001ac04fc7f7cce0acec806c268f597e9a40cd491f0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its registering seed was exposed (claims deny set)",
+   "hash": "51a533be6953d4965c1676e8d5cb7300c9f35e8a63f6911cb3d460fc",
+   "label": "TALOS owner and reward stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "52071302f987886041f5021e87ace36cf187704305fa63ab23825a45",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "521372d1486aa93db87f49c042ee04d3a92386321923ed8936c06158",
+   "label": "prorated-sub-service subscriber wallet, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "527518c13392f85401fc324fe511b6fa6f9a25c353606df289ad2844",
    "label": "exposed bot wallet 100, payment key"
@@ -696,6 +1261,16 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "530c1d9b16401fab80bc4215673106d903c2c9dea49251c1982ef6bb",
    "label": "exposed bot wallet 116, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "53aae4bcb86885ab7d9d452c305b0e477ba61a261f9af38ff20092dd",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "53b189d79612b64a8acb5cb2f9ae19ba7bd3eea0c8f1d88c1ee48f08",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "native script: after slot 167281469, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
@@ -713,14 +1288,34 @@
    "label": "drained wallet outside FPS, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "5744e2893e393ccef6b2ad99349171590f3712a55cb1f84549aa1589",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "574dc90b3cd33b17a73895a19371437b9d49469f2003e47a610270f4",
    "label": "exposed bot wallet 132, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "57572e62b9bfc4d6d5dc9c02b6dcf4166ba0d6e15b859060c67f31a0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "5785c239cb19732aa67a3c3b02e8f5485bcf2e1fa30bc96a65740342",
    "label": "exposed bot wallet 88, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "57a97121f043a591799b79103036cbab6dacf19e99da735923292aef",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "58dd133f54dd8eefcdfd2b513bbb86da089614a66838d836210bfda7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -753,6 +1348,11 @@
    "label": "exposed bot wallet 70, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "5986bfcc0cbfc60dec8df87715cc95d03817aac386b0e9d33da03b39",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "script parameterised with W1 as owner; rescued by 869d7d167a62218e885d65871e9d19804657324ecd2be5984377dd7d2a33bc5e",
    "hash": "59f1583d139063526db7acece757b74736dc8dd26b55cacf32202471",
    "label": "W1 liquidity contract (owner W1)"
@@ -761,6 +1361,11 @@
    "evidence": "drained to the attacker by dcfa90cf58a4c13aa94bd8df088f4245882761c7f14caed1cefad5ec7bb8b197",
    "hash": "5a19f9a78516882108ba52f51543a1f18013ff68e089db7f4f948dc3",
    "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "5a2154d84ef1da5b1493262d99cb16c876495eb046441d331c60c18f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -783,6 +1388,11 @@
    "label": "exposed bot wallet 162, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "5b9dd15ea6ba316bb844ea252cd9d27588a05f7587d3165a24d77298",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its signing key was exposed (2026-11-10 inventory)",
    "hash": "5c15a474b91ffe472b18f744aba28944331265ceb98ef6b9afe73e45",
    "label": "proof-of-inference Hydra alice, payment key"
@@ -803,9 +1413,19 @@
    "label": "exposed bot wallet 110, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "5e5756837cb0756bc741cf386cf06f0e6a688f5043c23bf776bf9b1f",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "5e8bb265ab6e082ea8191d650fbee21e76aff0e2ab713e8f4ce9c778",
    "label": "exposed bot wallet 0, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "5ec952f034815a3facced3123af2460d60a98ff3b032dfe1fd11df5f",
+   "label": "prorated-sub-service admin wallet, stake key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -823,9 +1443,29 @@
    "label": "exposed bot wallet 13, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "5f71f1f7df03576544d3035c88b11cf5276386e7d81c1661b122fc7b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "600a7db44dbcfb0d235e3e51c519516a91d2e29f3a1c21d1041f30e6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6023f59dce0064f1d6d27594dbea25bc4305a9f6a10f3a064037553a",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "6095e83e771ec6a6e7c96de1d1337fe8532eb67f7f7b8e35290e69b2",
    "label": "exposed bot wallet 34, stake key"
+  },
+  {
+   "evidence": "its mnemonic was stored in plaintext (claims deny set)",
+   "hash": "6096332c3f9c18805fdb1d189b74d54497049ffb254659cd45622152",
+   "label": "Aegis preprod publisher key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -843,9 +1483,29 @@
    "label": "W2 (FPS treasury), payment key"
   },
   {
+   "evidence": "its signing key was served publicly; the policy native script requires it (claims deny set)",
+   "hash": "61fac8908c36d308961bf50a5b81ee4fd7f29a5d74fdb5928d72751b",
+   "label": "T1 ADAM pass policy signing key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6292441e5bf365de4a35139c7ec6c5bbb20088b6bc5e2caa410d8829",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "62ce471a91c0983c3eedc704d18bc5305bf7b4c42cb0b4fb81924ac4",
    "label": "exposed bot wallet 117, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "630ab993bf7e21fcf29ea16723a773342f8742d4e7d9be870ceb0e6c",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6353d2941d9f8dbd8df03ffccd322402e04395ca6b39283ff8be52b3",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -863,14 +1523,29 @@
    "label": "exposed bot wallet 84, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "64c86f0f4faea6d71ebe6d4c6a7ccf7e99939c407cc2651d59898482",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "652f6b1c262773dbe60806269d73b7823be93346ba544ea225f70b1b",
    "label": "exposed bot wallet 6, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "65640ba77c0ca3ee39ab9109fdcd035fa1e50be8f18605abc12d6d5a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "65856c4432a3374e0edf75d715ca67c237c1e3c29e08e86bbf2e1675",
    "label": "exposed bot wallet 105, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "65a6f15218158c6177e4591e4043e5b836be0ea506ef6c57ccedd2be",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -881,6 +1556,31 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "65c172f0d68ae85b07f13ace765cfdb5db1b7f4d203b0cd814e9bba1",
    "label": "exposed bot wallet 165, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "65e13b54164a294c4c437514b85c3b81b5370f36eaeb1212f7b00d96",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "65ebc520f324e455597882d77d3a98dfb9d9dfd36e9328e06409ba14",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "664326d4878fabab3f3b54fe1efd8121bfa5c0e893bd748adc92f60f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "66b583226d6051db7c4ba5bfe8bf21f5e2aed725cd688646d29ed3d9",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "66f6ebd41206dc14caa6af06e67e4d101858a95ee9948adf736d2cba",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -923,9 +1623,24 @@
    "label": "exposed bot wallet 161, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "697d95e1f45cf0f7289b4b977f59e6734adf3d8f700628d6abfb4ec9",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; swept to custody by ee778c24d399415ef9ad8ae85c49857da2c6e9421690844f770489943389f1bd",
    "hash": "6a0bf6f1194166b28a5fee579194d52d4fc4eaf247858cba3d8da914",
    "label": "burned wallet Flint, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6a6c9b396e4ace73c1ccea2bac40cacb7f8fd64decc399d8193f03a9",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6a81fec33f5f9a19187d949ca57f5218d826090581f398db27fc17f8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -933,9 +1648,29 @@
    "label": "exposed bot wallet 75, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6b23f2f212f96bf5e72eb3a18b2896c421a66aa47f3f78aa57e23553",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "6b6cea4d0051b60b9103f4820993ff52387fe9cfdb35f93db553ff8e",
+   "label": "prorated-sub-service merchant wallet, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "6c82b9640d38c40e0a4b06a0c4b53b65eafe78660733cd74733d6a4f",
    "label": "exposed bot wallet 160, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6ccf4dd9a9b00419780751c523e7b4175024a9fbefb7e18162273664",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6d0bf3f707b69c157f68ec95475f607d06bfc7f052ff4c2aa02e9c58",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -948,6 +1683,11 @@
    "label": "exposed bot wallet 4, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6d66f5584e99d6ee118163a74d02752361e771a19590d92f85668c88",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "6daacb8795dd362bbd3f5b77fc3b9402885c6855cb358556ecad3d06",
    "label": "exposed bot wallet 144, payment key"
@@ -958,9 +1698,29 @@
    "label": "exposed bot wallet 174, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6e7d64a8bbb69fd110afb952dd0383c4bfaad7351bcf9f6ac9324bc7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "6ee1cf34ec7264555c34463e19f2a0ad512f575371bf190b951d9cae",
    "label": "exposed bot wallet 183, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6ef72b6451085b57a07ce734470e9a623639f107bd02eb032b4ce57f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6f55a2540db8ff3d2b225d8b3fa220322a45e77cb0126c6404a03f2d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "6f5ab73c1fbd09bb66fdbdd5e2f72a252a6eed1f0bb245312cc2cb88",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its signing key was exposed; swept to the FPS treasury by 1951c24199f63ce2e91ad4b6e9ff1b3bd1787921aff99ba1d8c915eeccf81d3f",
@@ -978,9 +1738,29 @@
    "label": "exposed bot wallet 114, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "706615076c0e3f0c50809844a86bd09ab904c5bf3163b1a243fa60e6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "706c50381a1d3339052121b244e22b35ce21655904669d37e29f387f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "707ce2dd5f3ae2746ab26fb5f8188cfc5092cde586a6772b55fa4b2b",
    "label": "exposed bot wallet 103, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "710be68ba0c4eb6a11317ad31a3ed867deeb67cc2070a5f155c3dc31",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "71976a8773760e47e29959b4172f4eaaad7aa4ab112a640722425e11",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its signing key was left on a host no longer in FPS custody",
@@ -998,14 +1778,39 @@
    "label": "exposed bot wallet 190, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "72d75953b25f4a46c84f9840488cbd5832f9a3a6daefdabee199e78b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "733c92c83ac28cf860b2cf02e49d72ca25f84dbd70a90e40babbe5b7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "733dc2c2593c12d8f1c141bd0ca82d0c8c3da08db57fa669b908ce66",
    "label": "exposed bot wallet 122, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "73990b71041ceade6f867617f6ce9f187ab710ea2bf1ff8db7d0292f",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "74199ffab7ac50e3f0528012c63670b5fd9f1e862d6f48fe72612970",
    "label": "exposed bot wallet 167, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "746cc53c96bff04e8cfcb7460ffe8e23fcdf0dbb47b0e690ebd462d8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed (2026-11-10 inventory)",
+   "hash": "746ebda7a1e39f69222b254ea154fd9a91fff88cbb585ec9148bb9b5",
+   "label": "prorated-sub-service subscriber wallet, stake key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1023,6 +1828,16 @@
    "label": "exposed bot wallet 133, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7599d623cf7e835af8ce1b0354e8e5bc439d076511a4b70db63be3d0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7605b2815a54f343536ecf199f3ff4e26eff862914667c906c727fa1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "770edfb9f68675823aea54bfe0e02bf75aacefdfbe471ab7adf84b26",
    "label": "exposed bot wallet 102, payment key"
@@ -1031,6 +1846,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "77495b006539be77201776e89bbfa3a1cfcfdba1369eb49f913fd773",
    "label": "exposed bot wallet 46, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7812f03888132fd3fac24295b219789f548418ba7057b1cb2fea8e0c",
+   "label": "decimalist root account stake1u8yt8c, payment key"
   },
   {
    "evidence": "its merger share was already paid by the carve 0de12aee2af3c5c7b12fb706b3cde4157d7fd7af31b36920e40769cb833f17cc",
@@ -1048,6 +1868,21 @@
    "label": "exposed bot wallet 157, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "795c9c46f2b7bb9f6e68a5becd3016f020c0af87b02e3511c09fee10",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "79a84e1d541b7afc6228aaa31d2f067c6496bb44bb3bdd1cb524cf7f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "79b46c4d2d76c0dd0290ccdd276c2e9c18d12896985c9579a3e845f0",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "79b9804df3c7cd0dcb4ecb5c4cdca79b7722143f95def4a00cea0e0d",
    "label": "exposed bot wallet 30, payment key"
@@ -1058,9 +1893,24 @@
    "label": "exposed bot wallet 143, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7b8b2d34d2f8092e02ec73efee4223b53a2b4d96c8f1912eda90c864",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7b9fe2889a4c4a969c9ff06227ab447a29961a6c3745c93d1833f86c",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "7be9d9287221c69e12f10bd0cce3e388f4bdd1be3c892d1402ac5121",
    "label": "exposed bot wallet 151, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7c0afde85ad5dbd57c41f9bbe6c05e1b8ea185a5d3c901b3835733e6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1073,6 +1923,26 @@
    "label": "exposed bot wallet 168, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7da030dcf3b353397055cc78f83d56f2cea5363ca9b20a766588bae5",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7dcbad321afe72e65b72a3f5964142b48fa0cdc64e4e8597cb50fac3",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7e460e53b4a980d6106ebc2871fe6da0b4d0f9a3c1d2a7ace9ecf854",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7e4c635d1ff4c18b54b15e98b2b96a8bcb5fc56a3538695e01fda562",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "7e9b6f9b6759f1d5bf959de81e70d0653cc10b2c5c2f11e35f9d7e0c",
    "label": "exposed bot wallet 38, stake key"
@@ -1083,9 +1953,24 @@
    "label": "exposed bot wallet 191, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7ec7f6e3a3892d789153771f29c1c0f8af08fba275be0ff3e23e5876",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "7ef91416cc871e1e211495c3a39f19b56786814bcba1fddfe9f9b480",
    "label": "exposed bot wallet 36, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7f3f60c66675bbc2101e7df14a76055fe95f00a171ce56c90f36fbab",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "7ffd209cf6fa9ff6b6efec511d64f33639ee58f77a9ff7a5c190a507",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "received the W1 drain 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
@@ -1093,14 +1978,79 @@
    "label": "attacker collection address, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "80c385a093c677b1bfb2908c0ea7456d80f029e1803a8a6c04e8d50b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "80d9859e51ec1bcbcbb9f5288d3b6a43064bc236dcd257ff3de2f017",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "814b53f4bd6231e11e21b70a553820569125716b454adf5b2e55e328",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "814bbf356881122510681369dec8b610ff32c338908745595bb29bf4",
    "label": "exposed bot wallet 173, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8168c5c82f33f5318fe96ea796370ada88a733a7d9b23ed5284b421d",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "816ad27028ec41c4d74f53c90857f9e2ba8494cf7e5c39b17a13cc49",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "81a7a378ddcbb1e6fcf6be7c678da24e8345bbd65c2663f79fb18dc7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "824e57379a8ae6372b8b377d7f3d1c9b484314aa15175e4b41cb6d75",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "82b1a0bdf0b07bbd05bdd3975cda06c09ecbf8fc5ed8909abed43b9a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "82be2fdd86fa4cab2afb35789944fd4a48c1e61b99a2788c93cb8296",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8319ab7f95c90d65167ee206fe9d9250fa29effdde0aa82fb01a00f4",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "832c5b1bb9369c4b7ea908a9250fc88e169f9bfd1b243471c9ae2a84",
    "label": "exposed bot wallet 64, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "834c04ff322bd48c9a44c93c2358a5467c7372e59838be49c6c98d71",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "835cbc3e417f266a4eb0669549725108a93c8a4904c88a7c327aa7cc",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "836f57bd8e21e3c15f4705166b84d8335cfbedacf5e5a019e29fa361",
+   "label": "exposed bot wallet 0, acct4 stake key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1128,9 +2078,24 @@
    "label": "drained decimalist account, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8477f902b8024d9144e91d2073184968678d783c9cfc771ee0d61568",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "84888bde990138a336f717c995102aa4a6c57c3988dcef75df888050",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "84bbd5437f22765a7c4384f8a04fe7c5eb25f466381d59b994e92873",
    "label": "exposed bot wallet 192, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "85646d12b0e33064675cb0fbc87e4c05bd5f5503dc71a634ef697b87",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -1148,6 +2113,11 @@
    "label": "exposed bot wallet 176, payment key"
   },
   {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "8716ad36469a1f87011ed8ccf8ab783442e2ffb0ae6a52f13e628327",
+   "label": "exposed bot wallet 180, acct2 stake key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "87597baac09fbd0cb4c369b0929219499cac7cd97733020e2e429c1f",
    "label": "exposed bot wallet 186, stake key"
@@ -1156,6 +2126,36 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "876eb5525c1f664ca0d13ddecd142ee206676510f95ee1d1a3097df9",
    "label": "exposed bot wallet 40, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8771428933e3df007a317a13e03fe6997b9821fcd00d37b92e3c1be3",
+   "label": "old FPS DRep key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "87df135feb294d8a575d9012fa3d5fea78d5fc6797199374e60dd84d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "881cccf9e6252d3c92711521ac506cd2a84c9b8b1dfb33f6672e10ba",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8822c7afe6cbd32eb15f554eca78ee417a9b85a187b84f74f1a9cbb1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "891a2856a0c143e65b84d8ef407e7583bd45e5938a68095834001b39",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "89a48ad24ca3b48f27b56edea20641e7e57ea5477acf8677a3fc0110",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "drained to the attacker by 20ea6e4d22f02da37315d04b2cf73de8c94ad4575b996aaec14f2cc081cb6e00",
@@ -1183,6 +2183,11 @@
    "label": "exposed bot wallet 38, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8baf10e44810eb416e2f0b59fad059055dc69137417731cc85333d5d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "8cbaf34e583f8c975ee9b88221ebea8dc4f5cbbe512567c392873b96",
    "label": "exposed bot wallet 0, stake key"
@@ -1191,6 +2196,11 @@
    "evidence": "drained to the attacker by 9be593882052bade50c6de3a518aa54cffea32ec65878ce863ac10b8417f954f",
    "hash": "8d0d0e5f3e94b6fabdb2a9c5010a954f4f0ce9640a846d3f9904caea",
    "label": "drained wallet outside FPS, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8d43a52151844f33cf0db12b2b78567260b12aeccd75e084765e494f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1218,9 +2228,19 @@
    "label": "exposed bot wallet 130, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8ecfc602a38a1b14a3bba017bd9ecc289e6a64435224535737df322a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "8eddece717ebfc4fa2ac4ec5df463283286510f23875944777d10bf2",
    "label": "exposed bot wallet 26, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "8f0617d0394546175c2a4838f9007afa0409e519ad6c48dc08cb68ba",
+   "label": "decimalist root account stake1u8yt8c, payment key"
   },
   {
    "evidence": "its merger share was already paid by the carve 0de12aee2af3c5c7b12fb706b3cde4157d7fd7af31b36920e40769cb833f17cc",
@@ -1236,6 +2256,31 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "8ff59d29955078aa46cb955c8601a1ab0b7a4865f98bc211b5e3d696",
    "label": "exposed bot wallet 21, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "901142a6927db26a3a0280aa34795891184ede8d8069b1878d0aec81",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "905f73e007ad0842bfb23780c18c965d3e9a541b3c420db2bdbbb9e6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "90f572106294b4fefe09e9caec4f513648e3199db7e9cee21cc7631d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9122da9667edb5eea1b6ecd58fc179d96a51b9c808006ec92d6b1600",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "91325ba230484df047d427f5943926850ccbd7b09e35771cbdc70295",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1258,6 +2303,11 @@
    "label": "exposed bot wallet 97, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9252744f0ba5c77ea032421ac3d4c18c9ab2e320f4fcbe78366adccf",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "92b7946252cf35ab669f8293ea671ec23975f3ddd3ec3117181ede80",
    "label": "exposed bot wallet 190, payment key"
@@ -1273,6 +2323,11 @@
    "label": "exposed bot wallet 157, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "93e242e26ce4e63accd33d6586d0054ddec288aa1b44ab7b765516f4",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "944a3588d374a20abe403c42ce5f51b8c4d21a37f44e92ee5b1e28fb",
    "label": "exposed bot wallet 31, payment key"
@@ -1283,9 +2338,29 @@
    "label": "exposed bot wallet 142, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9527863dc3ce5a2ec37ed1d18dba6f15a51dbdd46061699b0e644206",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "954afd7ef0f91f36031269be6e5af5c52a94ec92b9da1344ae8ff0bc",
+   "label": "exposed bot wallet 180, acct3 stake key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "95a58998443f1847259abb6fce558af470bb93a7e64512bc63cf9e5d",
    "label": "exposed bot wallet 172, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "95af7b02bfbaee004cd1da07ac143809830a2494a469cdb7834775fe",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "95e439ce5b2900552f63d819a33f75f7ddebd07727728ec6ac8d7614",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1293,14 +2368,34 @@
    "label": "exposed bot wallet 155, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9726fbfb127e7add5ec3bc08a00a4aca4e66244682b9ba1c58ad86f6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "9896cd3b655c740cb4d52d25ecb989c07ad0733c62107f5e064cf9d4",
    "label": "exposed bot wallet 87, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "98c2604ae71db064496f6ed5985bd7546ab3114856c87726bf107b09",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9943612fd9e44bc48fcbf3a11869249c2c2d83e4e2b4626072c965b1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "994f2a036ec5bbafe421d10dc05118a1231d6a9dcf98a4fc769c17c9",
    "label": "exposed bot wallet 6, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "99bd25a7b7af08294c338d983fac273f76c5fb712d3262e576fff737",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -1318,6 +2413,11 @@
    "label": "exposed bot wallet 85, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9b5b4896bcc608027c736cd84fc6b3674b118e6c9a8b98ef534213da",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "9b74d4038001a8f4552a2549f88d4b4c565f8a2241e00d1ed8206805",
    "label": "exposed bot wallet 138, stake key"
@@ -1331,6 +2431,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "9bb7df6c1ec32d0ffd6ab73b83503bbb1d7deb4230ce2f203502b949",
    "label": "exposed bot wallet 106, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9c00febe7a76a064da97b1dddeb32e16a880b7c4fd66d171ade6f58e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "drained to the attacker by 815ac7be84a5eb982e73fb041095aa8ab24f8aacd586c02f4b427c5f5ce49efc",
@@ -1348,9 +2453,24 @@
    "label": "exposed bot wallet 20, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9d35f673146ef9d1ac432a2d558a91eaa9f59338b2cf83bb02ed97db",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9d6ed16c6d36dee26c6a7da0d83a494de19f8947c92fb520985f9bfa",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "9df5efa751c65f62102a6e46b0b07dd75509c0bcc1b72398fbfeb63c",
    "label": "exposed bot wallet 114, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9e1ab5b02f1f7e069900f2da68ad7ae2e8bc334b065ff40d1afa778a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "received the W1 drain 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
@@ -1368,6 +2488,16 @@
    "label": "exposed bot wallet 49, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "9f1cb618b53db46fbe73e94c068c68c30845aa2243865e9d5afabe4b",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "its mnemonic was published (claims deny set)",
+   "hash": "9f41e54e93aabeeca9eaa6218837ae33b469f64405c04be74c9cdeb2",
+   "label": "license-service body.json wallet, stake key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "9faf6518c4bc80407fe4dcd17a5efc2d6724df35708087f21b4dec10",
    "label": "exposed bot wallet 178, payment key"
@@ -1381,6 +2511,21 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "a009e990eefc85d7eab467c76acd384edfe90f6247f2d7290cd3095f",
    "label": "exposed bot wallet 137, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a045e53ccaf91739f9f5e322a762d881d31de9936ec5e209c4695989",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a1334d603f69aca4937b0aac3f7a84cfdab8c7e3b061899fc179043b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a161aa729e2a7b04531b34e9d12741cacf13aed62fdb5be3ee08d21e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1408,9 +2553,34 @@
    "label": "exposed bot wallet 66, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a26d5fb5522e38d30bb0439de14b8c75fd9b5d12da5d87d5ad91c3f1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "drained to the attacker by b68f1b9d7a10fca3324a48391246a4faf68319ffed1e0463c9ad7e683d2e96e0",
    "hash": "a2ea7bac7fe2f1a89ac9cb64db16000e065517c4eaf002b1487c4d96",
    "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a3218afd59bdb438846e1ef19ecc142a8ea7191cc3fe68a77c706ce7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a34c6fcd4dddd1940a7c8a3d257fb07d28a6e266497e190b93dab571",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a38edd187a6020b0a9c1bfce9534da78e2cf9f58f01242c667a20d70",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a3c70492105826529484dae1647038c6a986bacdfcaefaaacd3aa62d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -1433,14 +2603,49 @@
    "label": "exposed bot wallet 85, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a4f6066be4825cc9f9dfcb2239cbccbc5ba53b38fb4474fb6466a9bd",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "drained to the attacker by a978d6243252e7d26d3e84937c9fc5a8324e65bba8cac737000c4321cb11f1c8",
    "hash": "a64296bf8ce216c41357e6830e612f9b8b37cb4f6e3f9c509505a03c",
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a64ca259ebffd4f18929a3dd707e9b92ed326912e887e2f7916a23ea",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a654f1447a708accfe4f7dadbe6c054cf5d5c9d307586d199596a170",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a65ca58a4e9c755fa830173d2a5caed458ac0c73f97db7faae2e7e3b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a6d980c231beafa10e5abfbad22e001c229731dba266ddb9bf29e07b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a706e77cd52db519e8e3ae3d2e40ef2d61dd724cfc5cbf1f64075a23",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "a71425a144a606b52022e9f6eb16ea2e5d120ffb0d43c971f2db1ef6",
    "label": "exposed bot wallet 78, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a71999826ceb1d6c1bc2d1deec25cb2f7d2bafba5a5947ea37258428",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1456,6 +2661,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "a76f5f0a8dff3117408c080ff26c8d02b822c44606ff4fa914cef681",
    "label": "exposed bot wallet 141, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a7ae99b08a9283426561f307aa16e855e4b0bb0eeb75a6e998b1e33b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1478,6 +2688,21 @@
    "label": "attacker claim address, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a92ed8cc8b30b588531a8d8a5976a55b8dcc328fe62c520968e34bbe",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "a96836ebd327211dff7920c373ec2fe497b508594ea0bac9f93cae25",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "aa0cddd17effb5ff6526efb4da075e1130360293f6ab6ffeb0000eca",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "aafa5bd7e717e6588027d8240ccf894fce791e901a3cc5140b8fdfd2",
    "label": "exposed bot wallet 177, stake key"
@@ -1488,6 +2713,11 @@
    "label": "exposed bot wallet 92, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ab1f8d6d2fd517cfe3d69385e533f229b6eead7a354aced503346fb3",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "drained to the attacker by a80ffd0ba30a18f7940b737403afa94bd98e43ab24a50b52ff4f289643c19707",
    "hash": "ab9610f3eaf56732b37b9c7ddc62d20ed3849e6a503bfd62dc7f5fe9",
    "label": "drained wallet outside FPS, payment key"
@@ -1496,6 +2726,16 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "abc45aa35fe85ce7f6ccdfeaeaa05bbe6bdb0eeb7cb47b91d40466ac",
    "label": "exposed bot wallet 93, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "abfce738cc016a34d2f117e6da5a35993927c3ccbe8a355d432c1d3b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ac29bda5a3177d0059dccb0cb246d9922ec4e2b8ddf68c50b955cfe7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -1513,9 +2753,29 @@
    "label": "burned wallet Flint, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "acdc68d147cfbb2bce1af99bdb4ecae189e9c007df8547323b43d64a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ad74d137cccd3c6ed0a33b4941fa0741ed254d4812585cb0f7378de4",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "ad7fa1f4df15e71fd3d40dab8706156b29ae6ce0c9d218c73b7eb011",
    "label": "exposed bot wallet 154, payment key"
+  },
+  {
+   "evidence": "its mnemonic was published (claims deny set)",
+   "hash": "ad818fd3a73a238f7655e32c762b5588d3fddc40adb3d87801960b43",
+   "label": "license-service body.json wallet, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ad9abb785f5277693e7e7c86357ee73e7fc5c9c2f291bdc813247e6b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "drained to the attacker by f520b47cad1e1002812cc95ed46dd07e2fb8511f586a2d0a8b6702623611d267",
@@ -1528,9 +2788,34 @@
    "label": "exposed bot wallet 69, stake key"
   },
   {
+   "evidence": "its seed was exposed (the seed of Aegis vault account 0) (claims deny set)",
+   "hash": "ae82b8742f0b276178772bbe41c1c63abe315d72cac182c1f13f22e8",
+   "label": "Aegis vault account 2 (keeper), payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "aecc6d22f6a20fd8f717da17190f8e364d33a50d692092e327cacb94",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "aeedf8d8cd313d75bd09840475bbd6d1600ac55a14ce1902bcaad743",
    "label": "exposed bot wallet 4, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "af42a6c23ca5c66b4b0ecc7318911cd09d1dbc77a200b0b3b29b0b3d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "af59d49a111c5966243e0c7794790743953165b4f1453df98e4fd105",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "af785a88b903ba4b7212594ec173efb8c68bb5db60637d0f36538149",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "native script: after slot 168329969, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
@@ -1548,9 +2833,24 @@
    "label": "exposed bot wallet 171, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b0ff1d8d2eb646dc968e3b385a6498cdb3a18f68d0a69fba227016b8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b1fa5af9d8b8ad36eb3cf28c1a03cfbd95e2d57b11ad0cdc6d95ac27",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "b28b55ea5da6742716855fa5207dc914299bf7d127039b584afe34c8",
    "label": "exposed bot wallet 82, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b2a9702af42ba21f959a3289b57532e5bbd724d541fbd4b87136f9d3",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1558,9 +2858,19 @@
    "label": "exposed bot wallet 120, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b3000f5706854449e428b9a81512752bbace28251e558ad65a8b6806",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "b321616f11c0dbc94f758e34e06423e9fd6f33205f1991acc234c32d",
    "label": "exposed bot wallet 182, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b3dc16ee1e9be0e9ad40a42b2ee2f755e69654046a69c7736eb3ab04",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its signing key was exposed in a hosting provider's breach",
@@ -1568,9 +2878,39 @@
    "label": "cMATRA arb-bot wallet, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b48c3bce605748de7f77d88b2e58a3d252f537a95431b358e9250a98",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b494b5091b208fb5376b09375a10172c27560cd940e5d90b21e83570",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b4ce9b8657c3e1f9dbce38ac6b8d439bc5a82fa6a379ca39ee63bad1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b4ee578a59d6577619845a268d834681b85e2212792620b34ffc8b38",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b58a36e2f6a92ab345300f59602c90b7845ac6cabd154fd75f89dacd",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "b5c3559d6cf63ef618277bb34e3bf17ff0c1bc9e43b97a7b4564210a",
    "label": "exposed bot wallet 185, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b5d619fbc65237317bf1cc3633fbf429b44111fe073f2aceb7f2e261",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1583,9 +2923,24 @@
    "label": "exposed bot wallet 155, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b62d571b33295b7721b2837c29740089debbc955a57c42cbb51cf4d1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b6ca690ec826f3a55a2172b3d68f651e0798ebf7b79acfdc0f5d08d1",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "b76050c74013031ba16ce6b1ba3721f2a85da3de4162d3254a84876e",
    "label": "exposed bot wallet 164, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b7b254f436d31d9799d07d4d171756de6a3dc5358c5db957e1fda9dd",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1593,14 +2948,44 @@
    "label": "exposed bot wallet 68, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b961a177d8869975efec4345d28ad4672307109db92dd07b84f9fcaa",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "b99fcef068a57feb7631785ab670d2edcc605cca17738fa3a546aed5",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "ba11b2ff5d4c51b51772af769f3b77d80b4df2c026ca19912fcf9306",
    "label": "exposed bot wallet 152, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ba19b84246ad6b35cc4afce384ac73005b6964f9afa1024efc72afd6",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "drained to the attacker by dcfa90cf58a4c13aa94bd8df088f4245882761c7f14caed1cefad5ec7bb8b197",
    "hash": "ba1fcc3390c5b3d7480c508bc162ca7a904b17a535fd838e569a0a5e",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ba4264110c35d9cb4053005c04321d50a58ad2838f55045225f4b313",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ba865e134758e6787ee1048475785e57927f3c78fdf8e85c32879d37",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "bab050f8b0b8c4b84806a51428aabe3e3984417bd9b57ea7903ff970",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1621,6 +3006,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "bb433680d45602156e2e8b7567e7bf52e7c748cba124132769a3a3ee",
    "label": "exposed bot wallet 179, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "bbee9f0eec12aab3615713fc548115d3eb4dd7e204b1811cb835f48e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -1648,6 +3038,16 @@
    "label": "exposed bot wallet 36, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "be3fd921d3603025db2662746d48438e964f05951d85339c97546ab4",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "bf971c37f03aa91f0c9d9c99cdefd199fdb0f53dfa9cf0380c4d5181",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "bf9adf929054dfd06f5394e3dab9c74a8006fc7429f933dc850db680",
    "label": "exposed bot wallet 177, payment key"
@@ -1663,6 +3063,11 @@
    "label": "exposed bot wallet 113, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c063f14007381f4630b1db10fa5f8f994e1c5b178d5bc7281460a321",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "c06919cb20ed33162426dcf8fbf4ac27d4cf05b772a6155a741bc2d4",
    "label": "exposed bot wallet 41, stake key"
@@ -1671,6 +3076,26 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "c06bb95909a3fcc70d39d915679f3b104e92afd17775b055008fa3f1",
    "label": "exposed bot wallet 132, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c0b1ee71c0ca950ff3d629f724ee5e20841798bfcbbb6676e56e70e9",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c0c04e67c30f699617d3013db872bbe67f1650ab6fe90cb4e141f6ba",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c0e0ed39a842eebbf784a60db5c278ac161691ed2651d89faaa51d1b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c23935cfff20e7abf9b7cd90c55860568b49edc33571232e197e613b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -1693,9 +3118,24 @@
    "label": "exposed bot wallet 15, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c2cc6551a9f5008073e40e8d1db0896ed00b063aee48573c65a32630",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c34079f286a1a7447732fee2367df88ca8e7808d357c544ea7adf8e1",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "c35d0f0063e37856d47e90734d14a58e8b8896586468588088d072de",
    "label": "exposed bot wallet 5, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c375d28659106163939c94304f00b52bac8d757d41aa73a2bc8e526f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1703,9 +3143,24 @@
    "label": "exposed bot wallet 91, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c3e28c36c3447315ba5a56f33da6a6ddc1770a876a8d9f0cb3a97c4c",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "c427b429a1d90e19a7a88abfe80b5d0d170e4ea3cc4f8ab1fec812d0",
    "label": "exposed bot wallet 33, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "c463d8565d5b209ca7447601e3ee7b8d57f198f58b84533b6fe3a015",
+   "label": "exposed bot wallet 0, acct1 stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c526a3c936840a71a7e3db45d529b79ee9293c2df9703a33121994c6",
+   "label": "decimalist root account stake1u8yt8c, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1713,9 +3168,24 @@
    "label": "exposed bot wallet 134, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c57c0a9a0220a833b52fff5ccba2a8d6ffe3afed34c0ad3753769cb3",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "c5bbedb337546778152bcd9119e1924b8cb9442c4ede8ecee5e68b4e",
+   "label": "exposed bot wallet 180, acct1 stake key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "c654efb153399521fa43361939f7aa0d674d654da1cd32488599908a",
    "label": "exposed bot wallet 128, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c65b940de0bedb0e0e3998768f9bda1e5d07984e8558824952c25994",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its signing key was left on a host no longer in FPS custody",
@@ -1726,6 +3196,11 @@
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "c69d620bfbd7727e3d6c3b55e61f8ff8ab8d3a9ed1732cdf9156ef31",
    "label": "exposed bot wallet 118, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c77e538ce1f3e907154ffedabc7048cc1c1f249c9ad6ff606dc32f22",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1753,9 +3228,24 @@
    "label": "exposed bot wallet 181, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c96b764dbcf691f97586db4fcaf1a219fbb055396d8535e518ca2977",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "c9c69145a0d4e9cef7d321bd6f4ee9a07d8cf3b5a6310b301a475750",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its signing key was exposed; swept to the FPS treasury by 1951c24199f63ce2e91ad4b6e9ff1b3bd1787921aff99ba1d8c915eeccf81d3f",
    "hash": "ca3da8601573b7cfb2514fc1819d040e2693dd4886c6719b764afe00",
    "label": "ADAM key, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "cae3897c66ce86308ebae401dc26a47bbc7558071badccbbac5f15d2",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1763,9 +3253,19 @@
    "label": "exposed bot wallet 31, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "cb1490ac485aabe687e76e5a771f09e6e13eaece900fc0d47804414e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "cb58b604ee81180e6c3d35a47463b5939195edba25194305fc4cbedc",
    "label": "exposed bot wallet 30, stake key"
+  },
+  {
+   "evidence": "its mnemonic was exposed in a hosting environment (claims deny set)",
+   "hash": "cbadbc2f7df2ec99d6b0f3a2570fbe66a7e66ffdb8b225ae94b9c0d4",
+   "label": "license-service sponsor wallet, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1778,9 +3278,24 @@
    "label": "exposed bot wallet 149, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "cbc2c85aa71216e6d2db351810241d4de70a739a9a543ec1a4a280f5",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "cc603aed937a96fcacb35cce24bcb26d2ddc9510c42b8311f771ce99",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "drained to the attacker by f520b47cad1e1002812cc95ed46dd07e2fb8511f586a2d0a8b6702623611d267",
    "hash": "cd3ed776608dd1349f816b9bf14984d0c432f132e49b96ef9770cdbf",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its wallet secret was committed to a code repository (claims deny set)",
+   "hash": "cd51fc17182a3b82f3b776e8a5a0d8808e6fc520fa8455015e2410df",
+   "label": "SaturnSwap ContractFee wallet, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1791,6 +3306,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "ce68950112e32615422ad2a7f029524da445df4cc8bd71bed4c0152a",
    "label": "exposed bot wallet 12, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ce932c5b0831a5e2e4a23f255eb428f971dd8f919c966c77343e5383",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its signing key was exposed",
@@ -1833,9 +3353,19 @@
    "label": "exposed bot wallet 7, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "d2ad0f7b8f128593b10f6274edad1b9ea2a69414e79a563d45c9f770",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "d2b3cb9318739907191a9e347da5cb97a085106ec6b505ad72216c14",
    "label": "exposed bot wallet 107, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "d2d18eaf3dcbe796ea64953f08537256ae96d8fe6cfa05301b67ee17",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1846,6 +3376,11 @@
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "d377e211b7f8646ae6804e09f1ffd07997021567665c79c40daf58d3",
    "label": "exposed bot wallet 63, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "d3e56566acdf44456cb47dad3d26c2ae9a2877b48ca07b8803f24038",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
@@ -1871,6 +3406,11 @@
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "d5381b4575c133ff1ef616c15d92a3f5bfc98ee87ef3c19f258d711a",
    "label": "exposed bot wallet 111, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (claims deny set)",
+   "hash": "d54c26bcc3bb3026147fc800c5a8578ecc0930a6d27661e16e9e8f48",
+   "label": "exposed bot wallet 0, acct3 stake key"
   },
   {
    "evidence": "drained to the attacker by e1a0745a60235cbcd311fa10343e8c01d205448851e1a75f6ff5913b78c2b993",
@@ -1903,6 +3443,11 @@
    "label": "exposed bot wallet 163, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "d6fc371d503c5ba2b17aa437e5f41f776fde34de3829e0e73cab0f1a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "d76e76fbfa5afdaba69d02cf8876f136bf77d752ef1afd722a07e248",
    "label": "exposed bot wallet 124, payment key"
@@ -1918,9 +3463,24 @@
    "label": "exposed bot wallet 10, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "d832942057c8ca8bd08b4018545df6fe2b916410fc0a8548d9c32c9e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "d84e0c9330e1975b1e23b198ba152fa3a66a148d4f0a3d4862d45e6e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "d8a3fa985f2e7f27466bbc0cf599aa0aa90adf5331afb8def8296090",
    "label": "exposed bot wallet 54, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "d910c87692392747b64e541f851c250640603397661efbb5d539c2eb",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1968,9 +3528,34 @@
    "label": "Aegis vault account 0, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "dc8ff603a2e5b3e59fccdd595b318a7da0c0003056179e1372c2ba32",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "dcca79baf9720d21f92725aa73ad95d8f2d1ba2a1920ea01cf7bc437",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "dd0dcc3020a9b59bbea6a82af374565a9cdc90d412152b139298d7d8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "dd18b0ca7ca3dc012005a4d10e2017739cb33f0721d5dd0b4077a192",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "dd2b3200916311cf42869f64b9d66868303e96919cf1efaf49b16b18",
    "label": "exposed bot wallet 104, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "dd3026a1073ae8312ebc9d3c9adbfdb7924ba5dd3d94a0a0dd819f7a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -1983,6 +3568,11 @@
    "label": "exposed bot wallet 120, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "de2396012a988cbc210eb02d177f2ed5964af8e3b90a21eb529b3b6c",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "de5e727980fbb9eebdcaeecae1fc18d9f10ca11b67887aeb3cf0bd27",
    "label": "exposed bot wallet 141, stake key"
@@ -1993,9 +3583,24 @@
    "label": "exposed bot wallet 119, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "dfed7d68311640e3bce698e9f6dcb5ff0b65d700218c054eae3f1474",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "e031da6c58f5869d0e7ea4d412e3f81dc6a1edf9d2a5ae51d0105282",
    "label": "exposed bot wallet 76, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e03443c7d520597408e44a8f949afbe9a26f77183c48b31f2dcb6366",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e04166e2f665ddfa129cee3e65605e491de02f8a8fc5d68e59b0fbeb",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2013,6 +3618,11 @@
    "label": "exposed bot wallet 52, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e171083d29035e9a7d6a5415c85564558f891eb16c2af4b66a5e427d",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "made 19 merger claims with FLUX_PASS taken from W1, the first a08b8b1739017285d853b84c8e71f52bc92c18bf6116ac7da7587df468d7382a, the last d3a1e632424794bed36d7062b4c09c5fe547fa7a1addbd2d45f9b84df773c733",
    "hash": "e19719dfb27e226b9c53702491d9fb83a5e50f37c6a16534ee58bcd1",
    "label": "attacker claim address, stake key"
@@ -2021,6 +3631,11 @@
    "evidence": "its seed was exposed; swept to the FPS treasury by bf5db9211775fd57230209c97db6587154eb260a8958bcfa1dd39a39cc99eadd and 6ff7fc0b51390d254ec2a17e0e3436cd107728e201b46635c52075e03787f9fd",
    "hash": "e2068a850e61da62e5d246b88c968d5e53f07abd61681d500bcdc469",
    "label": "Aegis ceremony key, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e22c4b06561d806254f0a3f5809771d709e42c52821efe95b4873d48",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2043,6 +3658,21 @@
    "label": "exposed bot wallet 174, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e385eede154ac5f316d57295fc40f6c41cd1a5e30b3c2fb3c33e0094",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e46df9c245e8c870885d7ba27331040fcdf11b1fc01055840dcaba29",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e4826b2a9483c4e91af697bdf355f4e4310e6aa4439f89b6676fef3f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "e4f2575eedad0666fed4c029b43f9da8144d943872f80073f66ea775",
    "label": "exposed bot wallet 99, stake key"
@@ -2053,9 +3683,44 @@
    "label": "W2 timelock script"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e5365f4a99e45705baa7a69a13b239811eb2a04214675db0fb68511a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e553fda1d9dadb7de68f82fbf41f40036f274b5f92c334606554751e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e56605df119f0740134b63d03869c974256ecece396d9d76abd4cc48",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e5ac5f8e5b122de48f48366a82ece8af5ed6847176e3810b342726c5",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e5b16d919ef6341b8d314b0a46d1c3f14fde86b8c73ea6702d0a5585",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "e5d7d9cc3be6e8f0aa13df4bb1d264846d1011abcaac85b7149a3d76",
    "label": "exposed bot wallet 11, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e6144b50f640ae60d15a8e16355e367b1e708e5e86ba0dd75381cda7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e62826778ca2db1943726017bfc1f76d7bce6e4a482264f41efb139d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2078,9 +3743,24 @@
    "label": "W2 timelock script"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e7b09548e5e28300f63bb636c5bc0fee6f567e53594b26653a9a4236",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e84c80a70963d4d49a5f9bec3e8d886715422fd1a7eb44569a45de0a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "e886080fda924e384e2f81071bf9b021bfa2cd74142d62526c25a083",
    "label": "exposed bot wallet 108, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e895d7138cffdc5ea23ae7446ffe23e93fb0747b3ca891ace234cd75",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2093,9 +3773,24 @@
    "label": "exposed bot wallet 135, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e97384000a3e0077a13846d38180540ff0657b00d7b86c6fb4acfb44",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "e99c181ee2d0e86c06516612f23f3d9d1eb55c81be707740380f8ace",
    "label": "exposed bot wallet 69, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "e9d3602b10faee425b43faaead36e32a04951993c04ae18db709286b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ea3c9470a582288161ee4ff5067b3b51cb17f7615b81bf202e0a4094",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2113,6 +3808,11 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its signing key was exposed (claims deny set)",
+   "hash": "eaf970d25f0fccba5d980ffa339195f96dfe926e666289b8c058cac1",
+   "label": "SaturnSwap stake key"
+  },
+  {
    "evidence": "drained to the attacker by 19a761cc9baea171033329f04f6c5fcf8cdee0f16db35d393aef7537c5ba61a7",
    "hash": "eb7a45466019acd8934655de234141cdac025fa586fec6594a891ab2",
    "label": "drained decimalist account, stake key"
@@ -2128,9 +3828,34 @@
    "label": "exposed bot wallet 33, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ebc364ca9977ffe5bb9c1c2b7e6188582fce0c3ab144bfc954037fc7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ebf9f7e3693c36c8027f51f6c18a1f89e3a02f68173b98c0be1cf05d",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ec0706917e83b6293a53d212defbf817a9208df499acb200291cc975",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "ec4066e9c76a644f2e8bcae8988fbe1bfc029f488cffb47210680fbf",
    "label": "exposed bot wallet 11, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ecba5cdf56e6df8ce37d1e33c34c9b56c5697c624f8da09bd4ff8399",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ece845be181d5c60aa6e0c32f62381e8113a6423199cd85057be2ff7",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2138,9 +3863,34 @@
    "label": "exposed bot wallet 39, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ed33804ccee1ed5e706653fcb1b75c51ef18f1e7b3067d5cc52197c8",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ed4bb816f4379ba41e0843a4539e23cda478b5fcd78184063ab8a798",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "ed86957c8953436b228c10c0e7f4c1019cf26b0aa6401e456e4aef8a",
    "label": "exposed bot wallet 192, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "edea5abd1d95d9b2ae8609b7aae4c7dc1f58e349496ca5ee9cc05533",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ee03c2aeaf1ae39afb47ab1c2f0bdb7f8070e71d6ecfff793ae99e48",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ee1de65bbce630d7aa28fd339e83315f44d6a9a7e5f471bae3461911",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2168,6 +3918,11 @@
    "label": "exposed bot wallet 140, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ef900ea3ff6395f7aad213d5b89e3672e6085c1bcaaa6f8a3363fdd2",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "efbbab99c9d09f81e7ac007544c36baff5e27c2040d93ec2420e4ecb",
    "label": "exposed bot wallet 55, stake key"
@@ -2191,6 +3946,11 @@
    "evidence": "its signing key was exposed (2026-11-10 inventory)",
    "hash": "f108825497f3f169155877a708799931b13e2dd3a326462d336d9cee",
    "label": "MMaaS fee-channel operator key, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f16b30a91aa62afb45b98f9b1e69405b875f00e6a9c17c12be04d99a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2233,9 +3993,19 @@
    "label": "exposed bot wallet 73, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f4867ff7cef4f67c1d6f94c5223c3a2bd328efb25381928fd033d6bd",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "f64fdfda43407466e7ee463f7e66d152bb05f1fe9bcdfd293affaa58",
    "label": "exposed bot wallet 81, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f71efb3ebc410056dd6c53921f7e574fbf34098173d25d09e975733f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2243,9 +4013,24 @@
    "label": "exposed bot wallet 19, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f75736304049c1ac986aaf45c42c56fb10c08c335265378dc319ec11",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f7822f17ce7526fa1d359d6a9c057cb080dd0121938fb5c3b19df70e",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "f7c64fdd46eb80dfb60c084bee27e57491ae4bb9e40e61b55f734635",
    "label": "exposed bot wallet 27, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f83e140975fb6b83897e4d4dffd7fe03abd755328a2bd9df93f4d6d9",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2268,6 +4053,11 @@
    "label": "exposed bot wallet 62, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f9724c47299e745cb4f50f9d36cbbadcdf87e015a9d99d927dc4e866",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "f972f02ca6850fb5d17f3aab68ae1132f3e8057dadf58e0bdebb8387",
    "label": "exposed bot wallet 167, stake key"
@@ -2278,9 +4068,39 @@
    "label": "exposed bot wallet 45, stake key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "f9ded618b9e4c172d74734e1fa646080bfc9f1358713fdd9b4bc9742",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "fa44ebad8046847f6fc0b802755477ab5ae136ec18880d7c01ba0b2a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "fa6a58bbe2d0ff05534431c8e2f0ef2cbdc1602a8456e4b13c8f3077",
+   "label": "decimalist root account stake1u8yt8c, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "fb14085d535951457283bed60cd64e934d80d5eb2a7708bbaa714c8b",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "fb3f6e3e9cf9c02a8acaca89ca12eb4be7981d764e833eba77e7003a",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
    "hash": "fb5d4c99ebad4bd80e0b26d3d70e372082411f61dd606c1596c67ff9",
    "label": "exposed bot wallet 188, stake key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "fbf53f18f6d9b1e0872f5c9525960e654716de84dc0c5c06cc61059f",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
@@ -2313,6 +4133,16 @@
    "label": "exposed bot wallet 74, payment key"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "fee78d99d2f69d7a641a45f7f6172e0e81e115142d4d55a82c857234",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "feffa77a7dce4f7a8454385d75a919bfe879dd3bc7b1d80a38d84516",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "ff0fccc79467acb910c3041840b3ac40d91e62fbe69af47a900abac0",
    "label": "exposed bot wallet 39, stake key"
@@ -2333,9 +4163,19 @@
    "label": "W2 liquidity contract (owner W2)"
   },
   {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ffa1c27d36302a8fd1fb00b45532b5c8925f94e58b0cbbe2e08f56bc",
+   "label": "decimalist root account stake1u8vmmm, payment key"
+  },
+  {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
    "hash": "ffbe7a1f4b36fb22b7095ef7da669388716dd94a80df4f3a6d170614",
    "label": "exposed bot wallet 83, payment key"
+  },
+  {
+   "evidence": "derived from the exposed decimalist root (claims deny set)",
+   "hash": "ffe1da0f17bff8cf823e4aef9306f8966c404c1fb911626eca2bc1aa",
+   "label": "decimalist root account stake1u8vmmm, payment key"
   },
   {
    "evidence": "its seed was exposed; its funds were moved to FPS custody",
