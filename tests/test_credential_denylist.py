@@ -66,7 +66,7 @@ def test_the_committed_list_loads_and_matches_its_schema():
     denylist = load_denylist(COMMITTED)
     jsonschema.validate(json.loads(COMMITTED.read_text()), SCHEMA)
     assert denylist.sha256 == hashlib.sha256(COMMITTED.read_bytes()).hexdigest()
-    assert len(denylist.labels) == 61
+    assert len(denylist.labels) == 834
     assert len(denylist.allowed) == 2
 
 
@@ -80,6 +80,52 @@ def test_the_committed_list_denies_the_attacker_and_the_drained_wallets():
         "addr1z9vlzkpazwgxx5ndk7kwee6hkarndhyd6f44tjk0xgszgu275jq4yvpskgayj55xegdp30g5rfynax66r8vgn9fldnds3rhruq",
     ):
         assert denylist.denied(Address.from_primitive(address).to_primitive()), address
+
+
+_EXPOSED = json.loads((ROOT / "tests/fixtures/denylist_exposed_since_v1.json").read_text())
+EXPOSED_SINCE_V1 = _EXPOSED["addresses"]
+EXPOSED_KEYS_WITHOUT_AN_ADDRESS = _EXPOSED["credentials"]
+"""Exposed key hashes whose addresses are not known: a .vkey inventory and the claims verifier's deny set."""
+
+
+def test_the_fixture_names_every_key_exposed_since_the_first_list():
+    labels = [entry["label"] for entries in EXPOSED_SINCE_V1.values() for entry in entries]
+    assert len(EXPOSED_SINCE_V1) == 204
+    assert sum(label.startswith("exposed bot wallet ") for label in labels) == 384
+    assert len({label.split(",")[0] for label in labels if label.startswith("exposed bot wallet ")}) == 192
+
+
+@pytest.mark.parametrize("address", sorted(EXPOSED_SINCE_V1))
+def test_the_committed_list_denies_each_key_exposed_since_the_first_list(address):
+    """Every credential of each address is listed under its label, so neither
+    part of a base address is left for a fresh pairing to reach."""
+    denylist = load_denylist(COMMITTED)
+    expected = EXPOSED_SINCE_V1[address]
+    credentials = address_credentials(Address.from_primitive(address).to_primitive())
+    assert [credential.hex() for credential in credentials] == [entry["hash"] for entry in expected]
+    for credential, entry in zip(credentials, expected):
+        assert denylist.labels.get(credential) == entry["label"]
+
+
+@pytest.mark.parametrize("credential", sorted(EXPOSED_KEYS_WITHOUT_AN_ADDRESS))
+def test_the_committed_list_denies_each_exposed_key_known_only_by_its_hash(credential):
+    denylist = load_denylist(COMMITTED)
+    assert denylist.labels.get(bytes.fromhex(credential)) == EXPOSED_KEYS_WITHOUT_AN_ADDRESS[credential]
+
+
+def _sweep_param(name: str) -> str:
+    line = next(l for l in (ROOT / "scripts/sweep_params.env").read_text().splitlines() if l.startswith(name + "="))
+    return line.split("=", 1)[1].split("#")[0].strip().strip('"')
+
+
+def test_the_committed_list_never_denies_the_merger_itself():
+    """The pool, the quarantine and both admins sit in every surrender; a list
+    that names one of them refuses every claim."""
+    labels = load_denylist(COMMITTED).labels
+    for address in (_sweep_param("SURRENDER_POOL_ADDR"), "addr1wy5gl6nh5rm8f3sgp2ka3mfu5skdt2fqhu0spsxnucesdeqatlhxl"):
+        assert not set(address_credentials(Address.from_primitive(address).to_primitive())) & labels.keys(), address
+    for admin in ("ADMIN_PKH_1", "ADMIN_PKH_2"):
+        assert bytes.fromhex(_sweep_param(admin)) not in labels, admin
 
 
 def test_the_committed_list_lets_the_rescue_wallet_through():
