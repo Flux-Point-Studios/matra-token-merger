@@ -4,6 +4,9 @@ The pool validator checks the two admin signatures and the time window; every
 other property of a surrender is checked here, off chain, by each signer. The
 policy reads the complete transaction and approves only a surrender:
 
+  * no input, collateral input, collateral return or output at an address
+    that names a credential on the deny-list, in either part; a pointer
+    address, whose stake credential the list cannot check, is refused too;
   * exactly one pool input, holding only ADA and cMATRA under the Void inline
     datum; every other input and all collateral from one key-hash address on
     the pool's network (the claimant), which is not an admin key. Each input is
@@ -30,7 +33,8 @@ policy reads the complete transaction and approves only a surrender:
 ``require_claimant_signature`` then checks that the claimant's payment key
 signed the body. services.chain_check confirms against the signer's own view
 of the chain that the inputs exist, no unit's supply grew and no NFT unit was
-minted or burned since the pin, and the per-day cap and each unit's remaining
+minted or burned since the pin, and no surrendered unit reached the claimant
+inside the cooling-off, and the per-day cap and each unit's remaining
 redemptions are enforced against every signer's own record by
 services.redemption_ledger.
 
@@ -53,7 +57,11 @@ from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 from pycardano import Address
 
+from tools.cardano_utils import SLOT_OFFSET_S
+from tools.credential_denylist import DEFAULT_DENYLIST_PATH, DenyList, PointerAddress, load_denylist
 from tools.process_surrender import (
+    compute_redemption,
+    funded_limits,
     load_rate_table,
     load_redemption_pin,
     surrendered_entitlement,
@@ -65,13 +73,6 @@ MAX_POOL_LOVELACE_OUTFLOW = 500_000
 # pycardano sets ttl = tip + 10_000 slots; the rest absorbs clock skew between
 # the builder's view of the tip and the signer's clock.
 MAX_VALIDITY_SLOTS = 12_000
-
-# POSIX seconds minus slot number, per network (1-second slots since Shelley).
-SLOT_OFFSET_S = {
-    "mainnet": 1_591_566_291,
-    "preprod": 1_655_683_200,
-    "preview": 1_666_656_000,
-}
 
 _ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_RATE_TABLE_PATH = _ROOT / "audit_pack/2026-04-19/rate_table_cmatra.json"
@@ -336,6 +337,19 @@ def _is_key_address(address: bytes) -> bool:
     return address[0] >> 4 in (0, 2, 4, 6)
 
 
+def _refuse_denied(address: bytes, cfg: CosignConfig) -> None:
+    """Refuse ``address`` if it names a credential on the deny-list, or
+    names its credentials in a way the list cannot check."""
+    try:
+        label = cfg.denylist.denied(address)
+    except PointerAddress as exc:
+        raise CosignRejected("pointer_address", str(exc)) from exc
+    except ValueError as exc:
+        raise CosignRejected("output_shape", str(exc)) from exc
+    if label is not None:
+        raise CosignRejected("denied_credential", f"{address.hex()}: {label}")
+
+
 def slot_at(posix_seconds: float, network: str) -> int:
     return int(posix_seconds) - SLOT_OFFSET_S[network]
 
@@ -393,12 +407,17 @@ class CosignConfig:
     pinned_supply: Mapping[str, int]
     supply_slot: int
     max_payout_per_tx: int
+    denylist: DenyList
+    funded_limits: Mapping[str, int]
+    """Per merge asset's policy: what the pool was funded to redeem after the pin."""
 
 
 def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignConfig:
     """Build the policy from environment variables. Everything that decides
-    what gets signed is required; only the two data files default to the
-    committed rate table and redemption pin."""
+    what gets signed is required; only the data files default to the
+    committed rate table, redemption pin and deny-list. A deny-list that is
+    missing or malformed raises, and so does a per-transaction cap below what
+    one unit pays at most."""
 
     def need(key: str) -> str:
         value = env.get(key, "").strip()
@@ -412,6 +431,14 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
     network = need("NETWORK")
     deadline_ms = int(need("SURRENDER_DEADLINE_POSIX_MS"))
     pin = load_redemption_pin(Path(env.get("REDEMPTION_PIN_PATH") or DEFAULT_REDEMPTION_PIN_PATH))
+    rate_table = load_rate_table(Path(env.get("RATE_TABLE_PATH") or DEFAULT_RATE_TABLE_PATH))
+    max_payout_per_tx = int(need("MAX_CMATRA_PER_TX"))
+    one_unit = max(compute_redemption(rate_table, name, 1) for name in rate_table["tokens"])
+    if max_payout_per_tx < one_unit:
+        raise ValueError(
+            f"MAX_CMATRA_PER_TX {max_payout_per_tx} is below {one_unit}, what one unit pays at most:"
+            " units that pay that could never be surrendered"
+        )
     return CosignConfig(
         network=network,
         pool_address=Address.from_primitive(need("SURRENDER_SCRIPT_ADDRESS")).to_primitive(),
@@ -420,12 +447,14 @@ def load_config(env: Mapping[str, str], admin_pkhs: Iterable[bytes]) -> CosignCo
         cmatra_name=bytes.fromhex(need("CMATRA_ASSET_HEX")),
         admin_pkhs=admins,
         deadline_slot=slot_at(deadline_ms // 1000, network),
-        rate_table=load_rate_table(Path(env.get("RATE_TABLE_PATH") or DEFAULT_RATE_TABLE_PATH)),
+        rate_table=rate_table,
         redeemable_nfts=pin.nft_units,
         redemption_limits=pin.remaining,
         pinned_supply=pin.supply,
         supply_slot=pin.supply_slot,
-        max_payout_per_tx=int(need("MAX_CMATRA_PER_TX")),
+        max_payout_per_tx=max_payout_per_tx,
+        denylist=load_denylist(Path(env.get("DENYLIST_PATH") or DEFAULT_DENYLIST_PATH)),
+        funded_limits=funded_limits(rate_table, pin),
     )
 
 
@@ -442,6 +471,12 @@ class Approval:
     spends: tuple[tuple[bytes, int], ...]
     """The outputs it consumes when it lands, the pool's included. Its
     collateral is consumed only if a script fails, when nothing else is."""
+    unit_inputs: tuple[tuple[bytes, int], ...]
+    """The claimant's inputs that hold a unit it quarantines."""
+    held: Mapping[str, int]
+    """What those inputs hold of each unit it quarantines."""
+    checked_at: int
+    """The slot it was checked at."""
 
 
 def evaluate_surrender(
@@ -513,6 +548,8 @@ def evaluate_surrender(
     spent = dict(resolve(raw) for raw in input_refs)
     if len(spent) != len(input_refs):
         raise CosignRejected("duplicate_input", "an input is listed twice")
+    for out in spent.values():
+        _refuse_denied(out.address, cfg)
     pool_refs = [ref for ref, out in spent.items() if out.address == cfg.pool_address]
     if len(pool_refs) != 1:
         raise CosignRejected("pool_input_count", f"{len(pool_refs)} pool inputs")
@@ -536,10 +573,15 @@ def evaluate_surrender(
         raise CosignRejected("claimant_network", "claimant address is on another network")
 
     collateral = [resolve(raw) for raw in _elements(body.get(13, []))]
+    for _, out in collateral:
+        _refuse_denied(out.address, cfg)
     if any(out.address != claimant for _, out in collateral):
         raise CosignRejected("collateral_not_claimant", "collateral is not the claimant's")
-    if 16 in body and parse_output(body[16]).address != claimant:
-        raise CosignRejected("collateral_return_not_claimant", "collateral return leaves the claimant")
+    if 16 in body:
+        collateral_return = parse_output(body[16]).address
+        _refuse_denied(collateral_return, cfg)
+        if collateral_return != claimant:
+            raise CosignRejected("collateral_return_not_claimant", "collateral return leaves the claimant")
 
     pool_outs: list[Output] = []
     quarantined: dict[str, int] = {}
@@ -548,6 +590,7 @@ def evaluate_surrender(
         raise CosignRejected("body_shape", "outputs are not an array")
     produced = [parse_output(raw) for raw in outputs]
     for out in produced:
+        _refuse_denied(out.address, cfg)
         if out.has_script_ref:
             raise CosignRejected("output_script_ref", "an output carries a reference script")
         if out.address == cfg.pool_address:
@@ -574,11 +617,14 @@ def evaluate_surrender(
         raise CosignRejected("quarantine_assets", str(exc)) from exc
     if entitlement == 0:
         raise CosignRejected("nothing_surrendered", "no legacy asset reaches quarantine")
+    unit_inputs: set[tuple[bytes, int]] = set()
+    held: dict[str, int] = {}
     for unit, quantity in quarantined.items():
         policy, name = bytes.fromhex(unit[:56]), bytes.fromhex(unit[56:])
-        held = sum(_quantity(out.assets, policy, name) for out in spent.values())
-        if held < quantity:
-            raise CosignRejected("quarantine_not_claimants", f"inputs hold {held} of {unit}")
+        held[unit] = sum(_quantity(out.assets, policy, name) for out in spent.values())
+        if held[unit] < quantity:
+            raise CosignRejected("quarantine_not_claimants", f"inputs hold {held[unit]} of {unit}")
+        unit_inputs.update(ref for ref, out in spent.items() if _quantity(out.assets, policy, name))
 
     payout = pool_in_cmatra - _quantity(continuation.assets, cfg.cmatra_policy, cfg.cmatra_name)
     if payout != entitlement:
@@ -614,6 +660,9 @@ def evaluate_surrender(
         pool_input=pool_ref, units=quarantined,
         inputs=tuple(sorted({pool_ref, *spent, *(ref for ref, _ in collateral)})),
         spends=tuple(sorted([pool_ref, *spent])),
+        unit_inputs=tuple(sorted(unit_inputs)),
+        held=held,
+        checked_at=now_slot,
     )
 
 

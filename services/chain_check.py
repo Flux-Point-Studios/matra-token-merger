@@ -17,7 +17,29 @@ Blockfrost project queried from the signer's own host:
     spends outputs still in the mempool). A producing body proves what an
     output would hold, not that it exists; a transaction spending an output
     that does not exist can never land, and must not use up the limits the
-    ledger holds approvals to.
+    ledger holds approvals to;
+  * of each unit surrendered, the claimant's inputs held what is
+    surrendered at its payment key COOLING_OFF_SLOTS before the check. An
+    input made inside that window is followed back through the transaction
+    that made it, through those of its inputs that carry the unit and are the
+    claimant's own (any of its addresses). Whatever of the unit entered such
+    a transaction from another key, or was minted in it, arrived inside the
+    window, and the inputs must hold what is surrendered on top of all of it:
+    units of one kind cannot be told apart, so what arrived counts in full
+    wherever it went afterwards, once per transaction, and a burn does not
+    offset it. A walk through more than MAX_PROVENANCE_TXS transactions
+    inside the window refuses the surrender, and so does one that would ask
+    the chain view more than MAX_PROVENANCE_LOOKUPS times. The walk asks
+    about each transaction once and reads the listings the input check
+    already read, so no ancestry a claimant builds costs the signer's
+    provider more than that per check. Change of a surrender this signer
+    recorded is followed back through that surrender's own inputs, as
+    the signer recorded them, unless the chain places the surrender before
+    the window: a surrender checks only the units it quarantines, so its
+    change may carry others that arrived inside the window. Stolen units are
+    surrendered within hours of being taken; a holder waits at most the
+    window, and only for what arrived inside it, so units sent to a holder
+    hold back nothing it held before.
 
 A view that cannot answer raises :class:`ChainUnavailable`, and nothing is
 signed. That includes an answer of the wrong shape: a page of a history that
@@ -32,12 +54,21 @@ leaves an entry out, cannot be told from a complete one.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping, NamedTuple
 
 import requests
+from pycardano import Address
+from pycardano.exception import DecodingException, DeserializeException
 
 from services.cosign_policy import Approval, CosignConfig, CosignRejected
 from tools.api_clients import BlockfrostUnavailable
+
+COOLING_OFF_SLOTS = 72 * 3600
+MAX_PROVENANCE_TXS = 32
+# No surrender up to the stop took the walk more than 19.
+MAX_PROVENANCE_LOOKUPS = 256
+
+Recorded = Callable[[bytes], tuple[tuple[bytes, int], ...] | None]
 
 
 class ChainUnavailable(RuntimeError):
@@ -90,6 +121,189 @@ def _slot(tx_hash: str, answer: Any) -> int:
     return slot
 
 
+def placed_at(tx_hash: str, chain: Any) -> int | None:
+    """The slot ``chain`` places ``tx_hash`` in, or None if it has not seen it."""
+    answer = _ask(chain.get_tx, tx_hash)
+    return None if answer is None else _slot(tx_hash, answer)
+
+
+def _amounts(entry: Any, tx_hash: str) -> dict[str, int]:
+    """How much of each unit, not lovelace, a /txs/{hash}/utxos entry holds."""
+    amounts: dict[str, int] = {}
+    try:
+        for a in entry["amount"]:
+            if a["unit"] != "lovelace" and int(a["quantity"]) > 0:
+                amounts[a["unit"]] = amounts.get(a["unit"], 0) + int(a["quantity"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ChainUnavailable(f"{tx_hash}: unexpected amounts from the chain view: {exc!r}") from exc
+    return amounts
+
+
+def _made_outputs(answer: Any, tx_hash: str) -> list:
+    """The outputs a /txs/{hash}/utxos answer lists the transaction as
+    making: not a valid transaction's collateral return, which the ledger
+    never creates."""
+    try:
+        return [out for out in answer["outputs"] if out["collateral"] is False]
+    except (KeyError, TypeError) as exc:
+        raise ChainUnavailable(f"{tx_hash}: unexpected outputs from the chain view: {exc!r}") from exc
+
+
+class _Listing(NamedTuple):
+    """A transaction as a /txs/{hash}/utxos answer lists it, read once."""
+
+    held: dict[int, dict[str, int]]
+    """What each output it makes holds, by the output's index."""
+    made: list[dict[str, int]]
+    """What its outputs hold, one entry each."""
+    inputs: list[tuple[Any, dict[str, int]]]
+    """Each input it consumes, with what that input holds."""
+
+
+def _listing(answer: Any, tx_hash: str) -> _Listing:
+    held: dict[int, dict[str, int]] = {}
+    made = []
+    for out in _made_outputs(answer, tx_hash):
+        amounts = _amounts(out, tx_hash)
+        made.append(amounts)
+        if type(out.get("output_index")) is int:
+            held.setdefault(out["output_index"], amounts)
+    inputs = [(entry, _amounts(entry, tx_hash)) for entry in _spent_inputs(answer, tx_hash)]
+    return _Listing(held, made, inputs)
+
+
+def _spent_inputs(answer: Any, tx_hash: str) -> list:
+    """The inputs a /txs/{hash}/utxos answer lists the transaction as
+    consuming: neither collateral, which a valid transaction keeps, nor
+    reference inputs, which it only reads."""
+    try:
+        return [
+            entry for entry in answer["inputs"]
+            if entry["collateral"] is False and entry["reference"] is False
+        ]
+    except (KeyError, TypeError) as exc:
+        raise ChainUnavailable(f"{tx_hash}: unexpected inputs from the chain view: {exc!r}") from exc
+
+
+def _input_ref(entry: Any, tx_hash: str) -> tuple[bytes, int]:
+    """The output an input entry spends. Its hash goes into a request path,
+    so it must be a transaction hash and nothing else."""
+    ref_tx, index = entry.get("tx_hash"), entry.get("output_index")
+    if not (isinstance(ref_tx, str) and _TX_HASH.fullmatch(ref_tx) and type(index) is int):
+        raise ChainUnavailable(f"{tx_hash}: unexpected input entry from the chain view: {entry!r:.200}")
+    return bytes.fromhex(ref_tx), index
+
+
+def _payment_key(entry: Any, tx_hash: str) -> bytes | None:
+    """The payment credential of the address an input entry names; None for
+    an address that has none (Byron)."""
+    try:
+        payment = Address.from_primitive(entry["address"]).payment_part
+    except (DecodingException, DeserializeException):
+        return None
+    except KeyError as exc:
+        raise ChainUnavailable(f"{tx_hash}: an input entry names no address") from exc
+    return None if payment is None else payment.payload
+
+
+def refuse_inside_cooling_off(approval: Approval, chain: Any, recorded: Recorded,
+                              listings: Mapping[bytes, Any] | None = None) -> None:
+    """Raise :class:`CosignRejected` unless, of each unit ``approval``
+    surrenders, its inputs held what it surrenders at the claimant's payment
+    key COOLING_OFF_SLOTS or more before it was checked. Units of one kind
+    cannot be told apart, so every unit that reached the claimant from
+    another key, or was minted, inside the window counts against what the
+    inputs hold, once, wherever it went afterwards. ``listings``: the
+    /txs/{hash}/utxos answers this check already has, by transaction id;
+    the chain view is asked about any other transaction once, and no more
+    than MAX_PROVENANCE_LOOKUPS times in all."""
+    cutoff = approval.checked_at - COOLING_OFF_SLOTS
+    owner = approval.claimant[1:29]
+    arrived = dict.fromkeys(approval.units, 0)
+    latest: dict[str, tuple[int, str]] = {}
+    pending, seen, inside, counted = list(approval.unit_inputs), set(), set(), set()
+    listings = listings or {}
+    places: dict[bytes, tuple[tuple[tuple[bytes, int], ...] | None, int | None]] = {}
+    read: dict[bytes, _Listing] = {}
+    asked = 0
+
+    def ask(lookup: Callable[[], Any]) -> Any:
+        nonlocal asked
+        if asked == MAX_PROVENANCE_LOOKUPS:
+            raise CosignRejected(
+                "cooling_off", f"following the surrendered units back {COOLING_OFF_SLOTS} slots takes more"
+                f" than {MAX_PROVENANCE_LOOKUPS} lookups; surrender fewer at a time, or once they have not"
+                f" moved for {COOLING_OFF_SLOTS} slots",
+            )
+        asked += 1
+        return lookup()
+
+    while pending:
+        ref = pending.pop()
+        if ref in seen:
+            continue
+        seen.add(ref)
+        tx_id, index = ref
+        tx_hash = tx_id.hex()
+        if tx_id not in places:
+            places[tx_id] = recorded(tx_id), ask(lambda: placed_at(tx_hash, chain))
+        spends, slot = places[tx_id]
+        if slot is None and spends is None:
+            raise ChainUnavailable(f"{tx_hash}: the chain view gives no slot for it")
+        if slot is not None and slot <= cutoff:
+            continue
+        if spends is not None:
+            # A recorded surrender, possibly still in the mempool. The policy
+            # held all its inputs but the pool's to the claimant, so its
+            # change carries only what those inputs brought.
+            pending.extend(spends)
+            continue
+        inside.add(tx_id)
+        if len(inside) > MAX_PROVENANCE_TXS:
+            raise CosignRejected(
+                "cooling_off", f"the surrendered units moved through more than {MAX_PROVENANCE_TXS}"
+                f" transactions in the {COOLING_OFF_SLOTS} slots before the surrender",
+            )
+        if tx_id not in read:
+            answer = listings.get(tx_id)
+            if answer is None:
+                answer = ask(lambda: _ask(chain.get_tx_utxos, tx_hash))
+            read[tx_id] = _listing(answer, tx_hash)
+        listing = read[tx_id]
+        if index not in listing.held:
+            raise ChainUnavailable(f"{tx_hash}#{index}: the chain view lists no such output")
+        held = listing.held[index]
+        for unit in sorted(arrived.keys() & held.keys()):
+            if (tx_id, unit) in counted:
+                continue
+            counted.add((tx_id, unit))
+            own, entered = [], 0
+            for entry, amounts in listing.inputs:
+                if unit in amounts:
+                    if _payment_key(entry, tx_hash) == owner:
+                        own.append(entry)
+                    else:
+                        entered += amounts[unit]
+            # What the outputs hold beyond what the inputs brought was minted;
+            # a burn does not offset what arrived.
+            minted = (sum(out.get(unit, 0) for out in listing.made)
+                      - sum(amounts.get(unit, 0) for _, amounts in listing.inputs))
+            entered += max(0, minted)
+            if entered:
+                arrived[unit] += entered
+                latest[unit] = max(latest.get(unit, (slot, tx_hash)), (slot, tx_hash))
+            pending.extend(_input_ref(entry, tx_hash) for entry in own)
+
+    for unit, quantity in sorted(approval.units.items()):
+        ready = approval.held[unit] - arrived[unit]
+        if quantity > ready:
+            slot, tx_hash = latest[unit]
+            raise CosignRejected(
+                "cooling_off", f"{unit} reached the claimant in {tx_hash} at slot {slot}; {max(0, ready)} of"
+                f" the {quantity} surrendered can be surrendered now, all from slot {slot + COOLING_OFF_SLOTS}",
+            )
+
+
 def mints_and_burns_after(unit: str, slot: int, chain: Any) -> Iterator[tuple[str, str, int]]:
     """Each mint or burn of ``unit`` after ``slot`` by the unit's own history
     on ``chain`` (a BlockfrostClient), as (action, transaction hash, its
@@ -107,12 +321,12 @@ def mints_and_burns_after(unit: str, slot: int, chain: Any) -> Iterator[tuple[st
             yield event.get("action"), tx_hash, tx_slot
 
 
-def confirm_on_chain(
-    approval: Approval, cfg: CosignConfig, chain: Any, recorded: Callable[[bytes], bool],
-) -> None:
+def confirm_on_chain(approval: Approval, cfg: CosignConfig, chain: Any, recorded: Recorded) -> None:
     """Raise :class:`CosignRejected` if the chain contradicts ``approval``,
     or :class:`ChainUnavailable` if ``chain`` (a BlockfrostClient) cannot say.
-    ``recorded(tx_hash)``: this signer recorded an approval of ``tx_hash``."""
+    ``recorded(tx_hash)``: the outputs besides the pool's that a surrender
+    this signer recorded spends, or None if it recorded no approval of
+    ``tx_hash`` (RedemptionLedger.claimant_spends)."""
     for unit in sorted(approval.units):
         info = _ask(chain.get_asset_info, unit)
         if info is None:
@@ -123,10 +337,11 @@ def confirm_on_chain(
                 "supply_grown", f"{unit}: {current} on chain, {pinned} at the pin",
             )
 
+    listings: dict[bytes, Any] = {}
     for tx_id in sorted({tx_id for tx_id, _ in approval.inputs}):
-        if recorded(tx_id):
+        if recorded(tx_id) is not None:
             continue
-        answer = _ask(chain.get_tx_utxos, tx_id.hex())
+        answer = listings[tx_id] = _ask(chain.get_tx_utxos, tx_id.hex())
         if answer is None:
             raise CosignRejected("input_unknown", f"{tx_id.hex()} is neither on chain nor recorded")
         unspent = _unspent_outputs(answer)
@@ -144,3 +359,5 @@ def confirm_on_chain(
                 "minted_after_pin",
                 f"{unit}: {action} in {tx_hash} at slot {slot}, after the pin at slot {cfg.supply_slot}",
             )
+
+    refuse_inside_cooling_off(approval, chain, recorded, listings)

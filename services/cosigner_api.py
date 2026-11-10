@@ -6,10 +6,13 @@ Runs on a separate host from the surrender API and holds the second admin
 key. It signs a transaction only after it has read the whole transaction,
 services.cosign_policy has approved it as a surrender that its claimant has
 signed, services.chain_check has confirmed it against this host's own view
-of the chain, and services.redemption_ledger has recorded it within the
-24-hour cap and each surrendered unit's pinned limit. The check does not
-depend on anything the surrender API asserts: input values come from
-producing bodies hashed against the inputs' transaction ids.
+of the chain, services.redemption_ledger has recorded it within the 24-hour
+cap and each surrendered unit's pinned limit, and services.pager owes the
+on-call channel a page of it; a refusal under a deny rule pages too. While a
+page has gone undelivered past the pager's grace it signs nothing, answering
+503 pager_backlog, and /health answers 503 while paging fails. The check
+does not depend on anything the surrender API asserts: input values come
+from producing bodies hashed against the inputs' transaction ids.
 
 POST /cosign takes the full transaction carrying the claimant's witness, the
 bodies of the transactions that produced its inputs (each is checked against
@@ -24,11 +27,16 @@ Environment (all required unless noted):
   COSIGNER_LEDGER_PATH        SQLite file recording every signed surrender, created
                               once with python -m services.redemption_ledger init
   MAX_CMATRA_PER_DAY          base units signed per rolling 24 hours
+  PAGER_DISCORD_WEBHOOK_URL   the on-call channel's Discord webhook
+  PAGER_OUTBOX_PATH           SQLite file of the pages owed to it
+  PAGER_GRACE_S               optional: seconds a page may go undelivered
+                              before signing pauses (60-3600, default 600)
   BLOCKFROST_PROJECT_ID       this host's Blockfrost project on NETWORK
   plus the policy variables read by services.cosign_policy.load_config
   (NETWORK, SURRENDER_SCRIPT_ADDRESS, QUARANTINE_ADDRESS, CMATRA_POLICY_HEX,
   CMATRA_ASSET_HEX, SURRENDER_DEADLINE_POSIX_MS, MAX_CMATRA_PER_TX, and
-  optionally RATE_TABLE_PATH / REDEMPTION_PIN_PATH).
+  optionally RATE_TABLE_PATH / REDEMPTION_PIN_PATH / DENYLIST_PATH; it does
+  not start without the deny-list).
 
 Usage:
   uvicorn services.cosigner_api:app --host <lan-ip> --port 8421
@@ -57,8 +65,10 @@ from services.cosign_policy import (
     require_claimant_signature,
     slot_at,
 )
+from services.pager import Pager, PagesUndelivered
 from services.redemption_ledger import RedemptionLedger
 from tools.api_clients import BlockfrostClient
+from tools.credential_denylist import log_denylist
 from tools.config import chain_api_base_url, chain_api_key
 
 logger = logging.getLogger("cosigner_api")
@@ -75,6 +85,7 @@ class CosignerState:
     cfg: CosignConfig | None = None
     ledger: RedemptionLedger | None = None
     chain: BlockfrostClient | None = None
+    pager: Pager | None = None
 
 
 state = CosignerState()
@@ -117,12 +128,15 @@ def startup() -> None:
     sk = PaymentSigningKey.load(_need("COSIGNER_SKEY_PATH"))
     vk = PaymentVerificationKey.from_signing_key(sk)
     primary = bytes.fromhex(_need("COSIGNER_PRIMARY_ADMIN_PKH"))
-    ledger = RedemptionLedger(_need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")))
     cfg = load_config(os.environ, [primary, vk.hash().payload])
+    ledger = RedemptionLedger(
+        _need("COSIGNER_LEDGER_PATH"), int(_need("MAX_CMATRA_PER_DAY")), cfg.funded_limits,
+    )
     api_key = chain_api_key(cfg.network)
     if not api_key:
         raise ValueError("CHAIN_API_KEY_FILE or BLOCKFROST_PROJECT_ID must be set")
     chain = BlockfrostClient(api_key, chain_api_base_url(cfg.network))
+    pager = Pager.from_env(os.environ, "co-signer, admin_2")
 
     state.sk = sk
     state.vkey_hex = vk.payload.hex()
@@ -131,11 +145,20 @@ def startup() -> None:
     state.cfg = cfg
     state.ledger = ledger
     state.chain = chain
+    state.pager = pager
+    pager.start()
     logger.info(
         "Co-signer ready: PKH=%s network=%s per-tx cap=%d per-day cap=%d pinned units=%d",
         state.pkh_hex, cfg.network, cfg.max_payout_per_tx, ledger.max_per_day,
         len(cfg.redemption_limits),
     )
+    log_denylist(logger, cfg.denylist)
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    if state.pager is not None:
+        state.pager.stop()
 
 
 @app.middleware("http")
@@ -153,7 +176,16 @@ async def verify_secret(request: Request, call_next):
 def cosign(req: CosignRequest) -> CosignResponse:
     """Verify the full transaction and its claimant's signature, confirm it
     against the chain, record it within the cap and the pinned unit limits,
-    then sign its body hash."""
+    then sign its body hash. Nothing is checked or recorded while a page
+    has gone undelivered past the grace."""
+    try:
+        state.pager.require_delivered()
+    except PagesUndelivered as exc:
+        logger.error("Refused to co-sign: %s", exc)
+        raise HTTPException(503, {"code": exc.code, "detail": str(exc)})
+    except sqlite3.Error as exc:
+        logger.error("Refused to co-sign: pager outbox unreadable: %s", exc)
+        raise HTTPException(503, {"code": "pager_unavailable", "detail": "the pager outbox cannot be read"})
     now = time.time()
     tx = bytes.fromhex(req.tx_cbor_hex)
     try:
@@ -165,10 +197,11 @@ def cosign(req: CosignRequest) -> CosignResponse:
             state.cfg,
         )
         require_claimant_signature(tx, approval)
-        confirm_on_chain(approval, state.cfg, state.chain, state.ledger.recorded)
+        confirm_on_chain(approval, state.cfg, state.chain, state.ledger.claimant_spends)
         state.ledger.record(approval, now, state.cfg.redemption_limits)
     except CosignRejected as exc:
         logger.warning("Refused to co-sign: %s", exc)
+        state.pager.refusal(exc.code, exc.detail, exc.detail)
         raise HTTPException(422, {"code": exc.code, "detail": exc.detail})
     except ChainUnavailable as exc:
         logger.error("Refused to co-sign: chain view unavailable: %s", exc)
@@ -181,6 +214,13 @@ def cosign(req: CosignRequest) -> CosignResponse:
             503, {"code": "ledger_unavailable", "detail": "the signing ledger cannot be written"},
         )
 
+    try:
+        state.pager.surrender(approval)
+    except sqlite3.Error as exc:
+        logger.error("Refused to co-sign: pager outbox unavailable: %s", exc)
+        raise HTTPException(
+            503, {"code": "pager_unavailable", "detail": "the page of this surrender cannot be written"},
+        )
     signature = state.sk.sign(approval.tx_hash)
     logger.info(
         "Co-signed %s: payout %d to %s", approval.tx_hash.hex(), approval.payout,
@@ -196,9 +236,14 @@ def cosign(req: CosignRequest) -> CosignResponse:
 
 
 @app.get("/health")
-def health() -> dict:
-    return {
-        "status": "ok",
-        "key_loaded": state.sk is not None,
-        "pkh": state.pkh_hex[:16] + "..." if state.pkh_hex else None,
-    }
+def health() -> JSONResponse:
+    """503 while paging fails: signing is paused, or Discord refuses the webhook."""
+    paging = state.pager.health()
+    return JSONResponse(
+        {
+            **paging,
+            "key_loaded": state.sk is not None,
+            "pkh": state.pkh_hex[:16] + "..." if state.pkh_hex else None,
+        },
+        status_code=200 if paging["status"] == "ok" else 503,
+    )

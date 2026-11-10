@@ -121,9 +121,10 @@ sent to the co-signer; admin 1 signs last. Both servers check the whole
 transaction against `services/cosign_policy.py` (a pool payout equal to the
 rate-table price of exactly the legacy units moved to quarantine, and the
 claimant's own signature), and each keeps a ledger
-(`services/redemption_ledger.py`) that holds its approvals to a 24-hour cap
-and to what the redemption pin says remains of each legacy unit, and records
-an approval before its signature leaves.
+(`services/redemption_ledger.py`) that holds its approvals to a 24-hour cap,
+to what the redemption pin says remains of each legacy unit and to what the
+pool was funded to pay of each asset, and records an approval, and pages the
+on-call channel about it, before its signature leaves.
 
 ---
 
@@ -260,9 +261,52 @@ The threat model is **dual-admin compromise**:
   redeemable name the pin lacks, any change in quarantine since the pin, and
   any record of waived units in quarantine that the transaction it names or
   the waived reserve does not bear out on chain.
+- Neither signer pays or takes from an address that names a credential on
+  the deny-list (`audit_pack/2026-11-01/denylist.json`: the attacker's
+  addresses and the wallets drained on 2026-10-30, each with its evidence;
+  schema beside it, loader in `tools/credential_denylist.py`), in either part
+  of the address; a pointer address, which the list cannot check, is refused
+  too. Neither starts without the list.
+- Neither signer pays for more of a unit than the claimant held at its
+  payment key 72 hours before: units taken from a compromised wallet are
+  surrendered within hours, and the wait gives the deny-list and the on-call
+  channel time to act. Every unit that reached the claimant from another key,
+  or was minted, in those 72 hours counts against what its inputs hold, so
+  units sent to a holder hold back only themselves. A unit moved between the
+  claimant's own addresses, or returned as change of an earlier surrender (on
+  chain or still in the mempool), is followed back to where it came from. The
+  surrender API spends the units the claimant has held longest first, asking
+  where at most 256 of the outputs holding them were made. A check asks its
+  provider about any transaction once, and refuses rather than ask more than
+  256 times, so an ancestry built to be expensive costs a signer no more than
+  that.
+- No merge asset redeems more than the pool was funded for: T2_ADAM_PASS has
+  150 editions on chain but was priced for 95. No per-surrender cap may be
+  below what one unit pays (one T1_ADAM_PASS); the reopen caps are 4M cMATRA
+  per surrender and 15M per day.
+- Each signer pages the on-call channel about every surrender it is about to
+  sign and every refusal under a deny rule; a page is written before the
+  signature and counts only once Discord has saved it. Surrender pages go
+  before refusal pages. A refusal costs its caller nothing, so a subject
+  refused again under one rule within the hour is only logged, and each rule
+  pages ten refusals an hour, counting the rest into one page when the hour
+  ends: no flood of refusals buries the channel, fills the outbox or delays
+  a surrender's page.
+- Paging fails closed. Once a page has gone undelivered for longer than
+  PAGER_GRACE_S seconds after it fell due (600 unless set, from 60 to 3600),
+  neither signer builds or signs: the claimant is answered 503
+  `pager_backlog` (surrenders temporarily paused), and both resume on their
+  own once Discord has saved the page. A Discord that is slow or failing
+  inside the grace never pauses signing. A deleted webhook, or one whose
+  token or channel Discord refuses (404, 401, 403), is logged as critical
+  and named in `/health` at once. `/health` answers 503 while paging fails,
+  so any check of it notices paging that has stopped working.
 - Compromising the flux1 front-end can at worst block surrenders (DoS); it
   cannot mint or drain. The front-end never holds either admin key.
-- Compromising a user's wallet is out of scope: it affects that user only.
+- A compromised user wallet loses what it holds, and its merger entitlement
+  with it: whoever holds its keys can surrender its units. The deny-list,
+  the cooling-off and the pages are what limit that once a compromise is
+  known.
 
 Once the surrender deadline passes, the only on-chain operation the admins
 can perform is the sweep of unclaimed cMATRA. They cannot mint more, they

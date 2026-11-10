@@ -1,0 +1,322 @@
+{
+ "allow": [
+  {
+   "hash": "60b50aea98b64288ccd542b66c79d75a1febb94b755d5f7fcb1bf992",
+   "label": "FPS rescue wallet, stake key",
+   "reason": "receives the funds rescued from W1, W2 and the burned wallets"
+  },
+  {
+   "hash": "f735882bc168e8c3faaefa74321181e69b88c08c53d694cdf8c3362f",
+   "label": "FPS rescue wallet, payment key",
+   "reason": "receives the funds rescued from W1, W2 and the burned wallets"
+  }
+ ],
+ "credentials": [
+  {
+   "evidence": "native script: after slot 113729409, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
+   "hash": "031afff5c1006f0ce276e8b8c02bf92c0e1554094f109f508532ddf7",
+   "label": "W1 timelock script"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by d05ea39d7dbd806938e20a5e7047c51e5a1bbeaa6192e9b4a9af9c8888af4280",
+   "hash": "0475f2a7efb8b33e266bb57e92e08d97c6c7cbc108266d6761f344dc",
+   "label": "burned wallet bodega, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by a80ffd0ba30a18f7940b737403afa94bd98e43ab24a50b52ff4f289643c19707",
+   "hash": "070c2f801567402df8e4e630ed3819e1c29219d1d918266758e3a063",
+   "label": "drained wallet outside FPS, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by e76d0e8a18d617b7fa3db5691022bbf71363657b54bd017ff730a1571649fe89",
+   "hash": "0a086c04f3ee8767e1471596295ccc9e377c4d1395f4b0f6bacbabc0",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by 5716801d60dd7884fabd43a818c1e05a72cecd1e06c61128c0e2fa314863bd69",
+   "hash": "14fcf86716baa9801b46d838149e4a97a250f4984a2b397af4126c9c",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "native script: after slot 113593946, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
+   "hash": "19e5bfea2037434b630368ede97f9f6d07791e67eb74777dac94d88b",
+   "label": "W1 timelock script"
+  },
+  {
+   "evidence": "spent by the attacker in 6223dd7e6dec5132c6b5745c303526cd40e09987b94b2bfbd927cbab1e83f257",
+   "hash": "1ae8f4cdfbda0eddde310b08f81c92e20007c1fbf8c9e411e6ac6ec3",
+   "label": "W2 seed, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by e76d0e8a18d617b7fa3db5691022bbf71363657b54bd017ff730a1571649fe89",
+   "hash": "20021aa3ca1bc72be2042a954ab48752a6047e5ea8ec76be534649a2",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by b68f1b9d7a10fca3324a48391246a4faf68319ffed1e0463c9ad7e683d2e96e0",
+   "hash": "20a1840c88237e09195652f8f658f2c6f5bf6ca4d005884ae8d6aa03",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by 5716801d60dd7884fabd43a818c1e05a72cecd1e06c61128c0e2fa314863bd69",
+   "hash": "21b2d00882d771b73190673facf257bfcfd056d36d4b4885c310d618",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "native script: after slot 113978752, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
+   "hash": "269ed91a110b697c55c15dd4c03de7c7820ead3359f984a4e82fcc9f",
+   "label": "W1 timelock script"
+  },
+  {
+   "evidence": "drained to the attacker by 667c6c393e2dcdd11787521600dba007cf2c241cae65dd9f1befba11378bde86",
+   "hash": "2ce8cf28c524320928247e15cd127403ee96347b78b0227c13a3c4ac",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by 667c6c393e2dcdd11787521600dba007cf2c241cae65dd9f1befba11378bde86",
+   "hash": "30115f9db086e1b11182e07dd61700a56c1a5483bb04720f0491b587",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
+   "hash": "359154167d1317afbd65d20b35ed60424ec873cf1c4b81c6103034ea",
+   "label": "burned wallet ada-bank, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
+   "hash": "43166236a0748a790caa766c2f4d2e70536124651c1432c7481c085f",
+   "label": "burned wallet ada-bank, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by 7ac35f9a8e59dc6d46271a09956310c69372e32cddf0e5b0f9aab812415cee3e",
+   "hash": "4affbd8b0367bb8e7864388791307ef6ce1560a9bd0f33815a140a5e",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "native script: after slot 167281469, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
+   "hash": "53c1e65cd8e7c78921aec538b2f3f93144ca18531abea3680ec2df43",
+   "label": "W2 timelock script"
+  },
+  {
+   "evidence": "drained to the attacker by 815ac7be84a5eb982e73fb041095aa8ab24f8aacd586c02f4b427c5f5ce49efc",
+   "hash": "56a0518db439a4b372a91c25776cd44ddf50c528f3e63ed11985a63e",
+   "label": "drained wallet outside FPS, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by 9be593882052bade50c6de3a518aa54cffea32ec65878ce863ac10b8417f954f",
+   "hash": "59543a159bcb555cc302990f11101936440dc6432f33c76ede11c4bc",
+   "label": "drained wallet outside FPS, stake key"
+  },
+  {
+   "evidence": "script parameterised with W1 as owner; rescued by 869d7d167a62218e885d65871e9d19804657324ecd2be5984377dd7d2a33bc5e",
+   "hash": "59f1583d139063526db7acece757b74736dc8dd26b55cacf32202471",
+   "label": "W1 liquidity contract (owner W1)"
+  },
+  {
+   "evidence": "drained to the attacker by dcfa90cf58a4c13aa94bd8df088f4245882761c7f14caed1cefad5ec7bb8b197",
+   "hash": "5a19f9a78516882108ba52f51543a1f18013ff68e089db7f4f948dc3",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by a978d6243252e7d26d3e84937c9fc5a8324e65bba8cac737000c4321cb11f1c8",
+   "hash": "5a375b1c21c97963b4774f697ba87859c8357129de39ee22b15d53c0",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "drained by 330f68f9e27d616c9f6a2a454cae694dca9740bfb24ae90e1119312a90d8248d",
+   "hash": "61ad95a7265a9c269125c149505043e143b822eedd930cc14e7e8129",
+   "label": "W2 (FPS treasury), payment key"
+  },
+  {
+   "evidence": "drained by 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
+   "hash": "6426234006526ae0f904322aa670325bbc4962adb854bd2897344de3",
+   "label": "W1, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by eb59314bac496919c05eb62b68dbdda154bd44d246cf3b0add958725410fb3aa",
+   "hash": "67d6abf7da1cc408dc04128935feef27ec08e009892d47bcce87aa3c",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
+   "hash": "68cfb532601b4670d9d6541367341fcbf7ae542d4adb09883ad4d26d",
+   "label": "burned wallet ada-bank, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by ee778c24d399415ef9ad8ae85c49857da2c6e9421690844f770489943389f1bd",
+   "hash": "6a0bf6f1194166b28a5fee579194d52d4fc4eaf247858cba3d8da914",
+   "label": "burned wallet Flint, stake key"
+  },
+  {
+   "evidence": "its merger share was already paid by the carve 0de12aee2af3c5c7b12fb706b3cde4157d7fd7af31b36920e40769cb833f17cc",
+   "hash": "785db8faa9202082de8faae5b96eff1a1ebc782b77d9af3e3e3d82c0",
+   "label": "FPS DAO Treasury script (waived reserve)"
+  },
+  {
+   "evidence": "drained to the attacker by 19a761cc9baea171033329f04f6c5fcf8cdee0f16db35d393aef7537c5ba61a7",
+   "hash": "788f537f42536b7ce53670396c73a7ddb081d2a638203c4173d81686",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "received the W1 drain 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
+   "hash": "809a40995f079a45821c91754a2875a64f874a4f77983185ba69becd",
+   "label": "attacker collection address, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by 0a093e145060ef69902f5ecf32655d9c17b10878d63a1db8f2c65ea80a145094",
+   "hash": "846e4c0ecfcea4103fe30f8c3a0572a096e07cae3a4d9499bde582aa",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by 20ea6e4d22f02da37315d04b2cf73de8c94ad4575b996aaec14f2cc081cb6e00",
+   "hash": "89fc56939aad587175dcfef7776354c2194501dee14f6810590fe61d",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by 0a093e145060ef69902f5ecf32655d9c17b10878d63a1db8f2c65ea80a145094",
+   "hash": "8aae6248867e09ed6f3b9ba42c0877f823fd9fac0506201bc210030f",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by 9be593882052bade50c6de3a518aa54cffea32ec65878ce863ac10b8417f954f",
+   "hash": "8d0d0e5f3e94b6fabdb2a9c5010a954f4f0ce9640a846d3f9904caea",
+   "label": "drained wallet outside FPS, payment key"
+  },
+  {
+   "evidence": "its merger share was already paid by the carve 0de12aee2af3c5c7b12fb706b3cde4157d7fd7af31b36920e40769cb833f17cc",
+   "hash": "8f522f9cddb2741b267fce1e8ea7a2b24f7eb906af155073c89e4ff3",
+   "label": "$TALOS Treasury script (waived reserve)"
+  },
+  {
+   "evidence": "drained to the attacker by 815ac7be84a5eb982e73fb041095aa8ab24f8aacd586c02f4b427c5f5ce49efc",
+   "hash": "9c87f0a90fcedee0a3b0fbbb6102c8e504b7e0459cf01ee4a31d63ac",
+   "label": "drained wallet outside FPS, payment key"
+  },
+  {
+   "evidence": "received the W1 drain 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
+   "hash": "9e9380b01065a3d2e3f66237590d60ffd48c87c63207317c1da69c3c",
+   "label": "attacker collection address, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by b68f1b9d7a10fca3324a48391246a4faf68319ffed1e0463c9ad7e683d2e96e0",
+   "hash": "a2ea7bac7fe2f1a89ac9cb64db16000e065517c4eaf002b1487c4d96",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
+   "hash": "a3dec54c0ed586d551a0216ec8522d33525f861405cc4742d6b10355",
+   "label": "burned wallet ada-bank, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by a978d6243252e7d26d3e84937c9fc5a8324e65bba8cac737000c4321cb11f1c8",
+   "hash": "a64296bf8ce216c41357e6830e612f9b8b37cb4f6e3f9c509505a03c",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "made 19 merger claims with FLUX_PASS taken from W1, the first a08b8b1739017285d853b84c8e71f52bc92c18bf6116ac7da7587df468d7382a, the last d3a1e632424794bed36d7062b4c09c5fe547fa7a1addbd2d45f9b84df773c733",
+   "hash": "a91bb94d89af78e40bd42c9981cf1fb1266de523a29d64cc1fed591c",
+   "label": "attacker claim address, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by a80ffd0ba30a18f7940b737403afa94bd98e43ab24a50b52ff4f289643c19707",
+   "hash": "ab9610f3eaf56732b37b9c7ddc62d20ed3849e6a503bfd62dc7f5fe9",
+   "label": "drained wallet outside FPS, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by ee778c24d399415ef9ad8ae85c49857da2c6e9421690844f770489943389f1bd",
+   "hash": "ac7adac042fd0a8650f7c0522b0a6f30737ac18338c2a08d72f8c38d",
+   "label": "burned wallet Flint, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by f520b47cad1e1002812cc95ed46dd07e2fb8511f586a2d0a8b6702623611d267",
+   "hash": "adde297b6e2a7710e886f2daf76563bf0dc39df03bf5087b791c99eb",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "native script: after slot 168329969, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
+   "hash": "b025945d8ec432d53a57a52d844dc8c0de3e7cdd4019c9a13ea27536",
+   "label": "W2 timelock script"
+  },
+  {
+   "evidence": "drained to the attacker by dcfa90cf58a4c13aa94bd8df088f4245882761c7f14caed1cefad5ec7bb8b197",
+   "hash": "ba1fcc3390c5b3d7480c508bc162ca7a904b17a535fd838e569a0a5e",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "native script: after slot 168101586, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
+   "hash": "c8508985cf18f78770a46c26aa9d4b2ecf5c84df7a7b3fffb05f592b",
+   "label": "W2 timelock script"
+  },
+  {
+   "evidence": "drained by 330f68f9e27d616c9f6a2a454cae694dca9740bfb24ae90e1119312a90d8248d",
+   "hash": "c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0",
+   "label": "W2 (FPS treasury), stake key"
+  },
+  {
+   "evidence": "drained to the attacker by f520b47cad1e1002812cc95ed46dd07e2fb8511f586a2d0a8b6702623611d267",
+   "hash": "cd3ed776608dd1349f816b9bf14984d0c432f132e49b96ef9770cdbf",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by e1a0745a60235cbcd311fa10343e8c01d205448851e1a75f6ff5913b78c2b993",
+   "hash": "d58b8260877d8c7c90c972a100f3915236c43c42761d0611a78f4fcc",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "drained by 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
+   "hash": "d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5",
+   "label": "W1, stake key"
+  },
+  {
+   "evidence": "made 19 merger claims with FLUX_PASS taken from W1, the first a08b8b1739017285d853b84c8e71f52bc92c18bf6116ac7da7587df468d7382a, the last d3a1e632424794bed36d7062b4c09c5fe547fa7a1addbd2d45f9b84df773c733",
+   "hash": "e19719dfb27e226b9c53702491d9fb83a5e50f37c6a16534ee58bcd1",
+   "label": "attacker claim address, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by e1a0745a60235cbcd311fa10343e8c01d205448851e1a75f6ff5913b78c2b993",
+   "hash": "e2811a5af1b9198fd365fb87351583f874fba8debc5400234c41df91",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "native script: after slot 168407939, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
+   "hash": "e505d17f9ed3aa24241f7d05291c9bb1257541b7c227dd9839583447",
+   "label": "W2 timelock script"
+  },
+  {
+   "evidence": "native script: after slot 167720114, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
+   "hash": "e7437d2ec38516f0159b891cf744a2f4a1d82d224955d5d2deb7f072",
+   "label": "W2 timelock script"
+  },
+  {
+   "evidence": "drained to the attacker by 20ea6e4d22f02da37315d04b2cf73de8c94ad4575b996aaec14f2cc081cb6e00",
+   "hash": "ea7ff1a2d3f6c8ea0de62e887df473524ca950b605d1100a3cadb461",
+   "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by 7ac35f9a8e59dc6d46271a09956310c69372e32cddf0e5b0f9aab812415cee3e",
+   "hash": "eae8346c2b9e0e7c5518ddea801565f462fd8fbff168da17d48eb2d1",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "drained to the attacker by 19a761cc9baea171033329f04f6c5fcf8cdee0f16db35d393aef7537c5ba61a7",
+   "hash": "eb7a45466019acd8934655de234141cdac025fa586fec6594a891ab2",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to custody by d05ea39d7dbd806938e20a5e7047c51e5a1bbeaa6192e9b4a9af9c8888af4280",
+   "hash": "f0f5676398bf042834f5a30d88e08de37bea7239ca0932372e7e64a0",
+   "label": "burned wallet bodega, payment key"
+  },
+  {
+   "evidence": "drained to the attacker by eb59314bac496919c05eb62b68dbdda154bd44d246cf3b0add958725410fb3aa",
+   "hash": "fc725614bea47efa4fda8a66d5912b66c7a365a0f8c1ddd5d4e98f2b",
+   "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "script parameterised with W2 as owner; rescued by f1007c92c678f927ccb49ba9b5b331d98f3263e5ce5f1c883cd7866f852f765f",
+   "hash": "ff9f0c0814e31c5dcdc540d4ac2e284ff4815b24cc12abe7e29d4303",
+   "label": "W2 liquidity contract (owner W2)"
+  }
+ ],
+ "version": 1
+}

@@ -119,20 +119,18 @@ def derive_script_address(
 # ---------------------------------------------------------------------------
 
 
-def posix_ms_to_slot(posix_ms: int, network: str = "mainnet") -> int:
-    """Convert POSIX milliseconds to a Cardano slot number.
+# POSIX seconds minus slot number, per network (1-second slots since Shelley).
+# Mainnet's first Shelley slot, 4492800, began at 2020-07-29T21:44:51Z.
+SLOT_OFFSET_S = {
+    "mainnet": 1_591_566_291,
+    "preprod": 1_655_683_200,
+    "preview": 1_666_656_000,
+}
 
-    Mainnet: shelley_start_slot=4492800, shelley_start_time=1596491091
-    Preprod: shelley_start_slot=0,       shelley_start_time=1655683200
-    """
-    posix_sec = posix_ms // 1000
-    if network == "mainnet":
-        return (posix_sec - 1596491091) + 4492800
-    elif network == "preprod":
-        return posix_sec - 1655683200
-    else:
-        # preview
-        return posix_sec - 1655683200
+
+def posix_ms_to_slot(posix_ms: int, network: str = "mainnet") -> int:
+    """The slot that starts at ``posix_ms`` (POSIX milliseconds) on ``network``."""
+    return posix_ms // 1000 - SLOT_OFFSET_S[network]
 
 
 # ---------------------------------------------------------------------------

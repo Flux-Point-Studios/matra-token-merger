@@ -42,3 +42,30 @@ def test_the_lock_pins_the_versions_these_tests_run_on():
         if installed != version:
             mismatched[name] = (version, installed)
     assert mismatched == {}
+
+
+def _image_files() -> set[str]:
+    """Every repo file Dockerfile.cosigner copies into the image."""
+    copied: set[str] = set()
+    for line in (ROOT / "services/deploy/Dockerfile.cosigner").read_text().splitlines():
+        if line.startswith("COPY ") and "requirements-cosigner.txt" not in line:
+            copied.update(line.split()[1:-1])
+    return copied
+
+
+def test_the_cosigner_image_carries_every_module_and_data_file_it_loads():
+    """What the co-signer imports from this repo, and the data files it loads
+    by default, as a process starting it finds them."""
+    import subprocess
+    import sys
+
+    loaded = subprocess.run(
+        [sys.executable, "-c",
+         "import sys, services.cosigner_api as c, services.cosign_policy as p;"
+         " print('\\n'.join([m.__file__ for m in list(sys.modules.values()) if getattr(m, '__file__', None)]"
+         " + [str(p.DEFAULT_RATE_TABLE_PATH), str(p.DEFAULT_REDEMPTION_PIN_PATH), str(p.DEFAULT_DENYLIST_PATH)]))"],
+        cwd=ROOT, capture_output=True, text=True, check=True, timeout=120,
+    ).stdout.split()
+    needed = {str(Path(f).relative_to(ROOT)) for f in loaded if Path(f).is_relative_to(ROOT)}
+    assert "tools/credential_denylist.py" in needed and "audit_pack/2026-11-01/denylist.json" in needed
+    assert needed <= _image_files()

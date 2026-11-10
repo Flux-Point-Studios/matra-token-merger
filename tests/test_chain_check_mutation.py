@@ -90,6 +90,60 @@ OPERATOR_MUTANTS = {
         "next(mints_and_burns_after(unit, cfg.supply_slot, chain), None)",
         "next(iter(list(mints_and_burns_after(unit, cfg.supply_slot, chain))), None)",
     ),
+    "the_first_slot_of_the_cooling_off_read_as_inside_it": ("slot <= cutoff", "slot < cutoff"),
+    "collateral_inputs_followed": (
+        'entry["collateral"] is False and entry["reference"] is False', 'entry["reference"] is False',
+    ),
+    "reference_inputs_followed": (
+        'entry["collateral"] is False and entry["reference"] is False', 'entry["collateral"] is False',
+    ),
+    "units_not_surrendered_counted": ("sorted(arrived.keys() & held.keys())", "sorted(held.keys())"),
+    "units_the_followed_output_lacks_counted": ("sorted(arrived.keys() & held.keys())", "sorted(arrived)"),
+    "an_arrival_counted_for_each_output_it_is_reached_through": (
+        "            if (tx_id, unit) in counted:\n                continue\n", "",
+    ),
+    "inputs_without_the_unit_counted": ("                if unit in amounts:\n", "                if True:\n"),
+    "units_from_another_key_taken_as_the_claimants": (
+        "if _payment_key(entry, tx_hash) == owner:", "if True:",
+    ),
+    "the_claimants_own_units_counted_as_arrivals": (
+        "if _payment_key(entry, tx_hash) == owner:", "if False:",
+    ),
+    "a_mint_not_counted": ("entered += max(0, minted)", "entered += 0"),
+    "a_burn_offsetting_what_arrived": ("max(0, minted)", "minted"),
+    "only_the_last_arrival_reached_counted": ("arrived[unit] += entered", "arrived[unit] = entered"),
+    "arrivals_not_weighed": ("ready = approval.held[unit] - arrived[unit]", "ready = approval.held[unit]"),
+    "the_holding_read_as_what_is_surrendered": ("approval.held[unit] - arrived[unit]", "quantity - arrived[unit]"),
+    "one_unit_more_than_held_before_passed": ("if quantity > ready:", "if quantity > ready + 1:"),
+    "the_walk_limit_reached_one_early": ("len(inside) > MAX_PROVENANCE_TXS", "len(inside) >= MAX_PROVENANCE_TXS"),
+    "a_recorded_surrenders_change_passed_unfollowed": (
+        "            pending.extend(spends)\n            continue", "            continue",
+    ),
+    "a_recorded_surrender_read_from_the_chain": ("        if spends is not None:\n", "        if False:\n"),
+    "a_recorded_surrender_in_the_mempool_placed_like_any_other": (
+        "if slot is None and spends is None:", "if slot is None:",
+    ),
+    "a_recorded_surrender_followed_back_however_old": (
+        "if slot is not None and slot <= cutoff:", "if spends is None and slot <= cutoff:",
+    ),
+    "self_transfers_not_followed_back": (
+        "pending.extend(_input_ref(entry, tx_hash) for entry in own)",
+        "[_input_ref(entry, tx_hash) for entry in own]",
+    ),
+    "a_bool_input_index_read_as_an_index": ("type(index) is int", "isinstance(index, int)"),
+    "one_lookup_more_than_the_budget_made": (
+        "if asked == MAX_PROVENANCE_LOOKUPS:", "if asked == MAX_PROVENANCE_LOOKUPS + 1:",
+    ),
+    "the_budget_reached_one_lookup_early": (
+        "if asked == MAX_PROVENANCE_LOOKUPS:", "if asked == MAX_PROVENANCE_LOOKUPS - 1:",
+    ),
+    "lookups_not_counted": ("        asked += 1\n", ""),
+    "a_transaction_placed_each_time_it_is_reached": ("        if tx_id not in places:\n", "        if True:\n"),
+    "a_listing_asked_for_each_output_followed": ("        if tx_id not in read:\n", "        if True:\n"),
+    "the_input_checks_listings_asked_for_again": (
+        "refuse_inside_cooling_off(approval, chain, recorded, listings)",
+        "refuse_inside_cooling_off(approval, chain, recorded)",
+    ),
 }
 
 

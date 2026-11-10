@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from pycardano import PaymentSigningKey
 
-from tests.cosign_cases import ADMIN_1
+from tests.cosign_cases import ADMIN_1, TEST_WEBHOOK
 from tests.test_cosign_policy import ENV as POLICY_ENV
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,10 +28,11 @@ DEPLOY = ROOT / "services/deploy"
 
 EXPORTS = {
     **{key: value for key, value in POLICY_ENV.items()
-       if key not in ("NETWORK", "RATE_TABLE_PATH", "REDEMPTION_PIN_PATH")},
+       if key not in ("NETWORK", "RATE_TABLE_PATH", "REDEMPTION_PIN_PATH", "DENYLIST_PATH")},
     "COSIGNER_PRIMARY_ADMIN_PKH": ADMIN_1.hex(),
     "MAX_CMATRA_PER_DAY": str(25_000_000 * 10**6),
     "BLOCKFROST_PROJECT_ID": "mainnet-test-project",
+    "PAGER_DISCORD_WEBHOOK_URL": TEST_WEBHOOK,
 }
 
 DOCKER_STUB = """#!/usr/bin/env bash
@@ -89,6 +90,7 @@ class Host:
             "PATH": os.environ["PATH"], **self.settings(),
             "COSIGNER_SKEY_PATH": str(self.dir / "keys/admin_2.skey"),
             "COSIGNER_LEDGER_PATH": str(self.ledger),
+            "PAGER_OUTBOX_PATH": str(self.ledger.parent / "pager-outbox.sqlite3"),
         }
         return subprocess.run(
             [sys.executable, "-c", "import services.cosigner_api as c; c.startup()"],
@@ -119,9 +121,11 @@ def test_a_host_set_up_by_the_earlier_version_gets_every_new_setting(host):
     assert settings["COSIGNER_API_SECRET"] == secret
     assert {key: settings[key] for key in EXPORTS} == EXPORTS
     assert settings["COSIGNER_LEDGER_PATH"] == "/app/data/cosigned.sqlite3"
+    assert settings["PAGER_OUTBOX_PATH"] == "/app/data/pager-outbox.sqlite3"
     assert settings["NETWORK"] == "mainnet"
     assert secret not in result.stdout + result.stderr
     assert "mainnet-test-project" not in result.stdout + result.stderr
+    assert TEST_WEBHOOK not in result.stdout + result.stderr
     assert stat.S_IMODE(host.env_file.stat().st_mode) == 0o600
     # It never kept a ledger, so it gets its first one.
     assert host.ledger_inits() == 1
