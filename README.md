@@ -263,7 +263,8 @@ The threat model is **dual-admin compromise**:
   the waived reserve does not bear out on chain.
 - Neither signer pays or takes from an address that names a credential on
   the deny-list (`audit_pack/2026-11-01/denylist.json`: the attacker's
-  addresses and the wallets drained on 2026-10-30, each with its evidence;
+  addresses, the wallets drained on 2026-10-30, and every other key or seed
+  known to be exposed, each with its evidence;
   schema beside it, loader in `tools/credential_denylist.py`), in either part
   of the address; a pointer address, which the list cannot check, is refused
   too. Neither starts without the list.

@@ -13,6 +13,31 @@
  ],
  "credentials": [
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "002f67f09a1ef3df9d213ef5c97e78c8d6ade3175859febfe0d6cdbe",
+   "label": "exposed bot wallet 51, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0126f10c5a1c01e41311f9c8f3a734122f40afaf46535de1ca8406a3",
+   "label": "exposed bot wallet 113, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "01450ddff66d11633e5fdf03797d72fc766f5eeba41167bd64452665",
+   "label": "exposed bot wallet 37, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "01c207c3cc479a5741c9b2b8ae8b0c2ef7b418433b9193bad2481d1f",
+   "label": "exposed bot wallet 94, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "01c3bfe5461a378fc4214f99d1306bb42cbf0615ac0b5baa576a9cac",
+   "label": "exposed bot wallet 46, stake key"
+  },
+  {
    "evidence": "native script: after slot 113729409, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
    "hash": "031afff5c1006f0ce276e8b8c02bf92c0e1554094f109f508532ddf7",
    "label": "W1 timelock script"
@@ -23,9 +48,54 @@
    "label": "burned wallet bodega, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "062c1438b78b31fde148d700ed95f2e8c63c31425dde7a5f485a9462",
+   "label": "exposed bot wallet 184, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "06711773a89a608acd5988552c18f2fcc340a4830b59801a8f0e2b8b",
+   "label": "exposed bot wallet 159, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "06dda9fc3a8a28960dc92ae7374c2e2a86ecc679c92eddc7dce8ca94",
+   "label": "exposed bot wallet 127, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "06fed500a690835d3b8134a764b4c2eb0d3b6eac099f7b346d350f55",
+   "label": "exposed bot wallet 62, payment key"
+  },
+  {
    "evidence": "drained to the attacker by a80ffd0ba30a18f7940b737403afa94bd98e43ab24a50b52ff4f289643c19707",
    "hash": "070c2f801567402df8e4e630ed3819e1c29219d1d918266758e3a063",
    "label": "drained wallet outside FPS, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "079bd033741f3e2149ea8ec1ec8ad23c2d0db632f77fa946d25655d7",
+   "label": "exposed bot wallet 35, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0846085f34a51a95b156a808326804d4f79201c24dc0b31e86b0c75d",
+   "label": "exposed bot wallet 146, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0895f7841f03a80fd89eba2ec9414139f659b3eebdc6eab21620ff2c",
+   "label": "exposed bot wallet 13, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "08bc970de7f8545db09a3c169789323041170c158bc491a92e97b8bd",
+   "label": "exposed bot wallet 22, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0982ef52aaa69525aea86996acda49508b7120486d4ad8190d240fd7",
+   "label": "exposed bot wallet 79, payment key"
   },
   {
    "evidence": "drained to the attacker by e76d0e8a18d617b7fa3db5691022bbf71363657b54bd017ff730a1571649fe89",
@@ -33,9 +103,129 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0b9925ec96c71e135529db5aa4d4ac4532f1a57cd83be637749b62d4",
+   "label": "exposed bot wallet 83, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "0c06ddf90ea7cb6aaa0540bd7957104f7cd69be98fc0cdd5403a939b",
+   "label": "exposed bot wallet 58, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0cacc09e92043459d9e77e3e73277e87eb6e099fa3f6c55026c5de15",
+   "label": "exposed bot wallet 35, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "0d50075d02832da0dce5d636b7fd816b87e20a0b959debff5e4c2d41",
+   "label": "exposed bot wallet 148, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0e273572a5163b23b25f73a53b9f63ea5b4f827c433601b18be7074e",
+   "label": "exposed bot wallet 153, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "0fc03fdb7162ccdd23b74cc3245f957911a1ac843036b8e012a8873d",
+   "label": "exposed bot wallet 154, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "10352df967762919a3058a21e33a026b98ef281b5cbc40b67494562f",
+   "label": "exposed bot wallet 86, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "10709f32b2d72c27b1b0b2ac365bb5843c39daad79f1786ccf239c18",
+   "label": "exposed bot wallet 95, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "10ff5696bcc7f99ad5a76efe87de81b51e49c3906a56823da860f29f",
+   "label": "exposed bot wallet 151, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "12ff470413f44cb04b1cc97a8d4994ee289de3188f46d5ba494a3134",
+   "label": "exposed bot wallet 126, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "13076720221b40c729ddabce9b1cc25a90aecc6cba9040eb49f13d55",
+   "label": "exposed bot wallet 123, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "13c739c141b29aacd6f0545758b4bda49da1eba6132ce6d6a85563c3",
+   "label": "exposed bot wallet 189, stake key"
+  },
+  {
    "evidence": "drained to the attacker by 5716801d60dd7884fabd43a818c1e05a72cecd1e06c61128c0e2fa314863bd69",
    "hash": "14fcf86716baa9801b46d838149e4a97a250f4984a2b397af4126c9c",
    "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "1550c6cbc2e7685b50428030edb1099369c3a98bbee57a61e90af67d",
+   "label": "exposed bot wallet 142, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "15ee18440b38896960653cc2b440598dfec4b456f963c892ca37bb60",
+   "label": "exposed bot wallet 77, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "15f31aa0195d31917f5601bb9350b09009919179c0bafbd5e7f0f110",
+   "label": "exposed bot wallet 139, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "163d587cc75527d2b177e89585e856938309d47e9757aba9a931252f",
+   "label": "exposed bot wallet 158, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "1654297fa970994c532bf08e97952b0428ed5b9e2b727125beadd332",
+   "label": "exposed bot wallet 19, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "1670358aa40e93a5621cd028bc70ba3a873d43d58bb83e73e2a2cac6",
+   "label": "exposed bot wallet 101, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "185027fd50e65c5af14cde938fab12933865b7a37d399621e3ca3619",
+   "label": "exposed bot wallet 28, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "18c7fcbed42bb2ff6a5b6e587a2a2d35416c8ade20cf76a3eda6b37d",
+   "label": "exposed bot wallet 121, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed",
+   "hash": "18cf7f2270ab7782806f379f3d6f71985ffa208015f817fb229d7d02",
+   "label": "SaturnSwap deploy key, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "1912b7c9501c440cf9a9b8809c8631b308b3fd287344799505a24cba",
+   "label": "exposed bot wallet 161, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "1959730e07d28042aa5e0b3a5c1fade7c1010deb56bec7d2f6006913",
+   "label": "exposed bot wallet 71, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "19d01daaa2a022371fe0a4bc47560e42d40adcdae5a1aaf68545b35b",
+   "label": "exposed bot wallet 137, payment key"
   },
   {
    "evidence": "native script: after slot 113593946, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
@@ -48,6 +238,26 @@
    "label": "W2 seed, payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "1d7d531c1b92a6e65add72a348e8552f6a6f52188b7478d6b4cffb62",
+   "label": "exposed bot wallet 47, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "1e894cdbe02b5fdc88a8acb0beab336853bd6b2c393e99226ff89552",
+   "label": "exposed bot wallet 102, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "1e9dd52b4cd014dda1ba6355a0dbffcb7bd12d72cf410efc24eca2b0",
+   "label": "exposed bot wallet 58, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2000933a78c2aceb7bac9308e4b603c75896c66777e026647841da94",
+   "label": "exposed bot wallet 98, payment key"
+  },
+  {
    "evidence": "drained to the attacker by e76d0e8a18d617b7fa3db5691022bbf71363657b54bd017ff730a1571649fe89",
    "hash": "20021aa3ca1bc72be2042a954ab48752a6047e5ea8ec76be534649a2",
    "label": "drained decimalist account, payment key"
@@ -58,9 +268,64 @@
    "label": "drained decimalist account, payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "20eb082f23ef9f1edf09b1d02b0fbc2a1da48ad43b724e02052db165",
+   "label": "exposed bot wallet 37, payment key"
+  },
+  {
    "evidence": "drained to the attacker by 5716801d60dd7884fabd43a818c1e05a72cecd1e06c61128c0e2fa314863bd69",
    "hash": "21b2d00882d771b73190673facf257bfcfd056d36d4b4885c310d618",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "21ebe9d7cfc5da326040e1f561b3d248d7ff62f77905a5d70eec6604",
+   "label": "exposed bot wallet 162, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "21f8ab03b67ebd57d08d02e7b58bc4a64d60af721252e5feeb615fc6",
+   "label": "exposed bot wallet 168, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "22086bed318cc38f6dcc94f9de857dfdc6d8f95ba44b4badf5e4e3ab",
+   "label": "exposed bot wallet 42, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2337c8245896ce5055ec8aa2c0128e3848e5278343a7c0c3fcd37a07",
+   "label": "exposed bot wallet 18, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "23d5cdfb32ce74af1023d23e38e7627e9114968db3e36f1060a11de8",
+   "label": "exposed bot wallet 158, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "240f006019d2b897af65ae1486352084f2f1ae678597284cd454e149",
+   "label": "exposed bot wallet 9, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "243872a04a7a1a5b0f8017007b22ca1f35767dffb7f8e4518369fea5",
+   "label": "exposed bot wallet 130, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "24c59732e193afaee0054469eeab04079145afec96d6735dc6157fb6",
+   "label": "exposed bot wallet 29, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "253d1253342a9a78f85c3939abbf7c64978a18b29de9dce142be47df",
+   "label": "exposed bot wallet 166, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2578ea16789df649e5864b8681043392a41878bc3bd5740b8c09380b",
+   "label": "exposed bot wallet 27, payment key"
   },
   {
    "evidence": "native script: after slot 113978752, signed by d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5 (W1 stake key)",
@@ -68,9 +333,79 @@
    "label": "W1 timelock script"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "277e0a7cb856c1e5e65ae11996941f447fafacbe27c6e765059b284c",
+   "label": "exposed bot wallet 108, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "27c929e463df25df35c000dbaaddc73a6c53ec57a9f65adf989f0ee5",
+   "label": "exposed bot wallet 94, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "282822306c61260729625ed103f9c54397a89612bc8694cc799bdc24",
+   "label": "exposed bot wallet 25, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2848d4539b695d62475a278820194dc7435636d0dc30728b1077a583",
+   "label": "exposed bot wallet 92, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "28b267a21bba422ebac3b98432a07cc545f2ef616af9ce8764df9082",
+   "label": "exposed bot wallet 80, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "29a1c7cdc8bbb47cb52794f464116785eff193265e1ac13b1e883c67",
+   "label": "exposed bot wallet 98, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2a918d3ffb813142cea135672b9980d39f201a09f897386f4bbe11d6",
+   "label": "exposed bot wallet 7, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2c393f25dd086ccfa07972c4254fae2aa142cdb916dad990671d8bfc",
+   "label": "exposed bot wallet 34, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "2c9337d30b0b9fcd3531971bc80d479e656306cf87a9ec5611670c78",
+   "label": "exposed bot wallet 95, stake key"
+  },
+  {
    "evidence": "drained to the attacker by 667c6c393e2dcdd11787521600dba007cf2c241cae65dd9f1befba11378bde86",
    "hash": "2ce8cf28c524320928247e15cd127403ee96347b78b0227c13a3c4ac",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2d5f81cc9ccda33747129a2d44652c6041fcf615b7266c6d764c6c8d",
+   "label": "exposed bot wallet 86, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2d70678863b5ce21d59a41d2b9a2dac3b2177d571b0e3cbcd92ac9fe",
+   "label": "exposed bot wallet 78, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2d905edae7f769f78225762701eafb75cd8cd1ef97459787b48c8a70",
+   "label": "exposed bot wallet 152, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2e65284fcaba419ee6024400ac2548b41a275bef61511e2359737d84",
+   "label": "exposed bot wallet 67, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "2fe348036600bce5356c78254570c31f4fbadbed15fe4095d7449904",
+   "label": "exposed bot wallet 125, payment key"
   },
   {
    "evidence": "drained to the attacker by 667c6c393e2dcdd11787521600dba007cf2c241cae65dd9f1befba11378bde86",
@@ -78,9 +413,134 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "30ffc8efb8cafcbcc9acaab6e6b6dcb802e04457158bd754eb4c04e1",
+   "label": "exposed bot wallet 111, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "311d3cadadada1a17c448672b4b008a2cdd3c5b2d19db1142f2010e2",
+   "label": "exposed bot wallet 172, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "32d3a10d5fd789d0157e552c79a5292eed7ed68e26a9576fae1a241c",
+   "label": "exposed bot wallet 169, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "32f6592bd32e6ec05db1251cd7d92e0365ecd245b67fbf21ee56912a",
+   "label": "exposed bot wallet 178, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "33345eb04056225a8d4df102ee5ab54f4c2657c99bad5c09bdb6d4a2",
+   "label": "exposed bot wallet 48, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "33c5f27b7fc4031b6134a1011ec40481cccb4557fb207fbae908c548",
+   "label": "exposed bot wallet 77, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "34117ce26549474c0a768d085d93cc624b09ce7f09a6ae3f02f4c79d",
+   "label": "exposed bot wallet 64, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "3494adc43113847384774546017ff0dbcf4dcf23b757bf4341322ee1",
+   "label": "exposed bot wallet 73, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "34e8386c4603d953b645bc62d799a80f7966cc5b4a6ea4c71c7ea461",
+   "label": "exposed bot wallet 145, payment key"
+  },
+  {
    "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
    "hash": "359154167d1317afbd65d20b35ed60424ec873cf1c4b81c6103034ea",
    "label": "burned wallet ada-bank, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "3665ac916479f13931aef660bb35d66710d3a0c661b6d280b61d7d2a",
+   "label": "exposed bot wallet 138, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "367e1112068a8a0791f385e75f644f4940cc4efc8ec5468cfb2c0daa",
+   "label": "exposed bot wallet 191, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "3816e64ceeeafc5bfe3afa53ad542cd7d5d374a4a224e8c0acd6266c",
+   "label": "exposed bot wallet 43, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "3941cbbc9bb67e314da9869b32999fa970ab3b4781e9291abccce7ce",
+   "label": "exposed bot wallet 109, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "3978c519e45d0793390a9debbb7231359dce127075367fd8637f968f",
+   "label": "exposed bot wallet 51, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "3a92e8f11c101bab49dfe901b56034c94651d9b9221d2f2b3913a189",
+   "label": "exposed bot wallet 20, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "3ac54f057ad32e0485ef2766a5aaeb8be50bf828d1daddd55c52c8ac",
+   "label": "exposed bot wallet 121, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "3aece8d5adf66dfeedf2b8e3168025ee83cf5cbce9f699f15e9bec96",
+   "label": "exposed bot wallet 2, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "3b84ccc3de404b4e0ce28dbf0354a899fa24ab7c5e69eb969b95840a",
+   "label": "exposed bot wallet 183, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "3d5dece8d2b23e20d02a5501c2201a5d935c4633ee2936a68fcbd20d",
+   "label": "exposed bot wallet 75, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "3ee2fa2bbb50b43fcbac0b912c2b91f9623fe6b0a52af10f3f988d9a",
+   "label": "exposed bot wallet 65, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "40648364226fcbc7b596d5e7ec59a388a463c3c10400067187b9fd60",
+   "label": "exposed bot wallet 96, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "414249ba226dd7ed9ce90bb1afc71161cad2942a5252fd4fc5d9dfeb",
+   "label": "exposed bot wallet 99, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "427eb2bfb2e09c1b17ac21af3944d90b3dd7d85f50bb82da510a8d2e",
+   "label": "exposed bot wallet 129, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "42bb49eebb479c2a234c5337c8296bb3b04dc256d460789cebec9873",
+   "label": "exposed bot wallet 90, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; swept to the FPS treasury by bf5db9211775fd57230209c97db6587154eb260a8958bcfa1dd39a39cc99eadd and 6ff7fc0b51390d254ec2a17e0e3436cd107728e201b46635c52075e03787f9fd",
+   "hash": "42de4bbd744823b60646a0b2bf7191088c3d19ace84c60bae1a03a2c",
+   "label": "Aegis ceremony key, stake key"
   },
   {
    "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
@@ -88,9 +548,139 @@
    "label": "burned wallet ada-bank, payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "44589fd6e987c771395c6785ad66c94b57e693b87df703ef4251a908",
+   "label": "exposed bot wallet 112, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "44eb523022bc0daf69b54964b719501ab375bfcfcaef47c99cacaa38",
+   "label": "exposed bot wallet 79, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "465b663656608e8ba40f4db5de961883c9460c168c862ca594a2b48b",
+   "label": "exposed bot wallet 80, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "470c6e90e8f7f153a5fce989a8adaa2870681684d12ac5806e1e6916",
+   "label": "exposed bot wallet 29, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "486013b0ea511853806fe2b403f70ef310d732330b88ed9caa3db5b4",
+   "label": "exposed bot wallet 136, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "48bae6a6696fbf6b34dbc1d990ba67d1cfa0da8ee71c6849b4abb8dc",
+   "label": "exposed bot wallet 125, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4906e100c7262cb5c4340b45cbad7093bc8ff8b9832746a2e33a1641",
+   "label": "exposed bot wallet 105, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "49c555faf5eedcb02d41a52cc24df37a68f9d545f0d11c1268ffa5d0",
+   "label": "exposed bot wallet 181, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "49f6b2ed859b4ac8c309f0570a6edefedb79c744fe0295c0c8c8e015",
+   "label": "exposed bot wallet 63, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "49fb66e0a03cd4540c9bb3413c4b49f5952f2443a59661783ba3f400",
+   "label": "exposed bot wallet 2, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4a9b101ee6d43a59b6dc075dd1d536fe2cec7ef21a8957097ab91bdc",
+   "label": "exposed bot wallet 32, stake key"
+  },
+  {
    "evidence": "drained to the attacker by 7ac35f9a8e59dc6d46271a09956310c69372e32cddf0e5b0f9aab812415cee3e",
    "hash": "4affbd8b0367bb8e7864388791307ef6ce1560a9bd0f33815a140a5e",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4b6b32ac9ad0643faea9110110ca72eb7192a9111040a7ff8cca06c3",
+   "label": "exposed bot wallet 129, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4b9a0a3fc5778bf589617ac43815e944bdb0a027bd712bc5f17cd2a8",
+   "label": "exposed bot wallet 65, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4c2eeec99f94e47407b87934303c79224b37a0bed4dce70d1b0a7c50",
+   "label": "exposed bot wallet 44, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4c3dcd6a856f7b93ac55b0c186a4b32d06859c5bb56fb354bdacb867",
+   "label": "exposed bot wallet 123, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4d7d3382fce38d6a0966a48139c33fa90bedce7849f9d88aa4661bd5",
+   "label": "exposed bot wallet 26, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "4de9f69075be8a23eebed04c0fc7d51aa8ebbb1460cf517e5bc96e3e",
+   "label": "exposed bot wallet 182, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "4f07d12eec7ba93e9d8b35b7034ed1c1ebcc147b1c9bc0562bc1de48",
+   "label": "exposed bot wallet 118, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "505b28051cf306dd62dd7c8235a3cad67e542b16d8663a05cf906181",
+   "label": "exposed bot wallet 176, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5064c7449c516a0d06812b299ab0115031b22525ed24ccf8764a3a1f",
+   "label": "exposed bot wallet 41, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "507a51d64e81328d0fb119598fd46c15d23ff8cdd104354fc7b177e0",
+   "label": "exposed bot wallet 189, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "508af53a7a8c3ee188f0340b61a0d2bd72000a23c1756de9bd416827",
+   "label": "exposed bot wallet 104, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "50dd755c48202f8c90e644ae05403915dbdbb391adc3514e6abf435f",
+   "label": "exposed bot wallet 74, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "527518c13392f85401fc324fe511b6fa6f9a25c353606df289ad2844",
+   "label": "exposed bot wallet 100, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "528fac2e1c1fdbd150515ef3ad873ae8cfca2c37b5ee3f8385ad5a8e",
+   "label": "exposed bot wallet 153, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "530c1d9b16401fab80bc4215673106d903c2c9dea49251c1982ef6bb",
+   "label": "exposed bot wallet 116, stake key"
   },
   {
    "evidence": "native script: after slot 167281469, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
@@ -98,14 +688,49 @@
    "label": "W2 timelock script"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "55f17272201e56381e06358bb973ef534452f97031554044bb3084a0",
+   "label": "exposed bot wallet 57, payment key"
+  },
+  {
    "evidence": "drained to the attacker by 815ac7be84a5eb982e73fb041095aa8ab24f8aacd586c02f4b427c5f5ce49efc",
    "hash": "56a0518db439a4b372a91c25776cd44ddf50c528f3e63ed11985a63e",
    "label": "drained wallet outside FPS, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "574dc90b3cd33b17a73895a19371437b9d49469f2003e47a610270f4",
+   "label": "exposed bot wallet 132, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5785c239cb19732aa67a3c3b02e8f5485bcf2e1fa30bc96a65740342",
+   "label": "exposed bot wallet 88, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "58e0d2cb83aa80f88ed21d1788e15f14b19ee4eb5851e96a86a2fc66",
+   "label": "exposed bot wallet 59, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "59060b7039178311a0a84a27f4bf35b778e2f2a44af1c91ce0a8da4b",
+   "label": "exposed bot wallet 100, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "59513fb09d27a2ed5106cf0bc88576f7845a6acfa75e874d76d203f5",
+   "label": "exposed bot wallet 56, payment key"
+  },
+  {
    "evidence": "drained to the attacker by 9be593882052bade50c6de3a518aa54cffea32ec65878ce863ac10b8417f954f",
    "hash": "59543a159bcb555cc302990f11101936440dc6432f33c76ede11c4bc",
    "label": "drained wallet outside FPS, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "597b5c86cf1d115adbb769406415b0fb1c1664fc4cac0f6ac502c96a",
+   "label": "exposed bot wallet 70, payment key"
   },
   {
    "evidence": "script parameterised with W1 as owner; rescued by 869d7d167a62218e885d65871e9d19804657324ecd2be5984377dd7d2a33bc5e",
@@ -118,9 +743,69 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5a327e66041c2dc8cf4991ddb8e738ab4a6858820825216eac6e2974",
+   "label": "exposed bot wallet 70, stake key"
+  },
+  {
    "evidence": "drained to the attacker by a978d6243252e7d26d3e84937c9fc5a8324e65bba8cac737000c4321cb11f1c8",
    "hash": "5a375b1c21c97963b4774f697ba87859c8357129de39ee22b15d53c0",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5a65622f2613afe4cb9ae2b6c2d9285d560b3d92d9245c384bfaf06b",
+   "label": "exposed bot wallet 107, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5b2bb524595d284068a5478d966fd320e482c64164aa15eee3dd92b0",
+   "label": "exposed bot wallet 162, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "5cd6f2e0f8ef9109503e0b181ebb566763e9cabdbf8db96eb5e41928",
+   "label": "exposed bot wallet 173, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "5d44d2a8cdf9f9e8728ac5e454db3cf4a2403442c5ec596d433bd85f",
+   "label": "exposed bot wallet 110, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "5e8bb265ab6e082ea8191d650fbee21e76aff0e2ab713e8f4ce9c778",
+   "label": "exposed bot wallet 0, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5ee51f8a276f54fd97b3fa81258c711a0e949b005c8aa3851a6c7635",
+   "label": "exposed bot wallet 3, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5f2c75807cf1f2ce0ca844c908526116bd9f72e3c34fa664a7591347",
+   "label": "exposed bot wallet 131, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "5f6e580f2d3b82d2085ebc5628d7e2ae4eae56407e3d091b3689e804",
+   "label": "exposed bot wallet 13, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6095e83e771ec6a6e7c96de1d1337fe8532eb67f7f7b8e35290e69b2",
+   "label": "exposed bot wallet 34, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "60b38d79d9cb85fb1d54f909f827479ccfc3f99d38f4e81291e8708d",
+   "label": "exposed bot wallet 160, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "61726e7991c43a698a91738a675285be1f6e8a665e40e291f280fd9f",
+   "label": "exposed bot wallet 119, stake key"
   },
   {
    "evidence": "drained by 330f68f9e27d616c9f6a2a454cae694dca9740bfb24ae90e1119312a90d8248d",
@@ -128,9 +813,59 @@
    "label": "W2 (FPS treasury), payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "62ce471a91c0983c3eedc704d18bc5305bf7b4c42cb0b4fb81924ac4",
+   "label": "exposed bot wallet 117, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "6367cce471da6a84dca76507b84b64d7e413a743e5332ac5f16cb6d6",
+   "label": "exposed bot wallet 24, stake key"
+  },
+  {
    "evidence": "drained by 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
    "hash": "6426234006526ae0f904322aa670325bbc4962adb854bd2897344de3",
    "label": "W1, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "642cf1b3978191f797e079f67cf5386e532a902d29d0001a2ac901ec",
+   "label": "exposed bot wallet 84, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "652f6b1c262773dbe60806269d73b7823be93346ba544ea225f70b1b",
+   "label": "exposed bot wallet 6, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "65856c4432a3374e0edf75d715ca67c237c1e3c29e08e86bbf2e1675",
+   "label": "exposed bot wallet 105, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "65bee1a8224ae448426eb9de89d994d7ee4606cf30fead348d2e78f4",
+   "label": "exposed bot wallet 131, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "65c172f0d68ae85b07f13ace765cfdb5db1b7f4d203b0cd814e9bba1",
+   "label": "exposed bot wallet 165, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "671144a1d8cbec18e766248851862776350ee7d0f8bd9ff18833cd5d",
+   "label": "exposed bot wallet 21, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6719c3e1c13b472ec44f629283b594364eb9ecf37fd305ff3176f524",
+   "label": "exposed bot wallet 17, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6759d8fe4b3792249956db997cb46a85d71846207732f4b45fb5be72",
+   "label": "exposed bot wallet 43, stake key"
   },
   {
    "evidence": "drained to the attacker by eb59314bac496919c05eb62b68dbdda154bd44d246cf3b0add958725410fb3aa",
@@ -138,14 +873,134 @@
    "label": "drained decimalist account, payment key"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "6809fb1e49ef79b0af8976007a7f151a4456f31e9392d0418e1c57e4",
+   "label": "exposed bot wallet 110, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6867b973963ae1174e39f6b148e876bca3d76db7247cbd7473ff1452",
+   "label": "exposed bot wallet 127, stake key"
+  },
+  {
    "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
    "hash": "68cfb532601b4670d9d6541367341fcbf7ae542d4adb09883ad4d26d",
    "label": "burned wallet ada-bank, payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6918602db18c7f2408253008e7ca5182446f4d064114e21b564bd538",
+   "label": "exposed bot wallet 161, payment key"
+  },
+  {
    "evidence": "its seed was exposed; swept to custody by ee778c24d399415ef9ad8ae85c49857da2c6e9421690844f770489943389f1bd",
    "hash": "6a0bf6f1194166b28a5fee579194d52d4fc4eaf247858cba3d8da914",
    "label": "burned wallet Flint, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "6a9dc6f20463f43d8d9e689b5d29741a6ded68b13cec2b533329f14e",
+   "label": "exposed bot wallet 75, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "6c82b9640d38c40e0a4b06a0c4b53b65eafe78660733cd74733d6a4f",
+   "label": "exposed bot wallet 160, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6d10b666f6107aa7c7ddbb6a2dd97392597311dd44df1a60f172abe7",
+   "label": "exposed bot wallet 171, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "6d598575a7b79be6bc261eafda7f23982c0ed009e71825adadddb8c7",
+   "label": "exposed bot wallet 4, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6daacb8795dd362bbd3f5b77fc3b9402885c6855cb358556ecad3d06",
+   "label": "exposed bot wallet 144, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "6e5502ad31fe860eeef7af135e9afaf958feba0bf968cff5ea15fe77",
+   "label": "exposed bot wallet 174, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "6ee1cf34ec7264555c34463e19f2a0ad512f575371bf190b951d9cae",
+   "label": "exposed bot wallet 183, stake key"
+  },
+  {
+   "evidence": "its signing key was exposed; swept to the FPS treasury by 1951c24199f63ce2e91ad4b6e9ff1b3bd1787921aff99ba1d8c915eeccf81d3f",
+   "hash": "6fc247fcdefce3dbf4ac0eae6af695ff62e11248c2de1a2dab2322ce",
+   "label": "ADAM key, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "70143a1e158c7e0f7014c49fdf9d1b90c523397a5a47d6c3fd066168",
+   "label": "exposed bot wallet 14, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "703321f1b50f73c28ae6c7339deb99399c3d64d80b7e3f3d7c5df697",
+   "label": "exposed bot wallet 114, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "707ce2dd5f3ae2746ab26fb5f8188cfc5092cde586a6772b55fa4b2b",
+   "label": "exposed bot wallet 103, stake key"
+  },
+  {
+   "evidence": "its signing key was left on a host no longer in FPS custody",
+   "hash": "71c7276f6a23d2123421a531b37b4b0e308c575dc0b28af1c11e8c69",
+   "label": "retired Hydra second party, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "722ce448430545e32687505b6fb7e92835fb05aaa40cd19ab62dc2ba",
+   "label": "exposed bot wallet 146, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "72999abc1430178360991422979a55391de97514a3a73b040bf7e90e",
+   "label": "exposed bot wallet 190, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "733dc2c2593c12d8f1c141bd0ca82d0c8c3da08db57fa669b908ce66",
+   "label": "exposed bot wallet 122, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "74199ffab7ac50e3f0528012c63670b5fd9f1e862d6f48fe72612970",
+   "label": "exposed bot wallet 167, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "74798d5a489ae8342a65bcab2891e8d2a27c9c471da151f2eaa0e42c",
+   "label": "exposed bot wallet 52, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "74a5e1510344e18fb6c9c6ca40e45b0bbdbdc0032bb3361b82159807",
+   "label": "exposed bot wallet 90, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "7579fedd7cbda9cb7a2771d88e2d1ee468e97806464610126672f3c9",
+   "label": "exposed bot wallet 133, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "770edfb9f68675823aea54bfe0e02bf75aacefdfbe471ab7adf84b26",
+   "label": "exposed bot wallet 102, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "77495b006539be77201776e89bbfa3a1cfcfdba1369eb49f913fd773",
+   "label": "exposed bot wallet 46, payment key"
   },
   {
    "evidence": "its merger share was already paid by the carve 0de12aee2af3c5c7b12fb706b3cde4157d7fd7af31b36920e40769cb833f17cc",
@@ -158,14 +1013,119 @@
    "label": "drained decimalist account, payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "78cce066729bc01ad4fa4ec5e6fa846f5b5292df05b66f1d550374ba",
+   "label": "exposed bot wallet 157, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "79b9804df3c7cd0dcb4ecb5c4cdca79b7722143f95def4a00cea0e0d",
+   "label": "exposed bot wallet 30, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "7b87e9a72ada03849ce5128659a17c36b4031a78a33efba3d7c08193",
+   "label": "exposed bot wallet 143, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "7be9d9287221c69e12f10bd0cce3e388f4bdd1be3c892d1402ac5121",
+   "label": "exposed bot wallet 151, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "7cc26b045458603e36fc47258c396129a9b4d49d6bad15d86acee3df",
+   "label": "exposed bot wallet 122, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "7d642cd950d52108b16b6675e53eb13306577230f65efe3f01cad44c",
+   "label": "exposed bot wallet 168, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "7e9b6f9b6759f1d5bf959de81e70d0653cc10b2c5c2f11e35f9d7e0c",
+   "label": "exposed bot wallet 38, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "7ebaabfda0229547f129d912fcbdb7c5832bb0614a7f5710b93e95d0",
+   "label": "exposed bot wallet 191, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "7ef91416cc871e1e211495c3a39f19b56786814bcba1fddfe9f9b480",
+   "label": "exposed bot wallet 36, stake key"
+  },
+  {
    "evidence": "received the W1 drain 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
    "hash": "809a40995f079a45821c91754a2875a64f874a4f77983185ba69becd",
    "label": "attacker collection address, payment key"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "814bbf356881122510681369dec8b610ff32c338908745595bb29bf4",
+   "label": "exposed bot wallet 173, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "832c5b1bb9369c4b7ea908a9250fc88e169f9bfd1b243471c9ae2a84",
+   "label": "exposed bot wallet 64, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "83bedb598b200e88624ba4a8cbcc4451d8a3db8d370b9f9bee4247a4",
+   "label": "exposed bot wallet 23, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "840c5e0b53a70ebecc3a4cb9f7e0207fba0e541bc9921f53a155f380",
+   "label": "exposed bot wallet 143, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8434c4de9ed5106bee60eebce47ddc3a9c6ae262b82ece021868f1ba",
+   "label": "exposed bot wallet 5, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8452586bf8d703b5d177d93fd6a979359601bd084f7ad167a13b59b4",
+   "label": "exposed bot wallet 101, stake key"
+  },
+  {
    "evidence": "drained to the attacker by 0a093e145060ef69902f5ecf32655d9c17b10878d63a1db8f2c65ea80a145094",
    "hash": "846e4c0ecfcea4103fe30f8c3a0572a096e07cae3a4d9499bde582aa",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "84bbd5437f22765a7c4384f8a04fe7c5eb25f466381d59b994e92873",
+   "label": "exposed bot wallet 192, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "85b1ed96ccc8db38f78b6a55ab4e0fc3f9bd8ff443bce6b6f6ce9593",
+   "label": "exposed bot wallet 185, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "86316b3c8307dffd09680662e72528f52b7c6cab6c031214b6c465d5",
+   "label": "exposed bot wallet 145, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8652c979a4f12d9c34c75a855a7d8e663516dc379b5e6c32f01f70d4",
+   "label": "exposed bot wallet 176, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "87597baac09fbd0cb4c369b0929219499cac7cd97733020e2e429c1f",
+   "label": "exposed bot wallet 186, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "876eb5525c1f664ca0d13ddecd142ee206676510f95ee1d1a3097df9",
+   "label": "exposed bot wallet 40, payment key"
   },
   {
    "evidence": "drained to the attacker by 20ea6e4d22f02da37315d04b2cf73de8c94ad4575b996aaec14f2cc081cb6e00",
@@ -178,9 +1138,59 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "8ac584fd815398053f25ffe3bb62e83330712dae6b5347728238dd2a",
+   "label": "exposed bot wallet 156, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8b0904377e1f436872dd62caba5a1722b927d6e0c2c4e12a87035c76",
+   "label": "exposed bot wallet 124, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "8b838be8fdccfb1e32e1ecc968ffb18cf02fd12149d5f5a76a40cd88",
+   "label": "exposed bot wallet 38, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "8cbaf34e583f8c975ee9b88221ebea8dc4f5cbbe512567c392873b96",
+   "label": "exposed bot wallet 0, stake key"
+  },
+  {
    "evidence": "drained to the attacker by 9be593882052bade50c6de3a518aa54cffea32ec65878ce863ac10b8417f954f",
    "hash": "8d0d0e5f3e94b6fabdb2a9c5010a954f4f0ce9640a846d3f9904caea",
    "label": "drained wallet outside FPS, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8d4d87370ef5b2e4bbb51e537f80f71e9654bcb11ac092df31022967",
+   "label": "exposed bot wallet 144, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8d7e277b149d347ac63c275936aa21ffb5313d46468ee071d81d8edf",
+   "label": "exposed bot wallet 93, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8da4a22b287a337e5968b8691d253fdf39d1f0d2220889345a97a0cb",
+   "label": "exposed bot wallet 60, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8da7a9cfd2d1b0eeb93287845a4129ad39c4d04152cf1a89dce634dc",
+   "label": "exposed bot wallet 140, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8de2d4416ca86148e2fd024ea1c4cd36dfba070130913d80949aed1c",
+   "label": "exposed bot wallet 130, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8eddece717ebfc4fa2ac4ec5df463283286510f23875944777d10bf2",
+   "label": "exposed bot wallet 26, stake key"
   },
   {
    "evidence": "its merger share was already paid by the carve 0de12aee2af3c5c7b12fb706b3cde4157d7fd7af31b36920e40769cb833f17cc",
@@ -188,9 +1198,129 @@
    "label": "$TALOS Treasury script (waived reserve)"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8fb0e944727899111fd6a4e54e31264f64bce51264b1e04e55115b7a",
+   "label": "exposed bot wallet 49, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "8ff59d29955078aa46cb955c8601a1ab0b7a4865f98bc211b5e3d696",
+   "label": "exposed bot wallet 21, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9187a6b6996ead8a75c3a22d371eef60cbc9f12bfdcd3ad8067b7f6e",
+   "label": "exposed bot wallet 126, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "91a0fe171cd154f735beee26ebc7d0811423773e65d7484caba3ade7",
+   "label": "exposed bot wallet 48, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "92347c1f82a917496342b98851d0940498fc1d09438997f363a9a6d5",
+   "label": "exposed bot wallet 135, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9249b04128911d680cb9adab617d40a51167b0ab86e1bdd060bc9ed3",
+   "label": "exposed bot wallet 97, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "92b7946252cf35ab669f8293ea671ec23975f3ddd3ec3117181ede80",
+   "label": "exposed bot wallet 190, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "931798d1644040fbca2e85c6dcd985018f0e5b999ffbee4a37a43580",
+   "label": "exposed bot wallet 17, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "93377bac27f6263e27ef461d0b17e31290bf84883be08fe4006d9cc0",
+   "label": "exposed bot wallet 157, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "944a3588d374a20abe403c42ce5f51b8c4d21a37f44e92ee5b1e28fb",
+   "label": "exposed bot wallet 31, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "94c8a922523eaa31e300a958bf95b956a7b7db7f5f9238328ca9aeca",
+   "label": "exposed bot wallet 142, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "95a58998443f1847259abb6fce558af470bb93a7e64512bc63cf9e5d",
+   "label": "exposed bot wallet 172, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "96ee31b050151cfbe450c55395a7f46ebcd0e43f69fc83d590fe6521",
+   "label": "exposed bot wallet 155, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9896cd3b655c740cb4d52d25ecb989c07ad0733c62107f5e064cf9d4",
+   "label": "exposed bot wallet 87, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "994f2a036ec5bbafe421d10dc05118a1231d6a9dcf98a4fc769c17c9",
+   "label": "exposed bot wallet 6, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "99f5b5527ba58d3bd9ece6faaef43c40a1006d51fa32c0aaa55dd46b",
+   "label": "exposed bot wallet 148, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9b406fafd33ad15e149badb464e602c760a4d5bc87178e94143fee80",
+   "label": "exposed bot wallet 1, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "9b4a4a64d81861325412c7993aad16188ddf18635ecb798bb8644f93",
+   "label": "exposed bot wallet 85, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "9b74d4038001a8f4552a2549f88d4b4c565f8a2241e00d1ed8206805",
+   "label": "exposed bot wallet 138, stake key"
+  },
+  {
+   "evidence": "its signing key was exposed; swept by bfe0619311c03f8963611f60b49667b821ce69ec478aa70e0e3529c0cc34a31e",
+   "hash": "9b833f37c7814934c89bd99733b72c018b6f17e4d04151b38cd5b997",
+   "label": "retired Hydra wallet, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9bb7df6c1ec32d0ffd6ab73b83503bbb1d7deb4230ce2f203502b949",
+   "label": "exposed bot wallet 106, payment key"
+  },
+  {
    "evidence": "drained to the attacker by 815ac7be84a5eb982e73fb041095aa8ab24f8aacd586c02f4b427c5f5ce49efc",
    "hash": "9c87f0a90fcedee0a3b0fbbb6102c8e504b7e0459cf01ee4a31d63ac",
    "label": "drained wallet outside FPS, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9c93ccfa8f8715d981011e14434b33bdea877024cf7e26fef103df4c",
+   "label": "exposed bot wallet 147, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "9cac78c2b44bf9b3d4048801a233ea7499cf966b3dc1dcd5f4c5642b",
+   "label": "exposed bot wallet 20, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9df5efa751c65f62102a6e46b0b07dd75509c0bcc1b72398fbfeb63c",
+   "label": "exposed bot wallet 114, payment key"
   },
   {
    "evidence": "received the W1 drain 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
@@ -198,9 +1328,64 @@
    "label": "attacker collection address, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9f0cfae295c0f7680c06c323184b9ec3af7d3facb23f73994a291a14",
+   "label": "exposed bot wallet 67, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9f14790f912a2345fc041054245e749446396b1442ca47d90a749754",
+   "label": "exposed bot wallet 49, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "9faf6518c4bc80407fe4dcd17a5efc2d6724df35708087f21b4dec10",
+   "label": "exposed bot wallet 178, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "9ffe44c2413b1f98f8daf18b0f6edd363cea4eea25374b3cb6390b72",
+   "label": "exposed bot wallet 139, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a009e990eefc85d7eab467c76acd384edfe90f6247f2d7290cd3095f",
+   "label": "exposed bot wallet 137, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a1658b0ccc687da2532c6f2059b5287b2924fef00a15fe84fbd2dfa3",
+   "label": "exposed bot wallet 136, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a20172de3ecd80dea5b98d6a65a5513ba15b3257ae8ed946b4160565",
+   "label": "exposed bot wallet 1, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a2024d1b12fd2c138074d53ebc9c0377308b5c6b6c350a0298b5bed5",
+   "label": "exposed bot wallet 149, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a20d597f81a72eefa1fff29d386bd4d35f7cea7ce10073b10e07ecdd",
+   "label": "exposed bot wallet 55, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a260024491a6a13d31bd1cbb14b2e2597acb4313edc94e629face23f",
+   "label": "exposed bot wallet 66, stake key"
+  },
+  {
    "evidence": "drained to the attacker by b68f1b9d7a10fca3324a48391246a4faf68319ffed1e0463c9ad7e683d2e96e0",
    "hash": "a2ea7bac7fe2f1a89ac9cb64db16000e065517c4eaf002b1487c4d96",
    "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "a3c8142b4417001d674cf0dec73a7b82bc6224e8d75f0edbdfba47b6",
+   "label": "exposed bot wallet 175, payment key"
   },
   {
    "evidence": "its seed was exposed; swept to custody by c56a0c4e221051f655b475b92afdec27399e234e5157a0ead943672b55928b31",
@@ -208,9 +1393,54 @@
    "label": "burned wallet ada-bank, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a4b3795a16107f0a5732ead37bbfd812dd69abd6c6541bac04a6fa40",
+   "label": "exposed bot wallet 128, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "a4da8072f4c3addfd4bf42b18d9a985276c6614f36ceba9c1531ec95",
+   "label": "exposed bot wallet 85, stake key"
+  },
+  {
    "evidence": "drained to the attacker by a978d6243252e7d26d3e84937c9fc5a8324e65bba8cac737000c4321cb11f1c8",
    "hash": "a64296bf8ce216c41357e6830e612f9b8b37cb4f6e3f9c509505a03c",
    "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a71425a144a606b52022e9f6eb16ea2e5d120ffb0d43c971f2db1ef6",
+   "label": "exposed bot wallet 78, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a725ffd981e590e303e05cd31e5a3dca7168678efdc69aa3ce324c73",
+   "label": "exposed bot wallet 163, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a7551fe4667065a6fbb91f70543bd6efa20c18b78b1c9ee8c1de8028",
+   "label": "exposed bot wallet 170, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a76f5f0a8dff3117408c080ff26c8d02b822c44606ff4fa914cef681",
+   "label": "exposed bot wallet 141, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a7f7e8c4a50ff2216654aaa65e5b12e01f044e5dd28da064951f389c",
+   "label": "exposed bot wallet 23, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "a851ed56a4e061d12707e42d086294f007d732e49b87ec5b07a23ae3",
+   "label": "exposed bot wallet 81, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "a915862c83e35327be3026f59deb1dd33a0a0dff6675cb89e7f1a51c",
+   "label": "exposed bot wallet 116, payment key"
   },
   {
    "evidence": "made 19 merger claims with FLUX_PASS taken from W1, the first a08b8b1739017285d853b84c8e71f52bc92c18bf6116ac7da7587df468d7382a, the last d3a1e632424794bed36d7062b4c09c5fe547fa7a1addbd2d45f9b84df773c733",
@@ -218,9 +1448,34 @@
    "label": "attacker claim address, payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "aafa5bd7e717e6588027d8240ccf894fce791e901a3cc5140b8fdfd2",
+   "label": "exposed bot wallet 177, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ab19dc1b17cce1f29faafe7f488c8fb127e82910b017c3931cb92356",
+   "label": "exposed bot wallet 92, payment key"
+  },
+  {
    "evidence": "drained to the attacker by a80ffd0ba30a18f7940b737403afa94bd98e43ab24a50b52ff4f289643c19707",
    "hash": "ab9610f3eaf56732b37b9c7ddc62d20ed3849e6a503bfd62dc7f5fe9",
    "label": "drained wallet outside FPS, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "abc45aa35fe85ce7f6ccdfeaeaa05bbe6bdb0eeb7cb47b91d40466ac",
+   "label": "exposed bot wallet 93, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "ac35ed0c5e9f35baac26fcecf2cfd08cebe7789344c2234ce7496dca",
+   "label": "exposed bot wallet 9, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "ac36791e3704aa1cafb9a208d46a6cb4b96cd1c0407b7f69619fce2f",
+   "label": "exposed bot wallet 89, stake key"
   },
   {
    "evidence": "its seed was exposed; swept to custody by ee778c24d399415ef9ad8ae85c49857da2c6e9421690844f770489943389f1bd",
@@ -228,9 +1483,24 @@
    "label": "burned wallet Flint, payment key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ad7fa1f4df15e71fd3d40dab8706156b29ae6ce0c9d218c73b7eb011",
+   "label": "exposed bot wallet 154, payment key"
+  },
+  {
    "evidence": "drained to the attacker by f520b47cad1e1002812cc95ed46dd07e2fb8511f586a2d0a8b6702623611d267",
    "hash": "adde297b6e2a7710e886f2daf76563bf0dc39df03bf5087b791c99eb",
    "label": "drained decimalist account, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ae396d3c5667ea8906bb8d36ad09e622c2c848461a29eec112982200",
+   "label": "exposed bot wallet 69, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "aeedf8d8cd313d75bd09840475bbd6d1600ac55a14ce1902bcaad743",
+   "label": "exposed bot wallet 4, payment key"
   },
   {
    "evidence": "native script: after slot 168329969, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
@@ -238,9 +1508,199 @@
    "label": "W2 timelock script"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "b06cf7cbc4ba2a087e0ea45b0fd18e0dee3ca519ac4e0b33545053c9",
+   "label": "exposed bot wallet 22, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b0e4cdce29eecbe710fc3a94af5f221025f617f35c21f1a7f707f007",
+   "label": "exposed bot wallet 171, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b28b55ea5da6742716855fa5207dc914299bf7d127039b584afe34c8",
+   "label": "exposed bot wallet 82, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b2b0f7ecd710d844706c65c6d721279035d02b9d797d203ca309bb64",
+   "label": "exposed bot wallet 120, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b321616f11c0dbc94f758e34e06423e9fd6f33205f1991acc234c32d",
+   "label": "exposed bot wallet 182, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed in a hosting provider's breach",
+   "hash": "b419d6a992a517f361fddea302a737a56ffe3c526402434350597314",
+   "label": "cMATRA arb-bot wallet, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "b5c3559d6cf63ef618277bb34e3bf17ff0c1bc9e43b97a7b4564210a",
+   "label": "exposed bot wallet 185, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b5e9bebc7c21da9f5cc7d87fa93f166695cb00768a6f5077e25471d3",
+   "label": "exposed bot wallet 72, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b61c124bbb5d9318b0e4ba0760f1f3b0b72c652ab75fcfc4b54c3d04",
+   "label": "exposed bot wallet 155, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b76050c74013031ba16ce6b1ba3721f2a85da3de4162d3254a84876e",
+   "label": "exposed bot wallet 164, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "b8e5848d9a1d163fcd6d409d10e25e9860149882f047332fa69a2730",
+   "label": "exposed bot wallet 68, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ba11b2ff5d4c51b51772af769f3b77d80b4df2c026ca19912fcf9306",
+   "label": "exposed bot wallet 152, stake key"
+  },
+  {
    "evidence": "drained to the attacker by dcfa90cf58a4c13aa94bd8df088f4245882761c7f14caed1cefad5ec7bb8b197",
    "hash": "ba1fcc3390c5b3d7480c508bc162ca7a904b17a535fd838e569a0a5e",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "bad57be564f8f98e52c66762a8522a37f2e3fdea135b91847be9b4ec",
+   "label": "exposed bot wallet 166, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "bb07deef090c8e4d5fdef550cdf65d7bc8be28c4d3b7ab32ebbeb861",
+   "label": "exposed bot wallet 117, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; emptied by cc678ba0fbf4e0348edd13bac43ee29e0d6dfe7d1712fb7f3dae215693c8eb07 and the Aegis rescue sweeps",
+   "hash": "bb09f43245759995440388db9ef3f8a614246e8da1dd9bd053261347",
+   "label": "Aegis vault account 0, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "bb433680d45602156e2e8b7567e7bf52e7c748cba124132769a3a3ee",
+   "label": "exposed bot wallet 179, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "bc81f038fd0fcde1383120d3ea93a01ecf8f99e909345d2916376b6c",
+   "label": "exposed bot wallet 188, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "bcc09bb8639ca583de139b9128a21dd1420f3a6bb9dd308567296080",
+   "label": "exposed bot wallet 169, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "bcfc54cbf360f49d16e701626ab0b4c544dcfb3409a7acceb9148837",
+   "label": "exposed bot wallet 179, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "bd01493f5b6f3fc6211aa223978724a26bf5f9e732e5c744447a7c5b",
+   "label": "exposed bot wallet 47, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "bd234a1d0475b08dd496029ea45a99d3479f49c88bd8e160874ba15f",
+   "label": "exposed bot wallet 36, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "bf9adf929054dfd06f5394e3dab9c74a8006fc7429f933dc850db680",
+   "label": "exposed bot wallet 177, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "bff38c7b4ae91bb8222b7f04b6b5311e48fbe289250ee495846a0c1c",
+   "label": "exposed bot wallet 84, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c055303f16100fe7eb7fb478a9e088a38bbf66835bbe1c1b09208cf1",
+   "label": "exposed bot wallet 113, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c06919cb20ed33162426dcf8fbf4ac27d4cf05b772a6155a741bc2d4",
+   "label": "exposed bot wallet 41, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c06bb95909a3fcc70d39d915679f3b104e92afd17775b055008fa3f1",
+   "label": "exposed bot wallet 132, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "c256c229f2a2b84efe8dd0a863388e31e564cfc7b8ffa75da61f63d1",
+   "label": "exposed bot wallet 175, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c29de495ebd2c007d50cb485e1c2fef42c103675814d85067aa1b6b0",
+   "label": "exposed bot wallet 134, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c2a79402439545ee7c8e785352563a96e30d4796e8f52b0f856ebf61",
+   "label": "exposed bot wallet 14, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c2bd84cc671075a4c58daccba4c264509191a9cc1cb9bec174c7b4de",
+   "label": "exposed bot wallet 15, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c35d0f0063e37856d47e90734d14a58e8b8896586468588088d072de",
+   "label": "exposed bot wallet 5, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c3b9c11c30e80533a49a78511b83c3498fd8008041a45988c0265716",
+   "label": "exposed bot wallet 91, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c427b429a1d90e19a7a88abfe80b5d0d170e4ea3cc4f8ab1fec812d0",
+   "label": "exposed bot wallet 33, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c53a7494e5970bd5fcc1efd81723750b9297d78693c88e35ac594247",
+   "label": "exposed bot wallet 134, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c654efb153399521fa43361939f7aa0d674d654da1cd32488599908a",
+   "label": "exposed bot wallet 128, payment key"
+  },
+  {
+   "evidence": "its signing key was left on a host no longer in FPS custody",
+   "hash": "c65d25cb4fdd930a70a4a99929edf11c141ef0b0f529e007cfda7421",
+   "label": "retired Hydra ops wallet, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "c69d620bfbd7727e3d6c3b55e61f8ff8ab8d3a9ed1732cdf9156ef31",
+   "label": "exposed bot wallet 118, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c812df4ea2832b1fa556651c3e449311a8b297ff29223ad1b3354f05",
+   "label": "exposed bot wallet 10, payment key"
   },
   {
    "evidence": "native script: after slot 168101586, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
@@ -253,9 +1713,134 @@
    "label": "W2 (FPS treasury), stake key"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "c9135817cc7c770c0290ed0142a8feb29ca82c9a5bab33243b3eba42",
+   "label": "exposed bot wallet 115, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "c946421b7cadb662b4e74aa689d37ac5f741b88747577fd79cd4e94d",
+   "label": "exposed bot wallet 181, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed; swept to the FPS treasury by 1951c24199f63ce2e91ad4b6e9ff1b3bd1787921aff99ba1d8c915eeccf81d3f",
+   "hash": "ca3da8601573b7cfb2514fc1819d040e2693dd4886c6719b764afe00",
+   "label": "ADAM key, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "caf01aca170a3bb0297ec50a029e252e11cafe70c57c945e9a21f0ad",
+   "label": "exposed bot wallet 31, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "cb58b604ee81180e6c3d35a47463b5939195edba25194305fc4cbedc",
+   "label": "exposed bot wallet 30, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "cbb2defdabd8788dd1861474a07adaea19df290ffe66161ab0cf1346",
+   "label": "exposed bot wallet 59, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "cbba3c55e3df2514642911df361b92fc42741554d5a76c1d07316b60",
+   "label": "exposed bot wallet 149, payment key"
+  },
+  {
    "evidence": "drained to the attacker by f520b47cad1e1002812cc95ed46dd07e2fb8511f586a2d0a8b6702623611d267",
    "hash": "cd3ed776608dd1349f816b9bf14984d0c432f132e49b96ef9770cdbf",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ce3fbf425e559a445d2cd51db1a4985ac5f0a2ee16ad81edb1232909",
+   "label": "exposed bot wallet 103, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ce68950112e32615422ad2a7f029524da445df4cc8bd71bed4c0152a",
+   "label": "exposed bot wallet 12, payment key"
+  },
+  {
+   "evidence": "its signing key was exposed",
+   "hash": "cea98dfce26e0ffbf5ab892edcb8f8ab8b794d5390f80ec0b9aafed3",
+   "label": "SaturnSwap adam-bot key, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "cf329da60be00601d99f5484916fcb7fe4de2f5e45690652d076d6d2",
+   "label": "exposed bot wallet 25, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "cf6c01da1bc0b0118360bd46059cd44c3c8c61f2449911d3de71af00",
+   "label": "exposed bot wallet 15, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "cfe9d9f07c284b689903f10f022a1483b0177109325224eaa64901b7",
+   "label": "exposed bot wallet 76, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d0043b44177052314f1d6828c66564c61c47323e3d928a6e5b49a61d",
+   "label": "exposed bot wallet 32, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "d0b02c6eece3416a810fcf6173149a590a2df5477954720e569ded3c",
+   "label": "exposed bot wallet 156, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d128b826c2079440646b7117b1fde7500ed745ec0a4cac916b38763d",
+   "label": "exposed bot wallet 96, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d1ed6972973f48075df8e4e65b1015fff50fbf899fa46e8f28908679",
+   "label": "exposed bot wallet 7, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d2b3cb9318739907191a9e347da5cb97a085106ec6b505ad72216c14",
+   "label": "exposed bot wallet 107, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d2d9e776de738d3761c558daa00ded83bbd7229b1f722e314e235969",
+   "label": "exposed bot wallet 112, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d377e211b7f8646ae6804e09f1ffd07997021567665c79c40daf58d3",
+   "label": "exposed bot wallet 63, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "d4233ac8b3e4d100e19a4a890ca7462c2a4bf15ee8f6ddb307e8333c",
+   "label": "exposed bot wallet 109, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d4968a2e41ea30a3b4e9408dbfdf2e495cfa384cec50e04c653b3ede",
+   "label": "exposed bot wallet 170, stake key"
+  },
+  {
+   "evidence": "its seed was exposed (the seed of Aegis vault account 0)",
+   "hash": "d4b9968c2d2b108771a458403e33604790e5bf47c6a878949f2c528d",
+   "label": "Aegis vault account 1, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d4c173f4407055aa8b9c5e0d7317cd8d031d1edfedf352286b843bc4",
+   "label": "exposed bot wallet 187, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "d5381b4575c133ff1ef616c15d92a3f5bfc98ee87ef3c19f258d711a",
+   "label": "exposed bot wallet 111, payment key"
   },
   {
    "evidence": "drained to the attacker by e1a0745a60235cbcd311fa10343e8c01d205448851e1a75f6ff5913b78c2b993",
@@ -263,9 +1848,139 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "d59b4b53018bc96d16b539c1a2c76599c170346578acda842a5f0d0d",
+   "label": "exposed bot wallet 16, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d5cfaa31be12aa70029e581b949cf9b97fbd7e2a805d51ff8ccb7694",
+   "label": "exposed bot wallet 133, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "d62ea03c1d408f146ba1ed962874a3e1fa026c7b49729e1f84674082",
+   "label": "exposed bot wallet 61, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d664b2bc74fbacf32556a616165efb671779b68f7ef2d67333b7a668",
+   "label": "exposed bot wallet 71, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d6e576a1597d99f668c8c023fd71687f77eeb85be340459525fbd8e2",
+   "label": "exposed bot wallet 163, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d76e76fbfa5afdaba69d02cf8876f136bf77d752ef1afd722a07e248",
+   "label": "exposed bot wallet 124, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d7c97e245a0314250cdcde934cebeea37c1ff0731f4f1f28322184f0",
+   "label": "exposed bot wallet 56, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d82938338a18c5a78b5e2184f36978fb9e7c8c8479f40753b48706ef",
+   "label": "exposed bot wallet 10, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "d8a3fa985f2e7f27466bbc0cf599aa0aa90adf5331afb8def8296090",
+   "label": "exposed bot wallet 54, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d922043d17d7b91964a8717f53b778f08ed4954874dfb10619c14b50",
+   "label": "exposed bot wallet 186, payment key"
+  },
+  {
    "evidence": "drained by 70f62a3bb6eace1fd32ad4ee4b107a6fdba3f76edcf640ddd4024608edf8a227",
    "hash": "d9bdec75b5aa93d205cfc5f52c3c8487efbe7c6436a2082203c8d7f5",
    "label": "W1, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "d9d0975a0a2bba86fa1af41da4e0a7269559dc5e7595df0598c1162d",
+   "label": "exposed bot wallet 88, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "da0c1affd35321ad42373c35e908c3737d543ba8751701c15ed2434f",
+   "label": "exposed bot wallet 147, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "da352e1f4ecaabf9c545483aa9869adefc974f6269e84a0209e9fa1f",
+   "label": "exposed bot wallet 42, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "da9b022714ace2a7ab1cc22d928b569faa0241bb4f55ae5d82ac5556",
+   "label": "exposed bot wallet 159, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "daf18c33b08896aeee0490fed32c30f95eba6484449febb334aef11c",
+   "label": "exposed bot wallet 150, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "db5ab4e920106bebe5077650b0b7a986a1d41d353d7ddbc3f206f34f",
+   "label": "exposed bot wallet 66, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; emptied by cc678ba0fbf4e0348edd13bac43ee29e0d6dfe7d1712fb7f3dae215693c8eb07 and the Aegis rescue sweeps",
+   "hash": "dbb81874d7e8c175896815e06da5113d78371fd123d64741521e09df",
+   "label": "Aegis vault account 0, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "dd2b3200916311cf42869f64b9d66868303e96919cf1efaf49b16b18",
+   "label": "exposed bot wallet 104, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "dd987a60f1c384e664bdc6fb4143e3efda6894869f83332801ff8a8c",
+   "label": "exposed bot wallet 72, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ddb172132738877494b9e553337cd72d8d16154b6924f4be168f1c73",
+   "label": "exposed bot wallet 120, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "de5e727980fbb9eebdcaeecae1fc18d9f10ca11b67887aeb3cf0bd27",
+   "label": "exposed bot wallet 141, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "deece363c9fd138e9f746f110e8d909c9fb77eb8af7732e167d2e80b",
+   "label": "exposed bot wallet 119, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "e031da6c58f5869d0e7ea4d412e3f81dc6a1edf9d2a5ae51d0105282",
+   "label": "exposed bot wallet 76, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e114061ec6d5fecf239b25cdc5fb562478db531c93abbdd48f3f0cdf",
+   "label": "exposed bot wallet 44, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e114611bf44d593ea5c7dfe8b6af79c48fbae0f07a6e36e397e4aee3",
+   "label": "exposed bot wallet 12, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e137a456449bbf8928c6fd1c3d5f9855399840155e1cdcb365638ee2",
+   "label": "exposed bot wallet 52, stake key"
   },
   {
    "evidence": "made 19 merger claims with FLUX_PASS taken from W1, the first a08b8b1739017285d853b84c8e71f52bc92c18bf6116ac7da7587df468d7382a, the last d3a1e632424794bed36d7062b4c09c5fe547fa7a1addbd2d45f9b84df773c733",
@@ -273,9 +1988,34 @@
    "label": "attacker claim address, stake key"
   },
   {
+   "evidence": "its seed was exposed; swept to the FPS treasury by bf5db9211775fd57230209c97db6587154eb260a8958bcfa1dd39a39cc99eadd and 6ff7fc0b51390d254ec2a17e0e3436cd107728e201b46635c52075e03787f9fd",
+   "hash": "e2068a850e61da62e5d246b88c968d5e53f07abd61681d500bcdc469",
+   "label": "Aegis ceremony key, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e26e69bac445b7485c9f5c2a54bf2d3a6a983a25e5a905210e676e82",
+   "label": "exposed bot wallet 53, payment key"
+  },
+  {
    "evidence": "drained to the attacker by e1a0745a60235cbcd311fa10343e8c01d205448851e1a75f6ff5913b78c2b993",
    "hash": "e2811a5af1b9198fd365fb87351583f874fba8debc5400234c41df91",
    "label": "drained decimalist account, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e308672f2cbe6cbde01aa764ca29649f2051c2b82849a5f0405793d1",
+   "label": "exposed bot wallet 45, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "e36de2788d41589508c1de98fe0648ea86cc9063a00f9bfb2f28025a",
+   "label": "exposed bot wallet 174, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "e4f2575eedad0666fed4c029b43f9da8144d943872f80073f66ea775",
+   "label": "exposed bot wallet 99, stake key"
   },
   {
    "evidence": "native script: after slot 168407939, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
@@ -283,9 +2023,54 @@
    "label": "W2 timelock script"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e5d7d9cc3be6e8f0aa13df4bb1d264846d1011abcaac85b7149a3d76",
+   "label": "exposed bot wallet 11, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e641ad7864f93d4795125c0ba8d4a90c74e3f10219138a01b57c0a31",
+   "label": "exposed bot wallet 68, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e685b68456d41a2ac693deee34a65349dd3e5b143c121eb4822632be",
+   "label": "exposed bot wallet 50, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "e70ad94d93774004f01ca2e6502b6e9121a28456723f29c43dda491d",
+   "label": "exposed bot wallet 89, payment key"
+  },
+  {
    "evidence": "native script: after slot 167720114, signed by c8b3e05f9520c162b260e2e545eb84adfc2dd55b2e2ac6d41e70c4b0 (W2 stake key)",
    "hash": "e7437d2ec38516f0159b891cf744a2f4a1d82d224955d5d2deb7f072",
    "label": "W2 timelock script"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "e886080fda924e384e2f81071bf9b021bfa2cd74142d62526c25a083",
+   "label": "exposed bot wallet 108, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e911ed6f3e41def16c9e92414be5cfada2b7125a3c103d614912d0bb",
+   "label": "exposed bot wallet 164, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e9489251e00de3d2655d2c0d0caffa7650c5bc057b52c0f9abd302a6",
+   "label": "exposed bot wallet 135, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "e99c181ee2d0e86c06516612f23f3d9d1eb55c81be707740380f8ace",
+   "label": "exposed bot wallet 69, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ea63399c4e8e796e016e430a75cbb23923931003b5c4a53af00db1de",
+   "label": "exposed bot wallet 82, stake key"
   },
   {
    "evidence": "drained to the attacker by 20ea6e4d22f02da37315d04b2cf73de8c94ad4575b996aaec14f2cc081cb6e00",
@@ -303,9 +2088,169 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "eb8954a50949dede6fe63d702145ed7f9a56fbe3d910ce0a017821a4",
+   "label": "exposed bot wallet 50, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ebbf72104cc301e2ddc8b854a845d1eb9eab780e40421e03a142b21d",
+   "label": "exposed bot wallet 33, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ec4066e9c76a644f2e8bcae8988fbe1bfc029f488cffb47210680fbf",
+   "label": "exposed bot wallet 11, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ed16e18367846d089937443abb246eaef8df02fa168d1216bbad18f1",
+   "label": "exposed bot wallet 39, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "ed86957c8953436b228c10c0e7f4c1019cf26b0aa6401e456e4aef8a",
+   "label": "exposed bot wallet 192, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ee312ed2fdd38f1c3ef6fe22cee06bc7ea06df0385dd04f24d009f3f",
+   "label": "exposed bot wallet 187, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ee6603cbba5df694f1e4e396865f95b14a86fc9f43452d51eba988a7",
+   "label": "exposed bot wallet 28, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "eeaa6cbba134e1527d3e81fad3cdf08ebf8ba661da2023c4732d7596",
+   "label": "exposed bot wallet 8, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "eeb7f3fea7fefa2cc56e77823186cf747fa4dc801b59989a85530e7d",
+   "label": "exposed bot wallet 8, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ef51960f2f513157c1aa5490a04241b5bbd60cb9d54bf246710fb2fa",
+   "label": "exposed bot wallet 140, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "efbbab99c9d09f81e7ac007544c36baff5e27c2040d93ec2420e4ecb",
+   "label": "exposed bot wallet 55, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "efc8f16a7909f6498cd63836b008fe622d1dd205c382056035bf219c",
+   "label": "exposed bot wallet 165, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f03d29d8eb35954a88edd0504ec8c09e25a47c8ce6b8abc036a20869",
+   "label": "exposed bot wallet 184, payment key"
+  },
+  {
    "evidence": "its seed was exposed; swept to custody by d05ea39d7dbd806938e20a5e7047c51e5a1bbeaa6192e9b4a9af9c8888af4280",
    "hash": "f0f5676398bf042834f5a30d88e08de37bea7239ca0932372e7e64a0",
    "label": "burned wallet bodega, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f16f985ad511b06c036fc283f00a217c0d73585b53670da48983780d",
+   "label": "exposed bot wallet 60, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f17de297f7bf4229a960b8c50376d9d8c1cf5a1760e957fd19af11ee",
+   "label": "exposed bot wallet 57, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f1a69cd7d0b1a579dd7319509e7380ee6f4d63d70e608df28cc2e663",
+   "label": "exposed bot wallet 40, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "f2251c45aa8602db13039f232c78b7e878fafe39eccdc7033151a863",
+   "label": "exposed bot wallet 115, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f34dcb23839778143fec45fcca7c7d882fb5c29901465923f7b1a1dd",
+   "label": "exposed bot wallet 3, payment key"
+  },
+  {
+   "evidence": "its seed was exposed (the seed of Aegis vault account 0)",
+   "hash": "f3a07c9464bd7d8f3e54370fc414ef731c36a51e67316d21fecb2ffb",
+   "label": "Aegis vault account 1, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "f442f74ccfc3c0b1e67163e2a8b60ab6c5b9f5c3be74bd13ca733a45",
+   "label": "exposed bot wallet 24, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f4860c7f6fe4a31425309a93471f381e3683f2ce759542f70e0dcd46",
+   "label": "exposed bot wallet 73, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "f64fdfda43407466e7ee463f7e66d152bb05f1fe9bcdfd293affaa58",
+   "label": "exposed bot wallet 81, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f736c1d221c1f4b8070db6befca5c55c3f8f562b49ecc24a75c00619",
+   "label": "exposed bot wallet 19, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f7c64fdd46eb80dfb60c084bee27e57491ae4bb9e40e61b55f734635",
+   "label": "exposed bot wallet 27, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f862bc3b1fe7269714a8117bf43994c42841fb133419997af883fcd8",
+   "label": "exposed bot wallet 106, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f90a18e450b885ca84152d7a50af1a582dcc996d8839b38d5cfdddc6",
+   "label": "exposed bot wallet 91, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f911e153e39755fbe70222d611e324208fa34b26251db0204e9c03b4",
+   "label": "exposed bot wallet 53, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f965555bf695cc5948948f7d72c8f3258a361cabff74e85eb321a364",
+   "label": "exposed bot wallet 62, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f972f02ca6850fb5d17f3aab68ae1132f3e8057dadf58e0bdebb8387",
+   "label": "exposed bot wallet 167, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "f9737a7eef65a7d1c13ac1853f9aed78a5adf96865bed7a45dd8b3f5",
+   "label": "exposed bot wallet 45, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "fb5d4c99ebad4bd80e0b26d3d70e372082411f61dd606c1596c67ff9",
+   "label": "exposed bot wallet 188, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "fc0c9a0a523deb9679a521ff32fa616d5c9fa3374eb6c3c8e1b3523f",
+   "label": "exposed bot wallet 150, stake key"
   },
   {
    "evidence": "drained to the attacker by eb59314bac496919c05eb62b68dbdda154bd44d246cf3b0add958725410fb3aa",
@@ -313,9 +2258,54 @@
    "label": "drained decimalist account, stake key"
   },
   {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "fe08d048963365fd879a994a34ff58a2492cbb8144329b91194e5030",
+   "label": "exposed bot wallet 87, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "fe77f286feaaef6e19fb79da86b001f78b181db5a82841ed40fc64a9",
+   "label": "exposed bot wallet 16, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "fec87ca0920435b5025e875a53f45ac971e9def41a1f8f927c7cf7db",
+   "label": "exposed bot wallet 54, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "fedf7204b97bc880a13d52724b07269509797417912041dbcbb05f0d",
+   "label": "exposed bot wallet 74, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ff0fccc79467acb910c3041840b3ac40d91e62fbe69af47a900abac0",
+   "label": "exposed bot wallet 39, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ff3a74b2062b94ba5b2706a0054970eacfb76848dacd904faf70d1d7",
+   "label": "exposed bot wallet 18, stake key"
+  },
+  {
+   "evidence": "its seed was exposed; it was unfunded when the bot wallets were swept",
+   "hash": "ff5b8c841f1e47e21235b06b91dde78e1f7a407e0e1444d85a869e47",
+   "label": "exposed bot wallet 61, stake key"
+  },
+  {
    "evidence": "script parameterised with W2 as owner; rescued by f1007c92c678f927ccb49ba9b5b331d98f3263e5ce5f1c883cd7866f852f765f",
    "hash": "ff9f0c0814e31c5dcdc540d4ac2e284ff4815b24cc12abe7e29d4303",
    "label": "W2 liquidity contract (owner W2)"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "ffbe7a1f4b36fb22b7095ef7da669388716dd94a80df4f3a6d170614",
+   "label": "exposed bot wallet 83, payment key"
+  },
+  {
+   "evidence": "its seed was exposed; its funds were moved to FPS custody",
+   "hash": "fff8ac7b44b87b6040a96f242aedb97b868920f2d621278615751047",
+   "label": "exposed bot wallet 97, payment key"
   }
  ],
  "version": 1

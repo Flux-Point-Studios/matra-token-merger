@@ -62,7 +62,7 @@
     {
       "id": "credential-denylist",
       "name": "Compromised-credential deny-list",
-      "desc": "One JSON list of compromised Cardano payment and stake key or script hashes, each with its on-chain evidence, and the rescue credentials it must never deny; a strict loader (refuses any other shape, a repeated key or hash, a hash both denied and allowed, an empty list) with a JSON Schema beside the data for consumers in other languages, and an address check that denies an address naming a listed credential in either part and refuses pointer and unreadable addresses. v1 lists the 10-30 drain: the attacker's two addresses, W1, W2, the drained decimalist accounts and other victims, their liquidity-contract and timelock scripts, the burned wallets, and the waived treasury reserves.",
+      "desc": "One JSON list of compromised Cardano payment and stake key or script hashes, each with its on-chain evidence, and the rescue credentials it must never deny; a strict loader (refuses any other shape, a repeated key or hash, a hash both denied and allowed, an empty list) with a JSON Schema beside the data for consumers in other languages, and an address check that denies an address naming a listed credential in either part and refuses pointer and unreadable addresses. v1 lists the 10-30 drain: the attacker's two addresses, W1, W2, the drained decimalist accounts and other victims, their liquidity-contract and timelock scripts, the burned wallets, and the waived treasury reserves; it also lists the keys and seeds exposed since (operations, ceremony and bot wallets), pinned address by address in tests/fixtures/denylist_exposed_since_v1.json.",
       "kind": "library",
       "paths": [
         "tools/credential_denylist.py",

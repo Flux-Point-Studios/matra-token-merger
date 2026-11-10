@@ -109,7 +109,7 @@ def test_both_signers_refuse_the_same_credentials(hosts):
     committed = hashlib.sha256(DENYLIST_PATH.read_bytes()).hexdigest()
     cosigner, surrender_api = hosts.loaded(COSIGNER), hosts.loaded(SURRENDER_API)
     assert cosigner["denylist"] == surrender_api["denylist"] == surrender_api["prechecked"] == committed
-    assert cosigner["denied"] == surrender_api["denied"] == 61
+    assert cosigner["denied"] == surrender_api["denied"] == 459
 
 
 @pytest.mark.parametrize("service", [COSIGNER, SURRENDER_API], ids=["cosigner", "surrender_api"])
@@ -138,4 +138,4 @@ def test_neither_signer_starts_with_a_pager_grace_outside_a_minute_to_an_hour(ho
 def test_each_signer_logs_the_denylist_it_loaded(hosts, service):
     result = hosts.start(service)
     committed = hashlib.sha256(DENYLIST_PATH.read_bytes()).hexdigest()
-    assert f"deny-list {committed}: 61 credentials denied, 2 allowed" in result.stderr
+    assert f"deny-list {committed}: 459 credentials denied, 2 allowed" in result.stderr
