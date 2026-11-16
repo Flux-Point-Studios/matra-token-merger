@@ -364,10 +364,30 @@ class KoiosClient:
         url = f"{self.base_url}{path}"
         return _request_with_retry("GET", url, self._headers, params=params)
 
-    def _post(self, path: str, json_body: Any) -> Any:
+    def _post(self, path: str, json_body: Any, params: dict[str, Any] | None = None) -> Any:
         url = f"{self.base_url}{path}"
         headers = {**self._headers, "Content-Type": "application/json"}
-        return _request_with_retry("POST", url, headers, json_body=json_body)
+        return _request_with_retry("POST", url, headers, params=params, json_body=json_body)
+
+    def get_address_utxos(self, address: str) -> list[dict[str, Any]]:
+        """Every UTxO at ``address`` with its assets, paged in a stated
+        order so no page repeats or skips a row."""
+        rows: list[dict[str, Any]] = []
+        limit = 1000
+        while True:
+            page = self._post(
+                "/address_utxos",
+                json_body={"_addresses": [address], "_extended": True},
+                params={"order": "tx_hash.asc,tx_index.asc", "offset": len(rows), "limit": limit},
+            )
+            if not isinstance(page, list):
+                raise BlockfrostUnavailable(f"/address_utxos offset {len(rows)}: {type(page).__name__}, not a list")
+            rows.extend(page)
+            if len(page) < limit:
+                return rows
+
+    def get_cli_protocol_params(self) -> dict[str, Any]:
+        return self._get("/cli_protocol_params")
 
     def get_asset_addresses(
         self,

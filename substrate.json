@@ -71,6 +71,20 @@
       ],
       "consumes": [],
       "status": "built"
+    },
+    {
+      "id": "attestor-payout",
+      "name": "Stage A attestor payout tooling",
+      "desc": "Monthly cMATRA payout to Materios attestors, paid on Cardano. A statement credits each signer of every receipt certified by threshold in the period, replayed from OrinqReceipts events read from an archive Materios node over read-only JSON-RPC (signers who left the committee before the threshold are dropped as the pallet drops them, a credited certification whose replayed signer count differs from the chain's is refused so a short lookback cannot pass, a Root certification credits no one, and pruned blocks are refused); prices credits in dollars at a stated cMATRA price under per-attestor and per-period caps no larger than the 65M attestor bucket; excludes FPS seats; and refuses a credited attestor without a registered payout address. An independent checker rebuilds the statement from a second node and refuses any differing field. The statement commits to a domain-separated blake2b Merkle root over (period, attestor, amount, payout address) and a label-8746 materios-payout record. Payout addresses are registered by a CIP-30 signData (CIP-8) signature from the address's own payment key over the chain, the AccountId and the address, verified strictly (32-byte Ed25519 key, unhashed payload, header and key bound to the address, deny-listed credentials refused). The unsigned payout transaction spends the 2-of-2 native-script float read through Koios, pays each line, builds its own change, prices the fee for both witnesses, carries the 8746 record, and refuses a float short of cMATRA or ADA, a line over its cap, or a statement whose total or root disagrees with its lines.",
+      "kind": "toolkit",
+      "paths": [
+        "tools/attestor_payout"
+      ],
+      "consumes": [
+        "orinq-receipts-pallet",
+        "credential-denylist"
+      ],
+      "status": "built"
     }
   ]
 }
