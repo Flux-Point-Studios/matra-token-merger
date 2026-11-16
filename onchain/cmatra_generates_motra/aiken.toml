@@ -1,0 +1,24 @@
+name = "fluxpoint/cmatra-generates-motra"
+version = "0.1.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "cMATRA registration: an auth NFT binds a Cardano stake credential to a Materios account so its cMATRA generates MOTRA"
+
+[repository]
+user = "fluxpoint"
+project = "cmatra-generates-motra"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "2.2.0"
+source = "github"
+
+[config.default.cmatra_policy]
+bytes = "7ff33a5565393dc47b48ac47becc12d92c9952e724e8446dfb6adc66"
+encoding = "hex"
+
+[config.preprod.cmatra_policy]
+bytes = "f82e57137e36e1440471a38018de0ae8d96a7d039daf560435c1b085"
+encoding = "hex"

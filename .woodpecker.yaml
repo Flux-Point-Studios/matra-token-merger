@@ -42,6 +42,12 @@ steps:
     environment:
       VALIDATOR: onchain/quarantine_validator
 
+  - name: aiken-cmatra_generates_motra
+    image: debian:bookworm-slim
+    commands: *aiken
+    environment:
+      VALIDATOR: onchain/cmatra_generates_motra
+
   - name: python
     # python+node so the HW interop gate actually runs (not skipped); 3.12 is
     # what both signing hosts run
