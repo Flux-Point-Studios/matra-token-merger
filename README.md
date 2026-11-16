@@ -126,6 +126,43 @@ to what the redemption pin says remains of each legacy unit and to what the
 pool was funded to pay of each asset, and records an approval, and pages the
 on-call channel about it, before its signature leaves.
 
+### Attestor payouts (Stage A)
+
+Outside Materios attestors are paid monthly in arrears in cMATRA on Cardano
+from a 2-of-2 native-script float.
+`python -m tools.attestor_payout` runs each month's steps in order:
+
+| Step | What it does |
+|------|--------------|
+| `message` | The text an attestor signs at admission with CIP-30 `signData`, using the payment key of its payout address. A Materios key never signs it. |
+| `registry` | Verifies every registration: the signature, the 32-byte Ed25519 key, the key as the address's payment key, the network, the deny-list. |
+| `build` | Reads the period's `OrinqReceipts` events from an archive Materios node and writes the statement: credits per attestor, dollar-priced amounts under per-attestor and per-period caps, FPS seats excluded, a Merkle root. |
+| `check` | Rebuilds the statement from a second archive node and writes a check record only if every field matches. |
+| `tx` | Builds the unsigned payout transaction from the float's UTxOs (read through Koios) for a statement with a matching check record. The transaction carries the statement's label-8746 `materios-payout` record. |
+
+A node keeps the state of only its last 256 blocks unless it runs with
+`--state-pruning archive`, so `build` and `check` each need an archive node,
+and the second one should be run by someone other than FPS. The transaction is
+deterministic in the statement and the float's UTxOs, so each float key holder
+runs `check` and `tx` on its own and signs only a transaction whose id matches.
+Nothing here signs or submits.
+
+The period config (one JSON file per month):
+
+```json
+{"version": 1, "network": "mainnet", "chain": "<Materios genesis, hex>", "period": 202701,
+ "blocks": {"first": 0, "last": 0, "lookback": 0},
+ "rates": {"usd_micros_per_credit": 0, "usd_micros_per_cmatra": 0, "price_source": "",
+           "cap_per_attestor": 0, "cap_total": 0},
+ "excluded": ["0x<FPS seat AccountId>"],
+ "cmatra": {"policy": "<hex>", "asset": "<hex>"},
+ "float_keys": ["<key hash>", "<key hash>"]}
+```
+
+`lookback` must reach back to the first attest of every receipt certified in
+the period; a statement whose replayed signer counts disagree with the chain's
+is refused and names the receipt.
+
 ---
 
 ## Quick start
@@ -372,6 +409,7 @@ matra-token-merger/
     cardano_utils.py                # address / datum / param helpers
     api_clients.py                  # Blockfrost + TapTools + Koios
     config.py                       # env loading
+    attestor_payout/                # Stage A monthly attestor payouts
   scripts/
     preprod_harness.py              # 9-stage rehearsal
     red_team.py                     # adversarial test suite

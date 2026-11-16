@@ -243,12 +243,12 @@ def chain_api_base_url(network: str | None = None) -> str:
 
 TAPTOOLS_BASE_URL: str = "https://openapi.taptools.io/api/v1"
 
-_KOIOS_BASE_URLS = {
+KOIOS_BASE_URLS = {
     "mainnet": "https://api.koios.rest/api/v1",
     "preprod": "https://preprod.koios.rest/api/v1",
     "preview": "https://preview.koios.rest/api/v1",
 }
-KOIOS_BASE_URL: str = _KOIOS_BASE_URLS[NETWORK]
+KOIOS_BASE_URL: str = KOIOS_BASE_URLS[NETWORK]
 KOIOS_API_KEY: str = os.environ.get("KOIOS_API_KEY", "")
 
 # ---------------------------------------------------------------------------

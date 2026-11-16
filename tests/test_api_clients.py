@@ -6,6 +6,7 @@ import responses
 from tools.api_clients import (
     BlockfrostClient,
     BlockfrostUnavailable,
+    KoiosClient,
     TapToolsClient,
     _request_with_retry,
 )
@@ -284,3 +285,29 @@ class TestTapToolsNft:
         client = TapToolsClient(api_key="test")
         result = client.get_nft_collection_holders_top("policy123")
         assert len(result) == 2
+
+
+class TestKoiosClient:
+    BASE = "https://koios.example/api/v1"
+
+    @responses.activate
+    def test_address_utxos_pages_in_a_stated_order_until_a_short_page(self):
+        rows = [{"tx_hash": f"{n:064x}", "tx_index": 0} for n in range(1001)]
+        responses.add(responses.POST, f"{self.BASE}/address_utxos", json=rows[:1000])
+        responses.add(responses.POST, f"{self.BASE}/address_utxos", json=rows[1000:])
+        assert KoiosClient(api_key="", base_url=self.BASE).get_address_utxos("addr1x") == rows
+        first, second = (c.request for c in responses.calls)
+        assert first.body == b'{"_addresses": ["addr1x"], "_extended": true}'
+        assert "order=tx_hash.asc%2Ctx_index.asc" in first.url and "offset=0" in first.url
+        assert "offset=1000" in second.url
+
+    @responses.activate
+    def test_address_utxos_refuses_an_answer_that_is_not_a_list(self):
+        responses.add(responses.POST, f"{self.BASE}/address_utxos", json={"error": "x"})
+        with pytest.raises(BlockfrostUnavailable, match="address_utxos"):
+            KoiosClient(api_key="", base_url=self.BASE).get_address_utxos("addr1x")
+
+    @responses.activate
+    def test_cli_protocol_params(self):
+        responses.add(responses.GET, f"{self.BASE}/cli_protocol_params", json={"txFeeFixed": 155381})
+        assert KoiosClient(api_key="", base_url=self.BASE).get_cli_protocol_params() == {"txFeeFixed": 155381}
